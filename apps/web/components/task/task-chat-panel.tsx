@@ -66,6 +66,8 @@ import {
 } from "./launch-queue-status";
 import { WipQueueStatus } from "./wip-queue-status";
 import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
+import { selectSessionRecoveryError } from "@/lib/session-recovery-presentation";
+import { TaskSessionMCPSettings } from "./task-session-mcp-settings";
 
 /** Returns a `clarificationKey` that increments each time a pending
  * clarification is resolved, letting the composer reset its input state for
@@ -619,6 +621,7 @@ type TaskChatPanelProps = {
   onSend?: (payload: ChatSubmitPayload) => ChatSubmitResult;
   sessionId?: string | null;
   taskId?: string | null;
+  workspaceId?: string | null;
   /**
    * Task this panel belongs to, independent of whether it has a session yet.
    * Only the status row uses it, so a task with no session still shows its
@@ -1050,6 +1053,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   onSend,
   sessionId = null,
   taskId: taskIdHint = null,
+  workspaceId = null,
   statusTaskId = null,
   onOpenFile,
   showRequestChangesTooltip = false,
@@ -1169,6 +1173,16 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const showScrollToLastPrompt = useAppStore((state) => state.userSettings.showScrollToLastPrompt);
   const showScrollToStart = useAppStore((state) => state.userSettings.showScrollToStart);
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const mcpWorkspaceId = useAppStore((state) => {
+    const currentTaskId = taskId ?? taskIdHint;
+    if (!currentTaskId) return null;
+    return (
+      workspaceId ??
+      state.kanban.tasks.find((item) => item.id === currentTaskId)?.workspaceId ??
+      state.workspaces.activeId ??
+      null
+    );
+  });
   // The anchored bar is a desktop-only, fine-pointer affordance; coarse
   // pointers use the compact scroll control instead.
   const showAnchoredBar = isFinePointer && !isMobile && showAnchoredPromptBar;
@@ -1259,6 +1273,14 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         scroll={false}
         className="relative flex min-h-0 flex-col overflow-hidden"
       >
+        {resolvedSessionId && taskId && (
+          <TaskSessionMCPSettings
+            sessionId={resolvedSessionId}
+            taskId={taskId}
+            workspaceId={mcpWorkspaceId}
+            profileId={session?.agent_profile_id}
+          />
+        )}
         <div className="flex min-h-0 flex-1 flex-col">
           {resolvedSessionId ? (
             <div className="shrink-0 px-2">
