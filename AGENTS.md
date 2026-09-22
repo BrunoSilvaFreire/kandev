@@ -1,6 +1,7 @@
 # Kandev Engineering Guide
 
 > **Purpose**: Architecture notes, key patterns, and conventions for LLM agents working on Kandev.
+> **Fork (BrunoSilvaFreire/kandev):** experimental heavy-development fork evaluating Kandev as a personal multi-provider orchestration base. Breaking changes are allowed when they improve architecture, provider integration, routing, or DX; prefer clean contracts over fork-only compatibility, but reuse upstream mechanisms instead of inventing new ones, and log every substantial divergence in `docs/fork-evaluation.md`. Read `docs/upstream-strategy.md` (fork rules, remotes, sync) plus `docs/{local-bootstrap,provider-setup}.md`. Never commit credentials, OAuth/auth files, or `.kandev-dev/`. Everything below is upstream's guide.
 
 ## Repo Layout
 
