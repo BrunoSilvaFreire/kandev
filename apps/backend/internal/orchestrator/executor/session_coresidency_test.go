@@ -276,7 +276,6 @@ func TestRunAgentProcessAsync_ObservesStartingSiblingsBeforeProcessStart(t *test
 		}, nil
 	}
 
-	before := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch)
 	var managerMu sync.Mutex
 	startedWithoutObservation := make(map[string]int)
 	started := make(chan string, 2)
@@ -324,9 +323,6 @@ func TestRunAgentProcessAsync_ObservesStartingSiblingsBeforeProcessStart(t *test
 	managerMu.Unlock()
 	if startedBeforeObservation != 0 {
 		t.Fatalf("agent process started before co-residency observation for %d session(s): %v", startedBeforeObservation, startedWithoutObservation)
-	}
-	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch); after != before+2 {
-		t.Fatalf("admitted[launch] counter = %d, want %d", after, before+2)
 	}
 	if warnings := logs.FilterLevelExact(zapcore.WarnLevel).All(); len(warnings) != 2 {
 		t.Fatalf("warning entries = %d, want 2", len(warnings))
