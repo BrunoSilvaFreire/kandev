@@ -120,6 +120,7 @@ Before reviewing implementation details:
 - Check whether the selected test level is appropriate: unit for pure logic, integration for boundaries, E2E for critical browser flows.
 - Identify missing coverage for happy path, key error paths, edge cases, auth/workspace boundaries, and concurrency/order-sensitive behavior.
 - When a contract spans dispatchers, explicit service/API launches, approval/UI flows, or background handlers, enumerate every user-reachable entry point, trace each to the operation, and require path-specific regression coverage before declaring review clean.
+- When a gate or expression is duplicated across logical branches, assert each branch structurally rather than checking token presence; cover symmetric variants so same-repository or connector drift cannot pass unnoticed.
 - When a PR changes the semantics of a field, flag, enum, event, or API contract, grep all producers and consumers for comments, logs, names, and tests that describe the old meaning. Those unchanged descriptions are in scope because the PR makes them false; anchor the finding to the changed contract use and list affected downstream sites.
 - For concurrent or event-driven changes, require a deterministic schedule that checks ownership or generation identity, stale-event handling, cancellation, and lock scope. Channel/barrier coordination is preferable to timing sleeps.
 - For stale-event races, cover both event-before-successor and delayed-old-event-after-successor orderings. Prefer integration coverage for cross-package event or callback paths when practical.

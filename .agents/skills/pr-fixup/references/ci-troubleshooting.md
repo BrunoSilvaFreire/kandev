@@ -257,16 +257,16 @@ scripts/pr-state --summary <PR>
 
 Only debug code if the rerun fails with an actual lint, test, or build error.
 
-**E2E container setup failures:** If an E2E Containers shard fails during setup
-before tests run, check for dependency or registry failures. Patterns such as
-`packages.microsoft.com ... 403 Forbidden`, `docker/login-action@v3`,
-`Error response from daemon: Get "https://ghcr.io/v2/"`, `ghcr.io/token`,
-`docker buildx imagetools inspect`, `Could not resolve an immutable digest`,
-`ghcr.io/kdlbs/kandev-ci:runtime-latest`, `context deadline exceeded`, or
-`Client.Timeout exceeded while awaiting headers` are infrastructure/package-
-registry issues, not app or test failures.
-If GitHub rejects `gh run rerun <run-id> --failed` while the workflow is still
-active, wait for the workflow/report job to finish and retry.
+**E2E setup failures:** If an E2E job fails before Playwright, inspect the exact
+job endpoint/annotations and verify named artifacts with
+`gh api repos/<owner>/<repo>/actions/runs/<run-id>/artifacts` and
+`gh run download <run-id> --name <artifact> --dir <tmp>`. `Failed to
+ListArtifacts` or intermediary HTTP 403 is artifact transport/setup failure,
+not a test flake; inspect the workflow download retry contract and keep a
+persistent failure blocked. After a workflow fix, require a fresh exact-head
+run. Container setup errors such as `packages.microsoft.com ... 403`,
+`ghcr.io/token`, or daemon timeouts are likewise infrastructure; wait for an
+active workflow to finish before retrying a rejected `gh run rerun --failed`.
 
 **Third-party action pnpm auto-install failures:** If an action detects pnpm
 and fails with `ERR_PNPM_ADDING_TO_ROOT`, inspect the pinned action bundle and

@@ -105,9 +105,10 @@ If delayed checks appear, restart the waiter. A sparse early rollup cannot
 prove completion. The helper requires two matching terminal snapshots.
 
 Inspect every current-head review body, including aggregate bot reviews.
-If earlier snapshots contained top-level findings absent from the new head's
-review list, run one `scripts/pr-state --summary --all` audit.
-Revalidate those findings against current source.
+`pr-state --summary` filters to the current head and can show zero unresolved
+threads while `pr-resolve list <PR>` still reports hidden threads from an older
+head. Inspect and revalidate each hidden thread, reply/resolve it, then run
+`scripts/pr-state --summary --all <PR>` before declaring the fixup clean.
 
 If a job exceeds its configured timeout or contradicts the rollup, query its
 exact job/run before diagnosing a hang. Verify that its SHA matches the PR head.
