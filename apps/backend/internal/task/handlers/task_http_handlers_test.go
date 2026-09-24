@@ -1630,7 +1630,7 @@ func newMarkSessionReadService(t *testing.T, repo *markSessionReadRepo, log *log
 func newMarkSessionReadRouter(t *testing.T, repo *markSessionReadRepo, log *logger.Logger) *gin.Engine {
 	t.Helper()
 	router := gin.New()
-	NewTaskHandlers(newMarkSessionReadService(t, repo, log), nil, repo, nil, log).registerHTTP(router)
+	NewTaskHandlers(newMarkSessionReadService(t, repo, log), nil, repo, nil, nil, log).registerHTTP(router)
 	return router
 }
 

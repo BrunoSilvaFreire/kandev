@@ -99,8 +99,8 @@ func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransition
 	attribution := steptelemetry.FromContext(ctx)
 	insertSQL := `
 		INSERT INTO task_step_transitions
-			(task_id, session_id, from_workflow_id, from_workflow_step_id, to_workflow_id, to_workflow_step_id, trigger, actor_kind, actor_id, contract_version, occurred_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			(task_id, session_id, from_workflow_id, from_workflow_step_id, to_workflow_id, to_workflow_step_id, trigger, actor_kind, actor_id, trigger_detail, contract_version, occurred_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	args := []any{
 		in.taskID,
@@ -112,6 +112,7 @@ func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransition
 		string(attribution.Trigger),
 		string(attribution.ActorKind),
 		nullableString(attribution.ActorID),
+		nullableString(attribution.TriggerDetail),
 		steptelemetry.ContractVersion,
 		occurredAt,
 	}
@@ -309,10 +310,11 @@ func detachAttribution(ctx context.Context) steptelemetry.Attribution {
 func hardcodedTriggerAttribution(ctx context.Context, trigger steptelemetry.Trigger) steptelemetry.Attribution {
 	if preset := steptelemetry.FromContext(ctx); preset.ActorKind != steptelemetry.ActorUnknown {
 		return steptelemetry.Attribution{
-			Trigger:   trigger,
-			ActorKind: preset.ActorKind,
-			ActorID:   preset.ActorID,
-			SessionID: preset.SessionID,
+			Trigger:       trigger,
+			ActorKind:     preset.ActorKind,
+			ActorID:       preset.ActorID,
+			SessionID:     preset.SessionID,
+			TriggerDetail: preset.TriggerDetail,
 		}
 	}
 	actorKind, actorID := steptelemetry.HumanOrSystemActor(ctx)

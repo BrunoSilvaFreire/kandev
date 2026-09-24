@@ -40,6 +40,8 @@ type TaskHandlers struct {
 	taskParkedProjection          dto.TaskParkedProvider
 	repo                          handlerRepo
 	planService                   *service.PlanService
+	documentService               *service.DocumentService
+	documentCatalog               *service.DocumentCatalogService
 	handoffSvc                    *service.HandoffService
 	workspaceRestorer             WorkspaceQuarantineRestorer
 	unarchiveRecoveryTimeout      time.Duration
@@ -147,13 +149,17 @@ type WorkflowMovePreviewer interface {
 	PreviewWorkflowMove(context.Context, orchestrator.WorkflowMovePreviewRequest) (*orchestrator.WorkflowMovePreview, error)
 }
 
-func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, repo handlerRepo, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
+func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, repo handlerRepo, planService *service.PlanService, documentService *service.DocumentService, log *logger.Logger) *TaskHandlers {
 	h := &TaskHandlers{
-		service:      svc,
-		orchestrator: orchestrator,
-		repo:         repo,
-		planService:  planService,
-		logger:       log.WithFields(zap.String("component", "task-task-handlers")),
+		service:         svc,
+		orchestrator:    orchestrator,
+		repo:            repo,
+		planService:     planService,
+		documentService: documentService,
+		logger:          log.WithFields(zap.String("component", "task-task-handlers")),
+	}
+	if documentService != nil && planService != nil {
+		h.documentCatalog = service.NewDocumentCatalogService(documentService, planService, log)
 	}
 	if previewer, ok := orchestrator.(WorkflowMovePreviewer); ok {
 		h.movePreviewer = previewer
@@ -179,8 +185,8 @@ func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, rep
 	return h
 }
 
-func RegisterTaskRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *service.Service, orchestrator OrchestratorStarter, repo handlerRepo, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
-	handlers := NewTaskHandlers(svc, orchestrator, repo, planService, log)
+func RegisterTaskRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *service.Service, orchestrator OrchestratorStarter, repo handlerRepo, planService *service.PlanService, documentService *service.DocumentService, log *logger.Logger) *TaskHandlers {
+	handlers := NewTaskHandlers(svc, orchestrator, repo, planService, documentService, log)
 	handlers.registerHTTP(router)
 	handlers.registerWS(dispatcher)
 	return handlers
@@ -284,6 +290,9 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentCreate, h.wsCreateTaskPlanComment)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentUpdate, h.wsUpdateTaskPlanComment)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentDelete, h.wsDeleteTaskPlanComment)
+	dispatcher.RegisterFunc(ws.ActionTaskDocumentsCatalog, h.wsListTaskDocumentsCatalog)
+	dispatcher.RegisterFunc(ws.ActionTaskDocumentGet, h.wsGetTaskDocument)
+	dispatcher.RegisterFunc(ws.ActionTaskDocumentRevisionsList, h.wsListTaskDocumentRevisions)
 	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackList, h.wsListTaskPreviewFeedback)
 	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackCreate, h.wsCreateTaskPreviewFeedback)
 	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackUpdate, h.wsUpdateTaskPreviewFeedback)

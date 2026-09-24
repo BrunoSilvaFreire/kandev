@@ -13,7 +13,7 @@ import (
 
 // docRevSelectCols lists the task_document_revisions columns in the fixed order
 // used by every SELECT in this file (and by scanDocRevisionRow / scanDocRevisionRows).
-const docRevSelectCols = `id, task_id, document_key, revision_number, title, content, author_kind, author_name, revert_of_revision_id, created_at, updated_at`
+const docRevSelectCols = `id, task_id, document_key, revision_number, title, content, author_kind, author_name, revert_of_revision_id, source_task_id, source_session_id, source_workflow_step_id, created_at, updated_at`
 
 // CreateDocument inserts a new task document HEAD row.
 func (r *Repository) CreateDocument(ctx context.Context, doc *models.TaskDocument) error {
@@ -139,10 +139,12 @@ func (r *Repository) InsertDocumentRevision(ctx context.Context, rev *models.Tas
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_document_revisions
 			(`+docRevSelectCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		rev.ID, rev.TaskID, rev.DocumentKey, rev.RevisionNumber, rev.Title, rev.Content,
-		rev.AuthorKind, rev.AuthorName, rev.RevertOfRevisionID, rev.CreatedAt, rev.UpdatedAt)
+		rev.AuthorKind, rev.AuthorName, rev.RevertOfRevisionID,
+		rev.SourceTaskID, rev.SourceSessionID, rev.SourceWorkflowStepID,
+		rev.CreatedAt, rev.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("insert document revision: %w", err)
 	}
@@ -184,16 +186,17 @@ func (r *Repository) ListDocumentRevisions(ctx context.Context, taskID, key stri
 	for rows.Next() {
 		rev := &models.TaskDocumentRevision{}
 		var revertOf sql.NullString
+		var srcTask, srcSession, srcStep sql.NullString
 		if err := rows.Scan(
 			&rev.ID, &rev.TaskID, &rev.DocumentKey, &rev.RevisionNumber, &rev.Title, &rev.Content,
-			&rev.AuthorKind, &rev.AuthorName, &revertOf, &rev.CreatedAt, &rev.UpdatedAt,
+			&rev.AuthorKind, &rev.AuthorName, &revertOf, &srcTask, &srcSession, &srcStep, &rev.CreatedAt, &rev.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan document revision: %w", err)
 		}
-		if revertOf.Valid {
-			v := revertOf.String
-			rev.RevertOfRevisionID = &v
-		}
+		rev.RevertOfRevisionID = nullStringPtr(revertOf)
+		rev.SourceTaskID = nullStringPtr(srcTask)
+		rev.SourceSessionID = nullStringPtr(srcSession)
+		rev.SourceWorkflowStepID = nullStringPtr(srcStep)
 		out = append(out, rev)
 	}
 	if err := rows.Err(); err != nil {
@@ -347,10 +350,12 @@ func insertNewDocRevisionInTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, rev
 	_, err := tx.ExecContext(ctx, db.Rebind(`
 		INSERT INTO task_document_revisions
 			(`+docRevSelectCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		rev.ID, rev.TaskID, rev.DocumentKey, rev.RevisionNumber, rev.Title, rev.Content,
-		rev.AuthorKind, rev.AuthorName, rev.RevertOfRevisionID, rev.CreatedAt, rev.UpdatedAt)
+		rev.AuthorKind, rev.AuthorName, rev.RevertOfRevisionID,
+		rev.SourceTaskID, rev.SourceSessionID, rev.SourceWorkflowStepID,
+		rev.CreatedAt, rev.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("insert document revision: %w", err)
 	}
@@ -360,9 +365,10 @@ func insertNewDocRevisionInTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, rev
 func (r *Repository) scanDocRevisionRow(row *sql.Row) (*models.TaskDocumentRevision, error) {
 	rev := &models.TaskDocumentRevision{}
 	var revertOf sql.NullString
+	var srcTask, srcSession, srcStep sql.NullString
 	err := row.Scan(
 		&rev.ID, &rev.TaskID, &rev.DocumentKey, &rev.RevisionNumber, &rev.Title, &rev.Content,
-		&rev.AuthorKind, &rev.AuthorName, &revertOf, &rev.CreatedAt, &rev.UpdatedAt,
+		&rev.AuthorKind, &rev.AuthorName, &revertOf, &srcTask, &srcSession, &srcStep, &rev.CreatedAt, &rev.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -370,9 +376,19 @@ func (r *Repository) scanDocRevisionRow(row *sql.Row) (*models.TaskDocumentRevis
 	if err != nil {
 		return nil, fmt.Errorf("scan document revision: %w", err)
 	}
-	if revertOf.Valid {
-		v := revertOf.String
-		rev.RevertOfRevisionID = &v
-	}
+	rev.RevertOfRevisionID = nullStringPtr(revertOf)
+	rev.SourceTaskID = nullStringPtr(srcTask)
+	rev.SourceSessionID = nullStringPtr(srcSession)
+	rev.SourceWorkflowStepID = nullStringPtr(srcStep)
 	return rev, nil
+}
+
+// nullStringPtr converts a sql.NullString to a *string so nullable provenance
+// columns round-trip as nil rather than an empty string.
+func nullStringPtr(ns sql.NullString) *string {
+	if !ns.Valid {
+		return nil
+	}
+	value := ns.String
+	return &value
 }

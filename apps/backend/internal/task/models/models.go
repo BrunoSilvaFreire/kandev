@@ -2023,6 +2023,11 @@ type TaskSession struct {
 	IsPrimary     bool         `json:"is_primary"`              // Whether this is the primary session for the task
 	IsPassthrough bool         `json:"is_passthrough"`          // Whether this session uses passthrough (PTY) mode
 	ReviewStatus  ReviewStatus `json:"review_status,omitempty"` // zero value = no review needed
+	// WorkflowStepIDAtCreation is the task's workflow step when this session
+	// was created, stamped once at creation from explicit runtime context and
+	// never re-derived. It is the immutable session/step provenance that lets
+	// task history attribute a session to a step visit. Empty for legacy rows.
+	WorkflowStepIDAtCreation string `json:"workflow_step_id_at_creation,omitempty"`
 	// LastReadMessageID is the id of the newest message the frontend has
 	// marked as read for this session — the Slack-style "read cursor" used
 	// to position the unread ("New") divider in the transcript. Advanced to
@@ -3058,17 +3063,24 @@ type TaskDocument struct {
 // TaskDocumentRevision is one immutable snapshot in the revision history of a task document.
 // Revisions are the source of truth for history; TaskDocument stores the latest revision's content as HEAD.
 type TaskDocumentRevision struct {
-	ID                 string    `json:"id" db:"id"`
-	TaskID             string    `json:"task_id" db:"task_id"`
-	DocumentKey        string    `json:"document_key" db:"document_key"`
-	RevisionNumber     int       `json:"revision_number" db:"revision_number"`
-	Title              string    `json:"title" db:"title"`
-	Content            string    `json:"content" db:"content"`
-	AuthorKind         string    `json:"author_kind" db:"author_kind"`
-	AuthorName         string    `json:"author_name" db:"author_name"`
-	RevertOfRevisionID *string   `json:"revert_of_revision_id,omitempty" db:"revert_of_revision_id"`
-	CreatedAt          time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at" db:"updated_at"`
+	ID                 string  `json:"id" db:"id"`
+	TaskID             string  `json:"task_id" db:"task_id"`
+	DocumentKey        string  `json:"document_key" db:"document_key"`
+	RevisionNumber     int     `json:"revision_number" db:"revision_number"`
+	Title              string  `json:"title" db:"title"`
+	Content            string  `json:"content" db:"content"`
+	AuthorKind         string  `json:"author_kind" db:"author_kind"`
+	AuthorName         string  `json:"author_name" db:"author_name"`
+	RevertOfRevisionID *string `json:"revert_of_revision_id,omitempty" db:"revert_of_revision_id"`
+	// Provenance for the newest revision: which task, session, and workflow
+	// step produced this write. All three are nullable so legacy and imported
+	// writes remain readable; callers must supply them explicitly and never
+	// infer them from timestamps or the task's current step.
+	SourceTaskID         *string   `json:"source_task_id,omitempty" db:"source_task_id"`
+	SourceSessionID      *string   `json:"source_session_id,omitempty" db:"source_session_id"`
+	SourceWorkflowStepID *string   `json:"source_workflow_step_id,omitempty" db:"source_workflow_step_id"`
+	CreatedAt            time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at" db:"updated_at"`
 }
 
 // TaskMessageAttachment is the durable registry row for a prompt attachment.
