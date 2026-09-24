@@ -47,6 +47,16 @@ vi.mock("./prompt-history-panel-content", () => ({
   },
 }));
 
+vi.mock("./task-plan-panel", () => ({
+  TaskPlanPanel: () => <div data-testid="plan-panel-mock" />,
+}));
+
+vi.mock("./simple/task-documents", () => ({
+  TaskDocuments: ({ taskId }: { taskId: string }) => (
+    <div data-testid="task-documents-mock">{taskId}</div>
+  ),
+}));
+
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) => selector(mockAppState),
   useAppStoreApi: () => ({ getState: () => mockAppState }),
@@ -110,6 +120,30 @@ describe("dockview prompt history panel (Office task layout)", () => {
     promptHistoryProps.current?.onNavigateToPrompt?.(MESSAGE_ID);
 
     expect(mockScrollTranscriptToMessage).toHaveBeenCalledWith(SESSION_ID, MESSAGE_ID, "Agent");
+  });
+});
+
+describe("dockview plan panel documents", () => {
+  afterEach(() => {
+    mockAppState.tasks.activeTaskId = "task-1";
+  });
+
+  it("renders the task documents section below the plan for the active task", () => {
+    mockAppState.tasks.activeTaskId = "task-42";
+
+    render(<>{renderPanel("plan-panel", "plan", {})}</>);
+
+    expect(screen.getByTestId("plan-panel-mock")).toBeTruthy();
+    expect(screen.getByTestId("task-documents-mock").textContent).toBe("task-42");
+  });
+
+  it("omits the documents section when no task is active", () => {
+    mockAppState.tasks.activeTaskId = "";
+
+    render(<>{renderPanel("plan-panel", "plan", {})}</>);
+
+    expect(screen.getByTestId("plan-panel-mock")).toBeTruthy();
+    expect(screen.queryByTestId("task-documents-mock")).toBeNull();
   });
 });
 

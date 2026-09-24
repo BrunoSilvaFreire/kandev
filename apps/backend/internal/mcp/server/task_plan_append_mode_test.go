@@ -238,6 +238,28 @@ func TestUpdateTaskPlanKandev_BridgesModeToPayload(t *testing.T) {
 	})
 }
 
+// TestUpdateTaskPlanKandev_BridgesNewRevisionToPayload pins that new_revision
+// reaches the backend only when the caller sets it, so every existing caller
+// keeps the coalescing behavior.
+func TestUpdateTaskPlanKandev_BridgesNewRevisionToPayload(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"task_id": "task-current", "content": "c"}}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "update_task_plan_kandev", map[string]interface{}{
+		"content": "whole document", "new_revision": true,
+	})
+	require.False(t, result.IsError, "unexpected error result")
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok, "payload should be a string-keyed map")
+	assert.Equal(t, true, payload["new_revision"])
+
+	result = callTool(t, s, "update_task_plan_kandev", map[string]interface{}{"content": "whole document"})
+	require.False(t, result.IsError, "unexpected error result")
+	payload, ok = backend.lastPayload.(map[string]interface{})
+	require.True(t, ok, "payload should be a string-keyed map")
+	assert.NotContains(t, payload, "new_revision")
+}
+
 // TestCreateTaskPlanKandev_RejectsModeArgument pins
 // AC-TASKS-PLAN-APPEND-005.2: any non-empty mode argument on
 // create_task_plan_kandev is rejected, naming update_task_plan_kandev, before

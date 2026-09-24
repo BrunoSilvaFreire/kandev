@@ -44,13 +44,17 @@ const DOC_TYPE_CONFIG: Record<string, DocTypeConfig> = {
     label: "REVIEW",
     className: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
   },
+  SPIKE: {
+    label: "SPIKE",
+    className: "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400",
+  },
   ATTACHMENT: {
     label: "ATTACH",
     className: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
   },
 };
 
-const DOCUMENT_TYPES = ["PLAN", "SPEC", "NOTES", "REVIEW", "ATTACHMENT"] as const;
+const DOCUMENT_TYPES = ["PLAN", "SPEC", "NOTES", "REVIEW", "SPIKE", "ATTACHMENT"] as const;
 
 function getTypeConfig(type: string): DocTypeConfig {
   return (
@@ -175,7 +179,7 @@ function AttachmentBody({ doc }: { doc: TaskDocument }) {
         )}
       </span>
       <a
-        href={`/api/v1/office/tasks/${doc.taskId}/documents/${encodeURIComponent(doc.key)}/download`}
+        href={`/api/v1/tasks/${doc.taskId}/documents/${encodeURIComponent(doc.key)}/download`}
         download={doc.filename ?? doc.key}
         className="cursor-pointer"
       >
@@ -195,37 +199,37 @@ function DocumentCard({ doc, onDelete }: { doc: TaskDocument; onDelete: (key: st
 
   return (
     <div className="border border-border rounded-lg overflow-hidden">
-      <button
-        type="button"
-        className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-accent/50 transition-colors cursor-pointer text-left"
-        onClick={() => setExpanded((v) => !v)}
-      >
-        {expanded ? (
-          <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-        ) : (
-          <IconChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-        )}
-        <span
-          className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium shrink-0 ${typeConfig.className}`}
-        >
-          {typeConfig.label}
-        </span>
-        <span className="flex-1 text-sm font-medium truncate">{doc.title || doc.key}</span>
-        <span className="text-xs text-muted-foreground shrink-0">rev {doc.revision}</span>
-        <span className="text-xs text-muted-foreground shrink-0 ml-2">
-          {formatRelativeTime(doc.updatedAt)}
-        </span>
+      <div className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-accent/50 transition-colors">
         <button
           type="button"
-          className="ml-1 cursor-pointer p-1 rounded hover:bg-destructive/10 hover:text-destructive"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete(doc.key);
-          }}
+          className="flex-1 flex items-center gap-2 cursor-pointer text-left overflow-hidden min-w-0"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? (
+            <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          ) : (
+            <IconChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          )}
+          <span
+            className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium shrink-0 ${typeConfig.className}`}
+          >
+            {typeConfig.label}
+          </span>
+          <span className="flex-1 text-sm font-medium truncate">{doc.title || doc.key}</span>
+          <span className="text-xs text-muted-foreground shrink-0">rev {doc.revision}</span>
+          <span className="text-xs text-muted-foreground shrink-0 ml-2">
+            {formatRelativeTime(doc.updatedAt)}
+          </span>
+        </button>
+        <button
+          type="button"
+          aria-label={t("task:deleteDocument")}
+          className="ml-1 cursor-pointer p-1 rounded hover:bg-destructive/10 hover:text-destructive shrink-0"
+          onClick={() => onDelete(doc.key)}
         >
           <IconTrash className="h-3 w-3" />
         </button>
-      </button>
+      </div>
       {expanded &&
         (isAttachment ? (
           <AttachmentBody doc={doc} />

@@ -413,6 +413,7 @@
   "delete2": "Ďēĺēţē {{name}}",
   "deleteAgent": "Ďēĺēţē àĝēńţ",
   "deleteComment": "Ďēĺēţē ćōḿḿēńţ",
+  "deleteDocument": "Ďēĺēţē đōćũḿēńţ",
   "deleteFileConfirm": "Ţĥĩś ŵĩĺĺ ƥēŕḿàńēńţĺŷ ďēĺēţē <1>{{name}}</1>. Ţĥĩś àćţĩōń ćàńńōţ ƀē ũńďōńē.",
   "deleteFolderConfirm": "Ţĥĩś ŵĩĺĺ ƥēŕḿàńēńţĺŷ ďēĺēţē <1>{{name}}</1>. Ţĥĩś àćţĩōń ćàńńōţ ƀē ũńďōńē.",
   "deleteFolderTitle": "Ďēĺēţē ƒōĺďēŕ?",

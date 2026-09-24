@@ -23,7 +23,7 @@ flag / Office), **Missing**.
 Workflow `Role Pipeline` in workspace `mineflayer`. Portable definition: `docs/examples/role-pipeline.workflow.yml`
 (import via **Settings > Workspaces > Workflows > Import**; profiles match by agent + model, see `docs/provider-setup.md`).
 
-`Backlog → Spike (OpenCode deepseek-v4.1-flash) → Architect (Codex gpt-5.6-sol) → Implement (Codex gpt-5.6-terra) → Review (Claude opus) → Done`
+`Backlog → Spike (OpenCode deepseek-v4.1-flash) → Architect (Codex gpt-5.6-sol) → Plan Approval (human) → Implement (Codex gpt-5.6-terra) → Review (Claude opus) → Done`
 
 Observed behavior:
 
@@ -33,6 +33,13 @@ Observed behavior:
 - **Shared workspace:** all steps share the same task environment (here: the Local executor's real checkout). No per-step worktree.
 - **Gating:** `auto_advance_requires_signal: true` + the agent calling `step_complete_kandev` is what moves the task; a plain
   turn end does not. Without it, any turn end (including a clarifying question) would advance.
+- **Artifacts:** the Spike writes task document `spike` (not the plan); only the Architect writes the task plan, and each
+  new plan is a forced plan revision (`new_revision=true`), so superseded plans stay readable by revision number.
+- **Conditional approval:** the first plan always goes Architect → `Plan Approval` (agent-less human gate) via
+  `step_complete_kandev` + `move_to_next`. After an Implementer escalation (`move_task_kandev` to Architect with
+  `ESCALATION: ...`), the Architect returns straight to Implement with `move_task_kandev` and no `step_complete_kandev`;
+  it parks at Plan Approval only when it signals completion with `APPROVAL REQUESTED: <reason>`. The first-plan rule is
+  prompt-enforced, not engine-enforced.
 - **Per-step profile:** yes; stored as `workflow_steps.agent_profile_id`. The New Task dialog also shows the chosen profile.
 - **Agent skill pickup:** each CLI loads its own user-level skills (`~/.config/opencode/skills`, `~/.agents/skills`, `~/.claude`),
   so personal skills (e.g. `cityscape-extract-resume-handoff`) work inside Kandev without configuration.
@@ -85,6 +92,7 @@ Not exercised in this bootstrap beyond reading code/docs; the regular workflow e
 | Date | Change | Files |
 |---|---|---|
 | 2026-09-22 | Fork docs + AGENTS.md fork preamble (no code changes) | `AGENTS.md`, `docs/{local-bootstrap,provider-setup,fork-evaluation,upstream-strategy}.md` |
+| 2026-09-22 | Task-document MCP tools in task mode (optional `task_id`), task-scoped document HTTP routes + Kanban documents panel, `new_revision` on `update_task_plan_kandev`; Role Pipeline gets a `spike` document slot, a Plan Approval gate, and a conditional escalation return | `apps/backend/internal/mcp/{server,handlers}/`, `apps/backend/internal/backendapp/{helpers,task_document_routes}.go`, `apps/web/components/task/`, `apps/web/lib/api/domains/office-extended-api.ts`, `docs/examples/role-pipeline.workflow.yml`, `docs/specs/tasks/*/kanban-task-documents.md` |
 
 ## Run log — Mineflayer Role Pipeline (2026-09-22)
 

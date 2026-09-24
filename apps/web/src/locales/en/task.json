@@ -413,6 +413,7 @@
   "delete2": "Delete {{name}}",
   "deleteAgent": "Delete agent",
   "deleteComment": "Delete comment",
+  "deleteDocument": "Delete document",
   "deleteFileConfirm": "This will permanently delete <1>{{name}}</1>. This action cannot be undone.",
   "deleteFolderConfirm": "This will permanently delete <1>{{name}}</1>. This action cannot be undone.",
   "deleteFolderTitle": "Delete folder?",

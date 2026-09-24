@@ -4462,6 +4462,7 @@ func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		Mode            string `json:"mode"`
 		ExpectedVersion string `json:"expected_version"`
 		AllowTruncation bool   `json:"allow_truncation"`
+		NewRevision     bool   `json:"new_revision"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -4486,6 +4487,7 @@ func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		AgentWrite:         true,
 		ExpectedVersion:    req.ExpectedVersion,
 		AllowTruncation:    req.AllowTruncation,
+		ForceNewRevision:   req.NewRevision,
 	})
 	if err != nil {
 		return planws.UpdateError(msg, err)

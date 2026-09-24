@@ -413,6 +413,7 @@
   "delete2": "{{name}} を削除",
   "deleteAgent": "エージェントを削除",
   "deleteComment": "コメントを削除",
+  "deleteDocument": "ドキュメントを削除",
   "deleteFileConfirm": "<1>{{name}}</1> を完全に削除します。この操作は元に戻せません。",
   "deleteFolderConfirm": "<1>{{name}}</1> を完全に削除します。この操作は元に戻せません。",
   "deleteFolderTitle": "フォルダを削除しますか?",

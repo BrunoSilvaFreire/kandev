@@ -374,6 +374,31 @@ the selected snapshot already matches the current plan. These tools accept
 another task ID only when that task is within the caller's reachable workspace
 or task tree.
 
+### Task documents
+
+Task documents are keyed, revisioned Markdown records attached to a task. They
+are a separate store from the task plan, so a workflow can keep more than one
+durable artifact: an investigation report and an implementation plan can coexist
+and neither overwrites the other.
+
+Every task-mode session can call `list_task_documents_kandev`,
+`get_task_document_kandev`, and `write_task_document_kandev`. `task_id` is
+optional on all three and defaults to the calling task; a caller may read the
+current task, its ancestors, descendants in the same workspace, and siblings
+sharing a parent, but may only write to itself or an ancestor. Document writes
+never modify the task plan; rapid same-author writes coalesce into one revision.
+
+Task documents are listed in the task's Plan panel below the plan. A document of
+type `spike` renders with a `SPIKE` badge, so a cheap investigation step can
+leave a report the planning step and the human approval gate both read.
+
+Writing to an existing `document_key` replaces that document and keeps its
+history as revisions; use a new key (for example `spike-2`) for a separate
+document of the same type. To supersede a task plan without merging into the
+previous revision, pass `new_revision: true` to `update_task_plan_kandev`: the
+write always appends a revision, so the earlier plan stays readable through
+`get_task_plan_revision_kandev`.
+
 ### Native rich output
 
 Task and Office agents can call `show_rich_output_kandev` when a workspace file,

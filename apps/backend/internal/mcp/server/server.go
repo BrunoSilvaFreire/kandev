@@ -1102,7 +1102,7 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "walkthrough", enabled: kanban, register: func(s *Server) { s.registerWalkthroughTools() }},
 		{name: "review", enabled: kanban, register: func(s *Server) { s.registerReviewTools() }},
 		{name: "related-tasks", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerRelatedTasksTool() }},
-		{name: "office-documents", enabled: office, register: func(s *Server) { s.registerTaskDocumentTools() }},
+		{name: "task-documents", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerTaskDocumentTools() }},
 		{name: "task-branch-sources", enabled: kanban, register: func(s *Server) {
 			s.registerAddBranchToTaskTool()
 			s.registerAddWorkspaceSourcesTool()
@@ -1877,7 +1877,7 @@ This tool is available only to autopilot child tasks. It sends a durable questio
 func (s *Server) registerPlanTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("create_task_plan_kandev",
-			mcp.WithDescription("Create or save a task plan. task_id addresses the plan's task: pass your own task ID for your current task, or another task's ID to write that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own). This tool replaces the entire content. For an existing plan, expected_version from get_task_plan_kandev or a successful write is required; a suspicious reduction is rejected unless allow_truncation=true confirms an intentional reduction. Use edit_task_plan_kandev for a local change or update_task_plan_kandev with mode=\"append\" for a new section."),
+			mcp.WithDescription("Create or save a task plan. task_id addresses the plan's task: pass your own task ID for your current task, or another task's ID to write that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own). This tool replaces the entire content. For an existing plan, expected_version from get_task_plan_kandev or a successful write is required; a suspicious reduction is rejected unless allow_truncation=true confirms an intentional reduction. Use edit_task_plan_kandev for a local change or update_task_plan_kandev with mode=\"append\" for a new section. The task plan holds only the implementation plan; write investigation or spike reports with write_task_document_kandev (document_key 'spike')."),
 			mcp.WithString("task_id", mcp.Description("The task ID to create a plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
 			mcp.WithString("content", mcp.Required(), mcp.Description("The full plan content in markdown format. This replaces existing content after expected_version is checked. Capped at 262,144 bytes (256 KiB) of UTF-8 content; a write over that limit is rejected and stores nothing.")),
 			mcp.WithString("title", mcp.Description("Optional title for the plan (default: 'Plan')")),
@@ -1903,7 +1903,7 @@ func (s *Server) registerPlanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("update_task_plan_kandev",
-			mcp.WithDescription(`Update an existing task plan. task_id selects the task whose plan to modify: your own task by default, or another task's ID to update that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own). Set mode="replace" (the default) to submit the whole document, or mode="append" to submit only an addition. Replace mode requires expected_version from get_task_plan_kandev or a successful write for an existing plan. A suspicious reduction is rejected before mutation; use edit_task_plan_kandev for a local change, or set allow_truncation=true only when the reduction is intentional and the matching version is current. In append mode you do not need to read the plan first: the server reads the stored plan and stores it, then one blank line, then your content. append is not idempotent — resubmitting the same call adds your content again.`),
+			mcp.WithDescription(`Update an existing task plan. task_id selects the task whose plan to modify: your own task by default, or another task's ID to update that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own). Set mode="replace" (the default) to submit the whole document, or mode="append" to submit only an addition. Replace mode requires expected_version from get_task_plan_kandev or a successful write for an existing plan. A suspicious reduction is rejected before mutation; use edit_task_plan_kandev for a local change, or set allow_truncation=true only when the reduction is intentional and the matching version is current. In append mode you do not need to read the plan first: the server reads the stored plan and stores it, then one blank line, then your content. append is not idempotent — resubmitting the same call adds your content again. The task plan holds only the implementation plan; write investigation or spike reports with write_task_document_kandev (document_key 'spike').`),
 			mcp.WithString("task_id", mcp.Description("The task ID to update the plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
 			// Deliberately not mcp.Required(): mode validity is checked before
 			// task-reach authorization, ahead of
@@ -1918,6 +1918,7 @@ func (s *Server) registerPlanTools() {
 			mcp.WithString("title", mcp.Description("Optional new title for the plan")),
 			mcp.WithString("expected_version", mcp.Description("Required for replace mode. Use the version returned by get_task_plan_kandev or a prior successful write. Optional for append mode.")),
 			mcp.WithBoolean("allow_truncation", mcp.Description("Acknowledge an intentional large reduction in replace mode. Requires a matching expected_version; the previous snapshot remains in a new revision.")),
+			mcp.WithBoolean("new_revision", mcp.Description("Always record this write as a new plan revision instead of merging it into the latest one. Use when superseding a plan so the previous plan stays addressable by revision number.")),
 			// Deliberately no mcp.Enum here: the server's generic MCP
 			// argument-schema validator enforces a declared enum strictly
 			// (compiled with additionalProperties:false) and would then

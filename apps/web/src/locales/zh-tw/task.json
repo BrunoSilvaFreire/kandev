@@ -403,6 +403,7 @@
   "delete2": "刪除 {{name}}",
   "deleteAgent": "刪除代理程式",
   "deleteComment": "刪除評論",
+  "deleteDocument": "刪除檔案",
   "deleteFileConfirm": "將永久刪除 <1>{{name}}</1>。此操作無法撤銷。",
   "deleteFolderConfirm": "將永久刪除 <1>{{name}}</1>。此操作無法撤銷。",
   "deleteFolderTitle": "刪除資料夾？",

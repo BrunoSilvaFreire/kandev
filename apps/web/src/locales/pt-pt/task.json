@@ -403,6 +403,7 @@
   "delete2": "Eliminar {{name}}",
   "deleteAgent": "Eliminar agente",
   "deleteComment": "Eliminar comentário",
+  "deleteDocument": "Eliminar documento",
   "deleteFileConfirm": "Isto elimina permanentemente <1>{{name}}</1>. Esta ação não pode ser anulada.",
   "deleteFolderConfirm": "Isto elimina permanentemente <1>{{name}}</1>. Esta ação não pode ser anulada.",
   "deleteFolderTitle": "Eliminar a pasta?",

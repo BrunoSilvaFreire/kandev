@@ -1405,6 +1405,9 @@ func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
 		if req.GetBool("allow_truncation", false) {
 			payload["allow_truncation"] = true
 		}
+		if req.GetBool("new_revision", false) {
+			payload["new_revision"] = true
+		}
 
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskPlan, payload, &result); err != nil {

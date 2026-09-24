@@ -521,6 +521,12 @@ export function importFromFS(options?: ApiRequestOptions) {
 
 // --- Task Documents ---
 
+// Task documents are a task record, not an Office record: the backend serves
+// them on the task-scoped route (`/api/v1/tasks/:id/documents...`) with a
+// per-task authorization guard, so they remain reachable with `features.office`
+// off. The legacy `/api/v1/office` document routes still respond for Office.
+const TASK_DOCUMENTS_BASE = "/api/v1";
+
 export type TaskDocument = {
   key: string;
   taskId: string;
@@ -535,12 +541,15 @@ export type TaskDocument = {
 };
 
 export function listDocuments(taskId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ documents: TaskDocument[] }>(`${BASE}/tasks/${taskId}/documents`, options);
+  return fetchJson<{ documents: TaskDocument[] }>(
+    `${TASK_DOCUMENTS_BASE}/tasks/${taskId}/documents`,
+    options,
+  );
 }
 
 export function getDocument(taskId: string, key: string, options?: ApiRequestOptions) {
   return fetchJson<{ document: TaskDocument }>(
-    `${BASE}/tasks/${taskId}/documents/${encodeURIComponent(key)}`,
+    `${TASK_DOCUMENTS_BASE}/tasks/${taskId}/documents/${encodeURIComponent(key)}`,
     options,
   );
 }
@@ -552,7 +561,7 @@ export function createOrUpdateDocument(
   options?: ApiRequestOptions,
 ) {
   return fetchJson<{ document: TaskDocument }>(
-    `${BASE}/tasks/${taskId}/documents/${encodeURIComponent(key)}`,
+    `${TASK_DOCUMENTS_BASE}/tasks/${taskId}/documents/${encodeURIComponent(key)}`,
     {
       ...options,
       init: { method: "PUT", body: JSON.stringify(data), ...options?.init },
@@ -561,10 +570,13 @@ export function createOrUpdateDocument(
 }
 
 export function deleteDocument(taskId: string, key: string, options?: ApiRequestOptions) {
-  return fetchJson<void>(`${BASE}/tasks/${taskId}/documents/${encodeURIComponent(key)}`, {
-    ...options,
-    init: { method: "DELETE", ...options?.init },
-  });
+  return fetchJson<void>(
+    `${TASK_DOCUMENTS_BASE}/tasks/${taskId}/documents/${encodeURIComponent(key)}`,
+    {
+      ...options,
+      init: { method: "DELETE", ...options?.init },
+    },
+  );
 }
 
 // --- Task Labels ---

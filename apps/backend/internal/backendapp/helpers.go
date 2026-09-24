@@ -909,6 +909,7 @@ func registerRoutes(p routeParams) {
 	}
 
 	p.gateway.SetupRoutes(p.router)
+	mountTaskDocumentRoutes(p.router, handoffDocSvc, p.taskSvc, p.homeDir, p.log)
 	registerTaskRoutes(p, planService, handoffSvc)
 	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, clarificationResolver, planService, handoffSvc)
 	if p.authSvc != nil {

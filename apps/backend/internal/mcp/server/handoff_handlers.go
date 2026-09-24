@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -25,11 +26,13 @@ func (s *Server) registerRelatedTasksTool() {
 	)
 }
 
-// registerTaskDocumentTools registers the cross-task document tools used for
-// office parent/child coordination: list_task_documents_kandev,
-// get_task_document_kandev, write_task_document_kandev. These are office-only
-// — kanban tasks don't use the document handoff pattern, so the surface is
-// kept lean.
+// registerTaskDocumentTools registers the keyed, revisioned task-document tools:
+// list_task_documents_kandev, get_task_document_kandev, write_task_document_kandev.
+// They are available in both kanban (ModeTask) and office (ModeOffice) modes.
+// Office uses them for parent/child coordination; a kanban workflow step uses
+// them to persist a durable role artifact (e.g. a spike report) without
+// competing for the single task plan. task_id is optional on all three and
+// defaults to the calling session's task.
 func (s *Server) registerTaskDocumentTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_task_documents_kandev",
@@ -38,7 +41,7 @@ func (s *Server) registerTaskDocumentTools() {
 Allowed for the current task itself, the current task's ancestors/descendants in the same workspace,
 and siblings sharing a non-empty parent. Returns access_denied for unrelated tasks.`,
 			),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("Target task to list documents for.")),
+			mcp.WithString("task_id", mcp.Description("Target task to list documents for. Defaults to the current task.")),
 		),
 		s.wrapHandler("list_task_documents_kandev", s.listTaskDocumentsHandler()),
 	)
@@ -48,8 +51,8 @@ and siblings sharing a non-empty parent. Returns access_denied for unrelated tas
 				`Fetch a single task document (with content). Same access rules as list_task_documents_kandev:
 self, ancestors, descendants in the same workspace, or siblings with a shared non-empty parent.`,
 			),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("Target task that owns the document.")),
-			mcp.WithString("document_key", mcp.Required(), mcp.Description("Document key (e.g. 'spec', 'plan', 'notes').")),
+			mcp.WithString("task_id", mcp.Description("Target task that owns the document. Defaults to the current task.")),
+			mcp.WithString("document_key", mcp.Required(), mcp.Description("Document key (e.g. 'spike', 'spec', 'notes').")),
 		),
 		s.wrapHandler("get_task_document_kandev", s.getTaskDocumentHandler()),
 	)
@@ -58,16 +61,33 @@ self, ancestors, descendants in the same workspace, or siblings with a shared no
 			mcp.WithDescription(
 				`Create or update a document on a target task. Allowed for the current task itself or any
 ancestor (child→parent coordination writes). Sibling and descendant writes are denied — publish
-coordination docs to the shared parent.`,
+coordination docs to the shared parent. Reusing an existing document_key replaces that document (prior
+content is kept as revisions); use a new key (e.g. 'spike-2', 'notes-perf') for a separate document of
+the same type. Investigation/spike reports use document_key 'spike' with type 'spike'; the implementation
+plan belongs to the task-plan tools, not here.`,
 			),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("Target task to write to. Must be self or an ancestor.")),
+			mcp.WithString("task_id", mcp.Description("Target task to write to. Must be self or an ancestor. Defaults to the current task.")),
 			mcp.WithString("document_key", mcp.Required(), mcp.Description("Document key.")),
 			mcp.WithString("title", mcp.Description("Optional title; defaults to the document key.")),
 			mcp.WithString("content", mcp.Required(), mcp.Description("Full document content.")),
-			mcp.WithString("type", mcp.Description("Optional document type; defaults to 'custom'.")),
+			mcp.WithString("type", mcp.Description("Optional document type (plan, spec, notes, review, spike, custom); defaults to 'custom'.")),
 		),
 		s.wrapHandler("write_task_document_kandev", s.writeTaskDocumentHandler()),
 	)
+}
+
+// resolveDocumentTaskID applies the optional task_id contract: empty or
+// "self" resolves to the calling session's task. An empty resolution (no task
+// context) returns an error rather than letting a blank id reach the lookup.
+func (s *Server) resolveDocumentTaskID(req mcp.CallToolRequest) (string, error) {
+	taskID := req.GetString("task_id", "")
+	if taskID == "" || taskID == selfTaskSentinel {
+		taskID = s.taskID
+	}
+	if taskID == "" {
+		return "", errors.New("task_id is required (no current task context)")
+	}
+	return taskID, nil
 }
 
 func (s *Server) listRelatedTasksHandler() server.ToolHandlerFunc {
@@ -123,9 +143,9 @@ func stripRelatedTaskDescriptions(result map[string]interface{}) {
 
 func (s *Server) listTaskDocumentsHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		taskID, err := req.RequireString("task_id")
+		taskID, err := s.resolveDocumentTaskID(req)
 		if err != nil {
-			return mcp.NewToolResultError("task_id is required"), nil
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 		payload := map[string]string{
 			"task_id":        taskID,
@@ -142,9 +162,9 @@ func (s *Server) listTaskDocumentsHandler() server.ToolHandlerFunc {
 
 func (s *Server) getTaskDocumentHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		taskID, err := req.RequireString("task_id")
+		taskID, err := s.resolveDocumentTaskID(req)
 		if err != nil {
-			return mcp.NewToolResultError("task_id is required"), nil
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 		key, err := req.RequireString("document_key")
 		if err != nil {
@@ -171,9 +191,9 @@ func (s *Server) getTaskDocumentHandler() server.ToolHandlerFunc {
 
 func (s *Server) writeTaskDocumentHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		taskID, err := req.RequireString("task_id")
+		taskID, err := s.resolveDocumentTaskID(req)
 		if err != nil {
-			return mcp.NewToolResultError("task_id is required"), nil
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 		key, err := req.RequireString("document_key")
 		if err != nil {
