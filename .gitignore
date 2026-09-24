@@ -86,6 +86,7 @@ build/
 # Debug files (at root level only)
 /debug
 *.pprof
+/.profile/
 
 # Air live reload (if used)
 .air.toml
@@ -162,3 +163,9 @@ apps/web/e2e/.restart-screenshots/
 
 # Manual dev-environment scratch repos (apps/web/e2e/manual-seed-*.ts)
 apps/backend/.manual-env/
+
+# Generated MCP config written by the Antigravity strategy into the workspace root
+.agents/mcp_config.json
+
+# llm-sudo session token
+.llm-sudo-session

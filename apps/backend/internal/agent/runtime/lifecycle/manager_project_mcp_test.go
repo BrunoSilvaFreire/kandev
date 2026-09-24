@@ -88,6 +88,41 @@ func TestMaterializeRuntimeProjectMCPForCursorWritesProjectFile(t *testing.T) {
 	}
 }
 
+func TestMaterializeRuntimeProjectMCPForAgyWritesProjectFile(t *testing.T) {
+	mgr := newTestManager(t)
+	execution := &AgentExecution{
+		ID:             "exec-1",
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		AgentProfileID: "profile-1",
+		WorkspacePath:  t.TempDir(),
+		metadata:       map[string]interface{}{},
+		standalonePort: 45678,
+	}
+	agentConfig, ok := mgr.registry.Get("agy-acp")
+	if !ok {
+		t.Fatal("agy-acp agent missing from test registry")
+	}
+	if err := mgr.materializeRuntimeProjectMCP(context.Background(), execution, agentConfig); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(execution.WorkspacePath, ".agents", "mcp_config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		MCPServers map[string]struct {
+			ServerURL string `json:"serverUrl"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if got := payload.MCPServers[kandevMCPServerName].ServerURL; got != "http://localhost:45678/mcp" {
+		t.Fatalf("serverUrl = %q", got)
+	}
+}
+
 func TestMaterializeRuntimeProjectMCPSkipsWhenPortUnavailable(t *testing.T) {
 	mgr := newTestManager(t)
 	execution := &AgentExecution{

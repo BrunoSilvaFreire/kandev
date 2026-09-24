@@ -151,3 +151,51 @@ func TestGetTaskUsageTotals_ZeroUsageReturnsZeroedTotals(t *testing.T) {
 		t.Errorf("timestamps = (%v, %v), want (nil, nil)", totals.FirstEventAt, totals.LastEventAt)
 	}
 }
+
+// TestGetTaskUsageBreakdown_ScopingAndGroups pins that the breakdown route
+// applies the same per-user scoping as the totals routes and returns the
+// finest-grain groups.
+func TestGetTaskUsageBreakdown_ScopingAndGroups(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedScopedWorkspaces(t, repo)
+	seedUsageEvent(t, repo, "evt-breakdown-1", "task-b", "sess-b")
+
+	if _, _, err := svc.GetTaskUsageBreakdown(ctxAs("user-a"), "task-b"); !errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("foreign GetTaskUsageBreakdown: %v", err)
+	}
+
+	for name, ctx := range map[string]context.Context{
+		"owner":    ctxAs("user-b"),
+		"internal": context.Background(),
+	} {
+		totals, groups, err := svc.GetTaskUsageBreakdown(ctx, "task-b")
+		if err != nil {
+			t.Fatalf("%s GetTaskUsageBreakdown: %v", name, err)
+		}
+		if totals.EventCount != 1 {
+			t.Fatalf("%s task EventCount = %d, want 1", name, totals.EventCount)
+		}
+		if len(groups) != 1 {
+			t.Fatalf("%s len(groups) = %d, want 1", name, len(groups))
+		}
+		if groups[0].SessionID == nil || *groups[0].SessionID != "sess-b" {
+			t.Fatalf("%s group SessionID = %v, want sess-b", name, groups[0].SessionID)
+		}
+	}
+}
+
+// TestGetTaskUsageBreakdown_UnknownTask mirrors the totals route's 404 for an
+// unknown task in every caller scope.
+func TestGetTaskUsageBreakdown_UnknownTask(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedScopedWorkspaces(t, repo)
+
+	for name, ctx := range map[string]context.Context{
+		"scoped":   ctxAs("user-b"),
+		"internal": context.Background(),
+	} {
+		if _, _, err := svc.GetTaskUsageBreakdown(ctx, "task-does-not-exist"); !errors.Is(err, repoerrors.ErrTaskNotFound) {
+			t.Fatalf("%s unknown task: %v", name, err)
+		}
+	}
+}

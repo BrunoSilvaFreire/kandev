@@ -27,6 +27,9 @@ export const SIDEBAR_LOCK = "no-drop-target" as const;
 
 export const PROMPT_HISTORY_PANEL_ID = "prompt-history";
 
+/** Task-wide per-agent usage/cost breakdown panel. */
+export const USAGE_PANEL_ID = "usage";
+
 /** Canonical single-instance panels supported by reusable layout profiles. */
 export const REUSABLE_PANEL_IDS = [
   "chat",
@@ -39,6 +42,7 @@ export const REUSABLE_PANEL_IDS = [
   "vscode",
   "todos",
   PROMPT_HISTORY_PANEL_ID,
+  USAGE_PANEL_ID,
 ] as const;
 export type ReusablePanelId = (typeof REUSABLE_PANEL_IDS)[number];
 
@@ -56,6 +60,7 @@ export const KNOWN_PANEL_IDS = new Set([
   "todos",
   DEV_SERVER_PANEL_ID,
   PROMPT_HISTORY_PANEL_ID,
+  USAGE_PANEL_ID,
 ]);
 
 /** Components whose panels are structural and should survive filterEphemeral,
@@ -149,6 +154,11 @@ export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id"> & { titleKey
     component: PROMPT_HISTORY_PANEL_ID,
     title: "Prompt History",
     titleKey: "task:promptHistory",
+  },
+  [USAGE_PANEL_ID]: {
+    component: USAGE_PANEL_ID,
+    title: "Usage",
+    titleKey: "task:panelUsage",
   },
 };
 

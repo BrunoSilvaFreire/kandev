@@ -238,6 +238,7 @@ export function useProfileSave({
               ? (draft.providerApiKeySecretId ?? "")
               : "",
           env_vars: draft.envVars ?? [],
+          tags: draft.tags ?? [],
         },
         force,
       );

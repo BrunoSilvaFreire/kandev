@@ -2,6 +2,7 @@ import { areCLIFlagsEqual } from "@/lib/cli-flags";
 import { areConfigOptionsEqual } from "@/lib/config-options";
 import { arePermissionsDirty } from "@/lib/agent-permissions";
 import { areEnvVarsEqual } from "@/components/settings/profile-edit/profile-env-vars-section";
+import { areTagListsEqual } from "@/components/settings/tag-token-input";
 import type { AgentProfile, PermissionSetting } from "@/lib/types/http";
 
 /** True when any OpenAI-compatible provider field of the draft differs. */
@@ -37,6 +38,7 @@ export function isProfileDirty(
     (draft.commandPrefix ?? "") !== (savedProfile.commandPrefix ?? ""),
     isProviderConfigDirty(draft, savedProfile),
     !areEnvVarsEqual(draft.envVars, savedProfile.envVars),
+    !areTagListsEqual(draft.tags, savedProfile.tags),
   ];
   return changed.some(Boolean);
 }

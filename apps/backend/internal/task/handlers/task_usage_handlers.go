@@ -23,6 +23,20 @@ func (h *TaskHandlers) httpGetTaskUsageTotals(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.ToTaskUsageTotalsDTO(dto.TaskUsageTotalsScopeTask, taskID, totals))
 }
 
+// httpGetTaskUsageBreakdown serves GET /api/v1/tasks/:id/usage/breakdown:
+// the task total plus the finest-grain groups the Usage panel rolls up. A
+// known task with no usage returns HTTP 200 with the zeroed total and an empty
+// groups array (never null). Returns 404 for an unknown task.
+func (h *TaskHandlers) httpGetTaskUsageBreakdown(c *gin.Context) {
+	taskID := c.Param("id")
+	taskTotals, groups, err := h.service.GetTaskUsageBreakdown(c.Request.Context(), taskID)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "task not found")
+		return
+	}
+	c.JSON(http.StatusOK, dto.ToTaskUsageBreakdownDTO(taskID, taskTotals, groups))
+}
+
 // httpGetTaskSessionUsageTotals serves
 // GET /api/v1/tasks/:id/sessions/:sessionId/usage (AC-18, AC-19, AC-20): the
 // session-scoped token/cost aggregate. Returns 404 when the task or session

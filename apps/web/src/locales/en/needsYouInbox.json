@@ -31,6 +31,7 @@
   "openTask": "Open task",
   "questionCount_one": "{{count}} question in this bundle",
   "questionCount_other": "{{count}} questions in this bundle",
+  "approvalBadge": "Approval",
   "emptyTitleUnnamedWorkspace": "Nothing is waiting on you in this workspace.",
   "tabLabel": "Needs you",
   "failedClauseSome_one": "This list does not count failed tasks. {{count}} task has also failed. See the Failed tab.",

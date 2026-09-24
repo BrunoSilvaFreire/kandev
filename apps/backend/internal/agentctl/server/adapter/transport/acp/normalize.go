@@ -309,13 +309,13 @@ func stampBackgroundShellWork(agentID string, payload *streams.NormalizedPayload
 }
 
 func updateShellExecInput(se *streams.ShellExecPayload, inputMap map[string]any) {
-	if cmd := shared.GetString(inputMap, "command"); cmd != "" && se.Command == "" {
+	if cmd := stringFromMap(inputMap, "command", "CommandLine", "commandLine", "cmd"); cmd != "" && se.Command == "" {
 		se.Command = cmd
 	}
-	if cwd := shared.GetString(inputMap, "cwd"); cwd != "" && se.WorkDir == "" {
+	if cwd := stringFromMap(inputMap, "cwd", "Cwd", "workDir", "workdir"); cwd != "" && se.WorkDir == "" {
 		se.WorkDir = cwd
 	}
-	if desc := shared.GetString(inputMap, "description"); desc != "" && se.Description == "" {
+	if desc := stringFromMap(inputMap, "description", "Description", "toolSummary", "toolAction"); desc != "" && se.Description == "" {
 		se.Description = desc
 	}
 	// Claude's Bash tool streams `command` and `run_in_background:true` in a
@@ -370,14 +370,16 @@ func updateReadFileInput(rf *streams.ReadFilePayload, supplemental, inputMap map
 }
 
 func updateCodeSearchInput(cs *streams.CodeSearchPayload, supplemental, inputMap map[string]any) {
-	if v := stringFromMap(inputMap, "query", "pattern", "search_term"); v != "" && cs.Query == "" {
+	if v := stringFromMap(inputMap, "query", "Query", "pattern", "search_term"); v != "" && cs.Query == "" {
 		cs.Query = v
 	}
-	if v := stringFromMap(inputMap, "pattern", "glob", "glob_pattern"); v != "" && cs.Pattern == "" && cs.Glob == "" {
+	if v := stringFromMap(inputMap, "pattern", "Pattern", "glob", "glob_pattern"); v != "" && cs.Pattern == "" && cs.Glob == "" {
 		cs.Pattern = v
 	}
 	if path := pathFromArgs(supplemental, inputMap); path != "" && cs.Path == "" {
 		cs.Path = path
+	} else if p := stringFromMap(inputMap, "SearchPath", "searchPath"); p != "" && cs.Path == "" {
+		cs.Path = p
 	}
 }
 
@@ -521,11 +523,15 @@ func (n *Normalizer) normalizeExecute(args map[string]any) *streams.NormalizedPa
 		rawInput = args
 	}
 
-	command := shared.GetString(rawInput, "command")
-	workDir := shared.GetString(rawInput, "cwd")
+	command := stringFromMap(rawInput, "command", "CommandLine", "commandLine", "cmd")
+	workDir := stringFromMap(rawInput, "cwd", "Cwd", "workDir", "workdir")
+	desc := stringFromMap(rawInput, "description", "Description", "toolSummary", "toolAction")
 	timeout := shared.GetInt(rawInput, "max_wait_seconds")
+	if timeout == 0 {
+		timeout = shared.GetInt(rawInput, "WaitMsBeforeAsync") / 1000
+	}
 
-	return streams.NewShellExec(command, workDir, "", timeout, isBackgroundExecInput(rawInput))
+	return streams.NewShellExec(command, workDir, desc, timeout, isBackgroundExecInput(rawInput))
 }
 
 // isBackgroundExecInput reports whether an execute/bash rawInput marks the
@@ -539,6 +545,9 @@ func isBackgroundExecInput(inputMap map[string]any) bool {
 	if bg, ok := inputMap["run_in_background"].(bool); ok && bg {
 		return true
 	}
+	if daemon, ok := inputMap["IsDaemon"].(bool); ok && daemon {
+		return true
+	}
 	return false
 }
 
@@ -550,17 +559,20 @@ func (n *Normalizer) normalizeCodeSearch(toolName string, args map[string]any) *
 	}
 
 	path := pathFromArgs(args, rawInput)
-	pattern := stringFromMap(rawInput, "pattern", "glob", "glob_pattern")
+	if path == "" {
+		path = stringFromMap(rawInput, "SearchPath", "searchPath")
+	}
+	pattern := stringFromMap(rawInput, "pattern", "Pattern", "glob", "glob_pattern")
 
 	var query, glob string
 	switch strings.ToLower(toolName) {
 	case toolKindGlob:
 		glob = pattern
 		if glob == "" {
-			glob = stringFromMap(rawInput, "query", "search_term")
+			glob = stringFromMap(rawInput, "query", "Query", "search_term")
 		}
 	case toolKindGrep, toolKindSearch:
-		query = stringFromMap(rawInput, "query", "pattern", "search_term", "regex")
+		query = stringFromMap(rawInput, "query", "Query", "pattern", "search_term", "regex")
 	}
 
 	return streams.NewCodeSearch(query, pattern, path, glob)
@@ -689,12 +701,12 @@ func stringFromMap(m map[string]any, keys ...string) string {
 // path/file_path/filePath, top-level path, locations).
 func pathFromArgs(args, rawInput map[string]any) string {
 	if rawInput != nil {
-		if p := stringFromMap(rawInput, "path", "file_path", "filePath"); p != "" {
+		if p := stringFromMap(rawInput, "path", "file_path", "filePath", "AbsolutePath", "absolutePath", "TargetFile", "targetFile"); p != "" {
 			return p
 		}
 	}
 	if args != nil {
-		if p := shared.GetString(args, "path"); p != "" {
+		if p := stringFromMap(args, "path", "file_path", "filePath", "AbsolutePath", "absolutePath", "TargetFile", "targetFile"); p != "" {
 			return p
 		}
 		return extractPathFromLocations(args)

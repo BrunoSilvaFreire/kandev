@@ -1,17 +1,7 @@
 /* eslint-disable max-lines -- route dispatch and its bootstrap remain one public boundary */
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { GitHubPageClient } from "@/app/github/github-page-client";
-import { GitLabPageClient } from "@/app/gitlab/gitlab-page-client";
-import { AzureDevOpsPageClient } from "@/app/azure-devops/azure-devops-page-client";
-import { JiraPageClient } from "@/app/jira/jira-page-client";
-import { LinearPageClient } from "@/app/linear/linear-page-client";
-import { StatsPageClient } from "@/app/stats/stats-page-client";
 import { isRangeKey } from "@/app/stats/stats-utils";
 import type { RangeKey } from "@/app/stats/stats-utils";
-import { TasksPageClient } from "@/app/tasks/tasks-page-client";
-import { AutomationDetailPage } from "@/components/runs/automation-detail-page";
-import { RunsListPage } from "@/components/runs/runs-list-page";
-import { RunsPageClient } from "@/components/runs/runs-page-client";
 import {
   AUTOMATIONS_HREF,
   LEGACY_RUNS_PREFIX,
@@ -61,7 +51,7 @@ import type {
 import { TaskDetailRoute } from "./task-detail-route";
 import { CanvasRoute } from "./canvas-route";
 import { NeedsYouInboxRoute } from "./needs-you-inbox-route";
-import { AuthRouteRedirect, RouteLoading } from "./spa-route-chrome";
+import { AuthRouteRedirect, RouteChunkLoading, RouteLoading } from "./spa-route-chrome";
 import { NEEDS_YOU_INBOX_HREF } from "@/lib/navigation/needs-you-inbox-destination";
 import { generateUUID } from "@/lib/utils";
 
@@ -77,6 +67,44 @@ const ThreadsPageClient = lazy(() =>
   import("@/app/threads/threads-page-client").then((mod) => ({
     default: mod.ThreadsPageClient,
   })),
+);
+// Integration dashboards are separate top-level routes a cold task open never
+// renders; keep their page trees off the entry graph.
+const GitHubPageClient = lazy(() =>
+  import("@/app/github/github-page-client").then((mod) => ({ default: mod.GitHubPageClient })),
+);
+const GitLabPageClient = lazy(() =>
+  import("@/app/gitlab/gitlab-page-client").then((mod) => ({ default: mod.GitLabPageClient })),
+);
+const AzureDevOpsPageClient = lazy(() =>
+  import("@/app/azure-devops/azure-devops-page-client").then((mod) => ({
+    default: mod.AzureDevOpsPageClient,
+  })),
+);
+const JiraPageClient = lazy(() =>
+  import("@/app/jira/jira-page-client").then((mod) => ({ default: mod.JiraPageClient })),
+);
+const LinearPageClient = lazy(() =>
+  import("@/app/linear/linear-page-client").then((mod) => ({ default: mod.LinearPageClient })),
+);
+// Stats, the tasks list, and the runs/automation surfaces are separate routes a
+// cold task open never renders; keep their page trees off the entry graph.
+const StatsPageClient = lazy(() =>
+  import("@/app/stats/stats-page-client").then((mod) => ({ default: mod.StatsPageClient })),
+);
+const TasksPageClient = lazy(() =>
+  import("@/app/tasks/tasks-page-client").then((mod) => ({ default: mod.TasksPageClient })),
+);
+const AutomationDetailPage = lazy(() =>
+  import("@/components/runs/automation-detail-page").then((mod) => ({
+    default: mod.AutomationDetailPage,
+  })),
+);
+const RunsListPage = lazy(() =>
+  import("@/components/runs/runs-list-page").then((mod) => ({ default: mod.RunsListPage })),
+);
+const RunsPageClient = lazy(() =>
+  import("@/components/runs/runs-page-client").then((mod) => ({ default: mod.RunsPageClient })),
 );
 const EMPTY_REPOSITORIES: Repository[] = [];
 
@@ -415,12 +443,14 @@ function TasksDataRoute({
   );
   const initialData = resolveTasksDataRouteInitialData(bootstrapped, tasksPage, initialSort);
   return (
-    <TasksPageClient
-      workspaces={[]}
-      {...initialData}
-      initialSort={initialSort}
-      initialGroup={initialGroup}
-    />
+    <Suspense fallback={<RouteChunkLoading />}>
+      <TasksPageClient
+        workspaces={[]}
+        {...initialData}
+        initialSort={initialSort}
+        initialGroup={initialGroup}
+      />
+    </Suspense>
   );
 }
 
@@ -465,59 +495,81 @@ function ExternalDataRoute({
   switch (route.kind) {
     case "github":
       return (
-        <GitHubPageClient
-          workspaceId={workspaceId}
-          workflows={data.workflows}
-          steps={data.steps}
-          repositories={data.repositories}
-        />
+        <Suspense fallback={<RouteChunkLoading />}>
+          <GitHubPageClient
+            workspaceId={workspaceId}
+            workflows={data.workflows}
+            steps={data.steps}
+            repositories={data.repositories}
+          />
+        </Suspense>
       );
     case "gitlab":
       return (
-        <GitLabPageClient
-          workspaceId={workspaceId}
-          workflows={data.workflows}
-          steps={data.steps}
-          repositories={data.repositories}
-        />
+        <Suspense fallback={<RouteChunkLoading />}>
+          <GitLabPageClient
+            workspaceId={workspaceId}
+            workflows={data.workflows}
+            steps={data.steps}
+            repositories={data.repositories}
+          />
+        </Suspense>
       );
     case "azure-devops":
       return (
-        <AzureDevOpsPageClient
-          workspaceId={workspaceId}
-          workflows={data.workflows}
-          steps={data.steps}
-          repositories={data.repositories}
-        />
+        <Suspense fallback={<RouteChunkLoading />}>
+          <AzureDevOpsPageClient
+            workspaceId={workspaceId}
+            workflows={data.workflows}
+            steps={data.steps}
+            repositories={data.repositories}
+          />
+        </Suspense>
       );
     case "jira":
       return (
-        <JiraPageClient workspaceId={workspaceId} workflows={data.workflows} steps={data.steps} />
+        <Suspense fallback={<RouteChunkLoading />}>
+          <JiraPageClient workspaceId={workspaceId} workflows={data.workflows} steps={data.steps} />
+        </Suspense>
       );
     case "linear":
       return (
-        <LinearPageClient workspaceId={workspaceId} workflows={data.workflows} steps={data.steps} />
+        <Suspense fallback={<RouteChunkLoading />}>
+          <LinearPageClient
+            workspaceId={workspaceId}
+            workflows={data.workflows}
+            steps={data.steps}
+          />
+        </Suspense>
       );
     case "stats":
       return (
-        <StatsPageClient workspaceId={workspaceId} activeRange={route.range} initialError={null} />
+        <Suspense fallback={<RouteChunkLoading />}>
+          <StatsPageClient workspaceId={workspaceId} activeRange={route.range} initialError={null} />
+        </Suspense>
       );
     case "runs":
       // The flat feed is demoted to a lens over the list, not deleted: with
       // many automations "what happened overnight" is a real question a
       // per-automation view cannot answer.
       return route.view === RUNS_FEED_VIEW ? (
-        <RunsPageClient workspaceId={workspaceId} />
+        <Suspense fallback={<RouteChunkLoading />}>
+          <RunsPageClient workspaceId={workspaceId} />
+        </Suspense>
       ) : (
-        <RunsListPage workspaceId={workspaceId} />
+        <Suspense fallback={<RouteChunkLoading />}>
+          <RunsListPage workspaceId={workspaceId} />
+        </Suspense>
       );
     case "runDetail":
       return (
-        <AutomationDetailPage
-          automationId={route.automationId}
-          tab={parseDetailTab(route.tab)}
-          runId={route.runId}
-        />
+        <Suspense fallback={<RouteChunkLoading />}>
+          <AutomationDetailPage
+            automationId={route.automationId}
+            tab={parseDetailTab(route.tab)}
+            runId={route.runId}
+          />
+        </Suspense>
       );
   }
 }

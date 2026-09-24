@@ -364,8 +364,9 @@ func (s *Server) registerConfigTaskTools() {
 		mcp.NewTool("move_task_kandev",
 			mcp.WithDescription(`Move a task to a different workflow step. When the source session is mid-turn (RUNNING), the move is deferred to turn-end automatically — prompt is optional (use it for cross-agent hand-offs). Idle-session and admin moves apply immediately. Returns a move-result envelope: "disposition" is "applied" when the move committed immediately or "deferred" when it was recorded for turn-end, "task" is the moved (or target-step) task, and an optioned move also returns "move_id" and the accepted "entry_options" so you can correlate the one-shot override with the eventual entry.`),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
-			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("Target workflow ID")),
-			mcp.WithString("workflow_step_id", mcp.Required(), mcp.Description("Target workflow step ID")),
+			mcp.WithString("workflow_id", mcp.Description("Target workflow ID. Required unless transition is given; resolved from the task's current step when transition is used.")),
+			mcp.WithString("workflow_step_id", mcp.Description("Target workflow step ID. Required unless transition is given.")),
+			mcp.WithString("transition", mcp.Description("Name of a named transition configured on the task's current step. Resolves the target workflow and step from the step's events.transitions. Exactly one of transition or workflow_step_id must be set.")),
 			mcp.WithNumber("position", mcp.Description("Position within the step (0-based)")),
 			mcp.WithString("prompt", mcp.Description("Legacy alias for entry_options.instructions. Optional hand-off message applied once when the task enters the new step. Supplying both this and entry_options.instructions is rejected. Omit for self-moves like Work → Done.")),
 			moveTaskEntryOptionsToolOption(),
@@ -675,13 +676,18 @@ func (s *Server) moveTaskHandler() server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError("task_id is required"), nil
 		}
-		workflowID, err := req.RequireString("workflow_id")
-		if err != nil {
-			return mcp.NewToolResultError("workflow_id is required"), nil
-		}
-		stepID, err := req.RequireString("workflow_step_id")
-		if err != nil {
-			return mcp.NewToolResultError("workflow_step_id is required"), nil
+		workflowID := req.GetString("workflow_id", "")
+		stepID := req.GetString("workflow_step_id", "")
+		transition := req.GetString("transition", "")
+		if transition == "" {
+			if workflowID == "" {
+				return mcp.NewToolResultError("workflow_id is required unless transition is given"), nil
+			}
+			if stepID == "" {
+				return mcp.NewToolResultError("workflow_step_id is required unless transition is given"), nil
+			}
+		} else if stepID != "" {
+			return mcp.NewToolResultError("supply either transition or workflow_step_id, not both"), nil
 		}
 		// prompt is optional — only relevant when handing off mid-turn from one
 		// agent to another. Admin/config moves of idle tasks omit it.
@@ -691,9 +697,16 @@ func (s *Server) moveTaskHandler() server.ToolHandlerFunc {
 		// the tool rather than guessing from the target task's own session.
 		payload := map[string]interface{}{
 			"task_id":           taskID,
-			"workflow_id":       workflowID,
-			"workflow_step_id":  stepID,
 			"sender_session_id": s.sessionID,
+		}
+		if workflowID != "" {
+			payload["workflow_id"] = workflowID
+		}
+		if stepID != "" {
+			payload["workflow_step_id"] = stepID
+		}
+		if transition != "" {
+			payload["transition"] = transition
 		}
 		if prompt := req.GetString("prompt", ""); prompt != "" {
 			payload["prompt"] = prompt

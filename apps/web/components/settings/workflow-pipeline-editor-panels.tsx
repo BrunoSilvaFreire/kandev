@@ -29,6 +29,7 @@ import { SessionConfigEditor, SessionConfigToggle } from "./workflow-session-con
 import { StepPromptSection } from "./workflow-step-prompt-section";
 import { isWorkflowStepDirty, isWorkflowStepValueDirty } from "./workflow-dirty-state";
 import { WorkflowStepAgentProfileSelector } from "./workflow-step-agent-profile-selector";
+import { WorkflowStepAllowedTags } from "./workflow-step-allowed-tags";
 import { settingsActionClassName, settingsControlClassName } from "./settings-control";
 
 // --- StepConfigHeader ---
@@ -108,6 +109,7 @@ function StepConfigHeader({
           onRestoreSource={onRestoreSource}
           readOnly={readOnly}
         />
+        <WorkflowStepAllowedTags step={step} onUpdate={onUpdate} readOnly={readOnly} />
         <SessionConfigToggle
           step={step}
           savedStep={savedStep}

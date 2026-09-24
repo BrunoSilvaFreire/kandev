@@ -147,6 +147,16 @@ export type GenericAction =
   | { type: "clear_decisions"; config?: Record<string, never> }
   | { type: "queue_run_for_each_participant"; config: QueueRunForEachParticipantConfig };
 
+export type StepTransition = {
+  name: string;
+  direction: "forward" | "backward";
+  to_step_id?: string;
+  to_step_position?: number;
+  instructions?: string;
+  skip_step_prompt?: boolean;
+  reset_context?: boolean;
+};
+
 export type StepEvents = {
   on_enter?: OnEnterAction[];
   on_turn_start?: OnTurnStartAction[];
@@ -159,4 +169,5 @@ export type StepEvents = {
   on_heartbeat?: GenericAction[];
   on_budget_alert?: GenericAction[];
   on_agent_error?: GenericAction[];
+  transitions?: StepTransition[];
 };

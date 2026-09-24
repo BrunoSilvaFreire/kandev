@@ -16,6 +16,7 @@ package/default generation resets it during startup.
 | Gemini | `@google/gemini-cli` | `--acp` |
 | Pi | `pi-acp` | none |
 | Muse | `@bex-co/muse-code-acp` | none |
+| Antigravity CLI | `agy-acp` | `--no-sandbox --dangerously-skip-permissions` |
 
 Normal capability probes, sessions, container commands, and one-shot inference
 use `npx --yes --prefer-offline package@<effective-version>` with the ACP
@@ -67,3 +68,7 @@ install-wide effective version is included in commands built for remote
 executors and new containers, but the Settings action does not prepare their
 package cache. Each remote environment must resolve the exact package when it
 launches.
+
+Antigravity CLI uses `agy-acp@0.5.2` with Node.js 22 or later. The adapter is
+third-party and depends on a separately installed, logged-in native `agy`
+binary; it is pinned here but native CLI updates are a compatibility boundary.

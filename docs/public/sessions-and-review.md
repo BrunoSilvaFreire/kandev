@@ -42,6 +42,26 @@ The profile picker shows only profiles compatible with the task executor. If non
 
 **Handoff** from an existing session opens the same dialog with Blank context and an empty prompt. Select a session summary when you need earlier discussion. Summarization requires a working `summarize-session` utility agent. Review generated summaries: they can omit constraints or decisions.
 
+### Resume an idle session with a handoff
+
+When a session has been idle for about an hour, Kandev estimates that the provider's prompt cache has expired and offers **Resume with handoff** above the composer. The offer extracts a facts-only handoff from the conversation, resets the live agent's context, and sends the handoff as the first prompt of the fresh context, so you do not pay to reprocess the whole transcript uncached.
+
+The one-hour window is an estimate: providers do not expose their cache lifetime, and actual lifetimes range from minutes to an hour. The offer needs a configured utility agent and a running agent process. If the agent is no longer live, the reset is rejected and the conversation context is left unchanged. Dismiss the offer to hide it until a new message arrives.
+
+### Inspect session cost and cache efficiency
+
+The context-window indicator in the composer toolbar carries a small cache-status dot. Open it (click or tap the indicator) to see the **usage inspector**: cache status and estimated expiry, cache hit ratio for the session and the last prompt, token use (uncached input, cached read, cached write, output, thought, total) for the session and the task, and cost for the session and the task.
+
+The dot is green when the cache is likely warm, amber when it is likely expired now, and grey when there is not enough data. An amber tint on the indicator means a likely problem: a low cache hit ratio, a cache that is likely expired now, or a high session cost. The expiry time is an estimate, because providers do not expose their cache lifetime. When an agent reports no usage, the panel says so instead of showing zeros.
+
+### Open the full Usage panel
+
+The tooltip above is the quick view for one session. For a per-agent breakdown, add the **Usage** panel from the composer's **+** menu, next to Terminal, Files and Changes. On mobile it is in the **More** menu in the bottom navigation.
+
+The panel has three views: **By agent**, **By model** and **By session**. Each row shows the prompt count, every token kind (input, cached read, cached write, output, thought, total), the cache hit ratio, cost with estimated, unpriced and incomplete notes, cost per prompt, average input and output per prompt, and the first and last activity. The session view also shows the estimated cache status and expiry, and lists any session that has not reported usage yet. The header card shows the task total.
+
+Cache status and the thresholds are estimates: providers do not expose cache lifetime, and the hit-ratio and cost thresholds are heuristics.
+
 Prompts support pasted, dropped, or selected attachments. A prompt can contain at most 10 files, with a limit of 10 MiB per file and 20 MiB in total. The prompt itself is required.
 
 ## Manage session state

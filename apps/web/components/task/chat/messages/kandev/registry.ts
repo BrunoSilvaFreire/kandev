@@ -28,6 +28,7 @@ import {
   WriteTaskDocumentRenderer,
 } from "./document-renderers";
 import { AskUserQuestionRenderer } from "./ask-user-question-renderer";
+import { ApprovalRenderer } from "./approval-renderer";
 import { ShowWalkthroughRenderer } from "./walkthrough-renderer";
 import { RichOutputRenderer } from "./rich-output/rich-output-renderer";
 import type { KandevRenderer } from "./types";
@@ -56,6 +57,7 @@ export const KANDEV_RENDERERS: Record<string, KandevRenderer> = {
   get_task_conversation: GetTaskConversationRenderer,
 
   ask_user_question: AskUserQuestionRenderer,
+  request_approval: ApprovalRenderer,
   show_walkthrough: ShowWalkthroughRenderer,
   show_rich_output: RichOutputRenderer,
 };

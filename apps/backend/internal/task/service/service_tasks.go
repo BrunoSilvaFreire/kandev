@@ -678,6 +678,13 @@ func (s *Service) createTaskWithCapacity(ctx context.Context, task *models.Task)
 	if step == nil {
 		return fmt.Errorf("%w: workflow step not found: %s", ErrInvalidTaskWorkflow, task.WorkflowStepID)
 	}
+	// Genesis (task creation at a tagged step) freezes its profile the same way
+	// a move does: resolve once and persist it with the created entry's ledger
+	// row. No source session exists yet.
+	ctx, err = s.attachPendingEntryRoute(ctx, task, step, nil)
+	if err != nil {
+		return err
+	}
 	if step.WIPLimit <= 0 {
 		return s.tasks.CreateTask(ctx, task)
 	}
@@ -2352,7 +2359,11 @@ func (s *Service) RestoreTaskMessageRollback(
 		rollbackAttribution.ActorID = preset.ActorID
 		rollbackAttribution.SessionID = preset.SessionID
 	}
-	rollbackCtx := steptelemetry.WithAttribution(ctx, rollbackAttribution)
+	rollbackCtx, err := s.attachRollbackEntryRoute(ctx, &restoredTask, ownerSessionID, workflowStepID)
+	if err != nil {
+		return task, false, err
+	}
+	rollbackCtx = steptelemetry.WithAttribution(rollbackCtx, rollbackAttribution)
 	updated, err := repo.RestoreTaskMessageRollbackIfSessionState(
 		rollbackCtx,
 		&restoredTask,
@@ -2368,6 +2379,31 @@ func (s *Service) RestoreTaskMessageRollback(
 	}
 	s.publishTaskEvent(ctx, events.TaskUpdated, &restoredTask, nil)
 	return &restoredTask, true, nil
+}
+
+// attachRollbackEntryRoute freezes the restored step's tagged-entry profile in
+// the same transition as the rollback restore. Restoring a tagged step commits
+// a new transition identity, so the pre-failure route is stale; without a fresh
+// choice the task could not launch. A tagged step that cannot be resolved fails
+// the rollback closed instead of committing an entry with no frozen route.
+func (s *Service) attachRollbackEntryRoute(
+	ctx context.Context, task *models.Task, ownerSessionID, workflowStepID string,
+) (context.Context, error) {
+	if s.workflowStepGetter == nil || workflowStepID == "" {
+		return ctx, nil
+	}
+	step, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
+	if err != nil {
+		return ctx, fmt.Errorf("load restored workflow step %q for entry route: %w", workflowStepID, err)
+	}
+	if step == nil || len(step.AllowedTags) == 0 || step.SessionTarget != nil {
+		return ctx, nil
+	}
+	var session *models.TaskSession
+	if ownerSessionID != "" && s.sessions != nil {
+		session, _ = s.sessions.GetTaskSession(ctx, ownerSessionID)
+	}
+	return s.attachPendingEntryRoute(ctx, task, step, session)
 }
 
 // ArchiveTask archives a task by setting its archived_at timestamp.

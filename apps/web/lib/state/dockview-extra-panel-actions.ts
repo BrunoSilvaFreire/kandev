@@ -8,7 +8,7 @@ import {
   type StoreSet,
 } from "./dockview-panel-actions";
 import { buildTerminalPanelActions } from "./dockview-terminal-panel-actions";
-import { PROMPT_HISTORY_PANEL_ID } from "./layout-manager/constants";
+import { PROMPT_HISTORY_PANEL_ID, USAGE_PANEL_ID } from "./layout-manager/constants";
 import { panelTitle } from "./layout-manager/panel-title";
 import {
   parsePluginPanelId,
@@ -145,6 +145,20 @@ function buildSidePanelActions(get: StoreGet) {
           id: PROMPT_HISTORY_PANEL_ID,
           component: PROMPT_HISTORY_PANEL_ID,
           title: panelTitle(PROMPT_HISTORY_PANEL_ID),
+        },
+        opts,
+      );
+    },
+    addUsagePanel: (opts?: SidePanelOpts) => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      addSidePanel(
+        api,
+        centerGroupId,
+        {
+          id: USAGE_PANEL_ID,
+          component: USAGE_PANEL_ID,
+          title: panelTitle(USAGE_PANEL_ID),
         },
         opts,
       );

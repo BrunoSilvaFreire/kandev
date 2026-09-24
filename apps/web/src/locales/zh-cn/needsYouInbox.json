@@ -31,6 +31,7 @@
   "openTask": "打开任务",
   "questionCount_one": "此问题集中有 {{count}} 个问题",
   "questionCount_other": "此问题集中有 {{count}} 个问题",
+  "approvalBadge": "批准",
   "emptyTitleUnnamedWorkspace": "此工作区中没有任何事项在等待您处理。",
   "tabLabel": "需要你处理",
   "failedClauseSome_one": "此列表不计入失败的任务。{{count}} 个任务也失败了,请查看失败标签页。",

@@ -181,6 +181,12 @@ grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null || 
 		stripEnv:               []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME"},
 		sessionDirTemplate:     "{home}",
 	}},
+	{func() Agent { return NewAgyACP() }, acpAgentSpec{
+		id: "agy-acp", displayName: "Antigravity CLI", detectBinaries: []string{"agy"},
+		expectedArgv:    []string{"npx", "--yes", "--prefer-offline", "agy-acp@0.5.2", "--no-sandbox", "--dangerously-skip-permissions"},
+		inferenceArgv:   []string{"npx", "--yes", "--prefer-offline", "agy-acp@0.5.2", "--no-sandbox", "--dangerously-skip-permissions"},
+		passthroughArgv: []string{"agy"}, installViaNpm: false, skipInstallBinaryCheck: true, sessionDirTemplate: "{home}",
+	}},
 }
 
 func TestNewACPAgents_IDAndDisplay(t *testing.T) {

@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { getReleaseNotes, hasReleaseNotes } from "@/lib/release-notes";
-import { getChangelog, type ChangelogEntry } from "@/lib/changelog";
+import { loadChangelog, type ChangelogEntry } from "@/lib/changelog";
 import { updateUserSettings } from "@/lib/api";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -44,7 +44,16 @@ export function useReleaseNotes() {
   const settingsLoaded = useAppStore((s) => s.userSettings.loaded);
   const storeApi = useAppStoreApi();
 
-  const changelog = useMemo(() => getChangelog(), []);
+  const [changelog, setChangelog] = useState<ChangelogEntry[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void loadChangelog().then((entries) => {
+      if (!cancelled) setChangelog(entries);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const unseenEntries = useMemo(
     () => getUnseenEntries(changelog, lastSeenVersion),
     [changelog, lastSeenVersion],

@@ -1,11 +1,13 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useSessionContextWindow } from "@/hooks/domains/session/use-session-context-window";
+import { useSessionUsageInspector } from "@/hooks/domains/session/use-session-usage-inspector";
 import {
   ClarificationEscapeGuardProvider,
   type ClarificationEscapeGuardEntry,
   type ClarificationEscapeGuardRegistry,
 } from "@/hooks/use-clarification-escape-guard";
+import type { UsageTotals } from "@/lib/api/domains/usage-api";
 import { isContextWindowReliable, TokenUsageDisplay } from "./token-usage-display";
 
 const TOOLTIP_ROOT_TESTID = "tooltip-root";
@@ -13,6 +15,49 @@ const TOOLTIP_ROOT_TESTID = "tooltip-root";
 vi.mock("@/hooks/domains/session/use-session-context-window", () => ({
   useSessionContextWindow: vi.fn(),
 }));
+
+vi.mock("@/hooks/domains/session/use-session-usage-inspector", () => ({
+  useSessionUsageInspector: vi.fn(),
+}));
+
+function totals(overrides: Partial<UsageTotals> = {}): UsageTotals {
+  return {
+    scope: "session",
+    scope_id: "sess-1",
+    tokens_in: 100,
+    tokens_cached_read: 300,
+    tokens_cached_write: 20,
+    tokens_out: 40,
+    tokens_thought: 0,
+    tokens_total: 460,
+    cost_subcents: 250,
+    event_count: 4,
+    estimated_event_count: 0,
+    unpriced_event_count: 0,
+    output_tokens_complete: true,
+    first_event_at: null,
+    last_event_at: null,
+    ...overrides,
+  };
+}
+
+function inspector(overrides: Partial<ReturnType<typeof useSessionUsageInspector>> = {}) {
+  return {
+    session: null,
+    task: null,
+    lastPrompt: undefined,
+    status: "unknown" as const,
+    expiresAt: null,
+    flags: null,
+    loading: false,
+    error: null,
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  vi.mocked(useSessionUsageInspector).mockReturnValue(inspector());
+});
 
 vi.mock("@kandev/ui/tooltip", () => ({
   TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -112,7 +157,7 @@ describe("TokenUsageDisplay", () => {
 
     const { getByRole, getByTestId } = render(<TokenUsageDisplay sessionId="sess-1" />);
 
-    fireEvent.click(getByRole("button", { name: "Context window: 28% used" }));
+    fireEvent.click(getByRole("button", { name: /Context window: 28% used/ }));
 
     expect(getByTestId(TOOLTIP_ROOT_TESTID).getAttribute("data-open")).toBe("true");
     const compactionRow = getByTestId("context-window-compactions-row");
@@ -132,7 +177,7 @@ describe("TokenUsageDisplay", () => {
 
     const { getByRole, getByTestId } = render(<TokenUsageDisplay sessionId="sess-1" />);
 
-    const trigger = getByRole("button", { name: "Context window: usage not measured" });
+    const trigger = getByRole("button", { name: /Context window: usage not measured/ });
     fireEvent.click(trigger);
 
     expect(getByTestId(TOOLTIP_ROOT_TESTID).getAttribute("data-open")).toBe("true");
@@ -157,7 +202,7 @@ describe("TokenUsageDisplay", () => {
 
     const { getByRole, getByTestId } = render(<TokenUsageDisplay sessionId="sess-1" />);
 
-    fireEvent.click(getByRole("button", { name: "Context window: 28% used" }));
+    fireEvent.click(getByRole("button", { name: /Context window: 28% used/ }));
     fireEvent.keyDown(document, { key: "Escape" });
 
     expect(getByTestId(TOOLTIP_ROOT_TESTID).getAttribute("data-open")).toBe("false");
@@ -173,7 +218,7 @@ describe("TokenUsageDisplay", () => {
     });
 
     const holder = withEscapeGuardRegistry(<TokenUsageDisplay sessionId="sess-1" />);
-    const trigger = screen.getByRole("button", { name: "Context window: 28% used" });
+    const trigger = screen.getByRole("button", { name: /Context window: 28% used/ });
 
     fireEvent.click(trigger);
 
@@ -267,5 +312,160 @@ describe("TokenUsageDisplay context source", () => {
     fireEvent.click(helpButton);
     expect(help.className).toContain("opacity-0");
     expect(getByText(/model's advertised maximum from the catalogue/i)).toBeDefined();
+  });
+});
+
+// eslint-disable-next-line max-lines-per-function -- the badge and inspector scenarios share one harness.
+describe("TokenUsageDisplay usage inspector", () => {
+  it("renders the cache status badge dot", () => {
+    vi.mocked(useSessionContextWindow).mockReturnValue({
+      size: 200_000,
+      used: 56_047,
+      remaining: 143_953,
+      efficiency: 28,
+      compactionCount: 0,
+    });
+    vi.mocked(useSessionUsageInspector).mockReturnValue(
+      inspector({ status: "warm", session: totals(), task: totals({ scope: "task" }) }),
+    );
+
+    render(<TokenUsageDisplay sessionId="sess-1" taskId="task-1" />);
+
+    const dot = screen.getByTestId("usage-cache-status-dot");
+    expect(dot.getAttribute("data-cache-status")).toBe("warm");
+    expect(dot.className).toContain("bg-green-500");
+  });
+
+  it("keeps the quick-chat indicator free of the cache badge", () => {
+    vi.mocked(useSessionContextWindow).mockReturnValue({
+      size: 200_000,
+      used: 56_047,
+      remaining: 143_953,
+      efficiency: 28,
+      compactionCount: 0,
+    });
+    vi.mocked(useSessionUsageInspector).mockReturnValue(
+      inspector({ status: "warm", session: totals() }),
+    );
+
+    render(<TokenUsageDisplay sessionId="sess-1" />);
+
+    expect(screen.queryByTestId("usage-cache-status-dot")).toBeNull();
+    expect(screen.queryByTestId("usage-inspector")).toBeNull();
+    const trigger = screen.getByTestId(TOOLTIP_ROOT_TESTID).querySelector("button")!;
+    expect(trigger.getAttribute("aria-label")).not.toContain("Prompt cache");
+  });
+
+  it("renders the inspector sections with session and task totals", () => {
+    vi.mocked(useSessionContextWindow).mockReturnValue({
+      size: 200_000,
+      used: 56_047,
+      remaining: 143_953,
+      efficiency: 28,
+      compactionCount: 0,
+    });
+    vi.mocked(useSessionUsageInspector).mockReturnValue(
+      inspector({ status: "warm", session: totals(), task: totals({ scope: "task" }) }),
+    );
+
+    render(<TokenUsageDisplay sessionId="sess-1" taskId="task-1" />);
+    fireEvent.click(screen.getByTestId(TOOLTIP_ROOT_TESTID).querySelector("button")!);
+
+    expect(screen.getByTestId("usage-inspector-cache")).toBeTruthy();
+    expect(screen.getByTestId("usage-inspector-tokens").textContent).toContain("Cached read");
+    expect(screen.getByTestId("usage-inspector-cost").textContent).toContain("$0.03");
+  });
+
+  it("marks estimated cost with a tilde and shows per-column notes", () => {
+    vi.mocked(useSessionContextWindow).mockReturnValue({
+      size: 200_000,
+      used: 56_047,
+      remaining: 143_953,
+      efficiency: 28,
+      compactionCount: 0,
+    });
+    vi.mocked(useSessionUsageInspector).mockReturnValue(
+      inspector({
+        status: "warm",
+        session: totals({ estimated_event_count: 2, unpriced_event_count: 1 }),
+        task: totals({
+          scope: "task",
+          estimated_event_count: 0,
+          unpriced_event_count: 3,
+        }),
+      }),
+    );
+
+    render(<TokenUsageDisplay sessionId="sess-1" taskId="task-1" />);
+    fireEvent.click(screen.getByTestId(TOOLTIP_ROOT_TESTID).querySelector("button")!);
+
+    const cost = screen.getByTestId("usage-inspector-cost");
+    expect(cost.textContent).toContain("~$0.03");
+    expect(cost.textContent).toContain("estimated");
+    expect(cost.textContent).toContain("1 prompt unpriced");
+    expect(cost.textContent).toContain("3 prompts unpriced");
+  });
+
+  it("tints the trigger when a usage flag is raised", () => {
+    vi.mocked(useSessionContextWindow).mockReturnValue({
+      size: 200_000,
+      used: 56_047,
+      remaining: 143_953,
+      efficiency: 28,
+      compactionCount: 0,
+    });
+    vi.mocked(useSessionUsageInspector).mockReturnValue(
+      inspector({
+        status: "likely_expired",
+        session: totals(),
+        flags: { lowHitRatio: false, highCost: true, cacheLikelyExpired: true },
+      }),
+    );
+
+    render(<TokenUsageDisplay sessionId="sess-1" taskId="task-1" />);
+
+    const trigger = screen.getByTestId(TOOLTIP_ROOT_TESTID).querySelector("button")!;
+    expect(trigger.className).toContain("bg-amber-500/10");
+  });
+
+  it("renders the indicator from usage alone when the context window is unreliable", () => {
+    vi.mocked(useSessionContextWindow).mockReturnValue({
+      size: 200_000,
+      used: 233_900,
+      remaining: -33_900,
+      efficiency: 117,
+      compactionCount: 0,
+    });
+    vi.mocked(useSessionUsageInspector).mockReturnValue(
+      inspector({ status: "warm", session: totals(), task: totals({ scope: "task" }) }),
+    );
+
+    const { container } = render(<TokenUsageDisplay sessionId="sess-1" taskId="task-1" />);
+
+    expect(container.firstChild).not.toBeNull();
+    expect(screen.queryByTestId("context-window-usage")).toBeNull();
+    expect(screen.getByTestId("usage-inspector-cache")).toBeTruthy();
+  });
+
+  it("shows a no-usage line when the agent reported no events", () => {
+    vi.mocked(useSessionContextWindow).mockReturnValue({
+      size: 200_000,
+      used: 56_047,
+      remaining: 143_953,
+      efficiency: 28,
+      compactionCount: 0,
+    });
+    vi.mocked(useSessionUsageInspector).mockReturnValue(
+      inspector({
+        status: "unknown",
+        session: totals({ event_count: 0 }),
+        task: totals({ scope: "task", event_count: 0 }),
+      }),
+    );
+
+    render(<TokenUsageDisplay sessionId="sess-1" taskId="task-1" />);
+    fireEvent.click(screen.getByTestId(TOOLTIP_ROOT_TESTID).querySelector("button")!);
+
+    expect(screen.getByTestId("usage-inspector-no-usage")).toBeTruthy();
   });
 });

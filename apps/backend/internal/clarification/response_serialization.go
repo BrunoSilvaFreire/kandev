@@ -3,14 +3,17 @@ package clarification
 import (
 	"encoding/json"
 	"time"
+
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 // serializedAnswer mirrors Answer but declares no `omitempty`: every key is
 // always present (M6a).
 type serializedAnswer struct {
-	QuestionID      string   `json:"question_id"`
-	SelectedOptions []string `json:"selected_options"`
-	CustomText      string   `json:"custom_text"`
+	QuestionID      string                          `json:"question_id"`
+	SelectedOptions []string                        `json:"selected_options"`
+	CustomText      string                          `json:"custom_text"`
+	PlanCommentRefs []taskmodels.TaskPlanCommentRef `json:"plan_comment_refs,omitempty"`
 }
 
 // serializedResponse mirrors Response but declares no `omitempty`: every key
@@ -24,6 +27,7 @@ type serializedResponse struct {
 	Rejected     bool               `json:"rejected"`
 	RejectReason string             `json:"reject_reason"`
 	RespondedAt  time.Time          `json:"responded_at"`
+	Approval     *ApprovalOutcome   `json:"approval,omitempty"`
 }
 
 // SerializeResponse produces the M6a/N3a-compliant JSON encoding of resp: the
@@ -39,12 +43,14 @@ func SerializeResponse(resp *Response) (string, error) {
 		Rejected:     resp.Rejected,
 		RejectReason: resp.RejectReason,
 		RespondedAt:  resp.RespondedAt,
+		Approval:     resp.Approval,
 	}
 	for _, a := range resp.Answers {
 		out.Answers = append(out.Answers, serializedAnswer{
 			QuestionID:      a.QuestionID,
 			SelectedOptions: append([]string{}, a.SelectedOptions...),
 			CustomText:      a.CustomText,
+			PlanCommentRefs: append([]taskmodels.TaskPlanCommentRef{}, a.PlanCommentRefs...),
 		})
 	}
 	b, err := json.Marshal(out)
@@ -68,12 +74,14 @@ func DeserializeResponse(data string) (*Response, error) {
 		Rejected:     in.Rejected,
 		RejectReason: in.RejectReason,
 		RespondedAt:  in.RespondedAt,
+		Approval:     in.Approval,
 	}
 	for _, a := range in.Answers {
 		resp.Answers = append(resp.Answers, Answer{
 			QuestionID:      a.QuestionID,
 			SelectedOptions: append([]string{}, a.SelectedOptions...),
 			CustomText:      a.CustomText,
+			PlanCommentRefs: append([]taskmodels.TaskPlanCommentRef{}, a.PlanCommentRefs...),
 		})
 	}
 	return resp, nil

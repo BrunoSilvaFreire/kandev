@@ -29,7 +29,7 @@ type resolverDeliveryMessageCreator struct {
 }
 
 func (s *resolverDeliveryMessageCreator) CreateClarificationRequestMessages(
-	context.Context, string, string, string, []Question, string,
+	context.Context, string, string, string, []Question, string, *ApprovalMeta,
 ) ([]string, error) {
 	return nil, nil
 }
@@ -584,7 +584,7 @@ func TestResolverDetachedResumeUsesFreshBoundedContextAfterCallerCancellation(t 
 		ID: "q1", Prompt: "Continue?",
 		Options: []Option{{ID: "yes", Label: "Yes"}, {ID: "no", Label: "No"}},
 	}}
-	_, claimed, err := resolver.claimAndDeliver(ctx, pendingID, "session-1", "task-1", questions, resolverAnswer())
+	_, claimed, err := resolver.claimAndDeliver(ctx, pendingID, "session-1", "task-1", questions, resolverAnswer(), nil)
 	if err != nil || !claimed {
 		t.Fatalf("cancelled-context response = claimed %v, err %v", claimed, err)
 	}
@@ -614,7 +614,7 @@ func TestResolverClaimUsesShortDedicatedTimeoutNotThePersistenceTimeout(t *testi
 		ID: "q1", Prompt: "Continue?",
 		Options: []Option{{ID: "yes", Label: "Yes"}, {ID: "no", Label: "No"}},
 	}}
-	_, claimed, err := resolver.claimAndDeliver(context.Background(), pendingID, "session-1", "task-1", questions, resolverAnswer())
+	_, claimed, err := resolver.claimAndDeliver(context.Background(), pendingID, "session-1", "task-1", questions, resolverAnswer(), nil)
 	if err != nil || !claimed {
 		t.Fatalf("response = claimed %v, err %v", claimed, err)
 	}

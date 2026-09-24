@@ -366,7 +366,7 @@ func (s *svcMessageUpdater) UpdateClarificationMessage(ctx context.Context, sess
 	return s.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, questionID, status, answer)
 }
 
-func (s *svcMessageUpdater) CreateClarificationRequestMessages(context.Context, string, string, string, []clarification.Question, string) ([]string, error) {
+func (s *svcMessageUpdater) CreateClarificationRequestMessages(context.Context, string, string, string, []clarification.Question, string, *clarification.ApprovalMeta) ([]string, error) {
 	return nil, errors.New("svcMessageUpdater: CreateClarificationRequestMessages not implemented for tests")
 }
 

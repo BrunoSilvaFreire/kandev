@@ -2,6 +2,7 @@
 
 import {
   IconBrandVscode,
+  IconChartBar,
   IconDeviceDesktop,
   IconFileText,
   IconFolder,
@@ -304,6 +305,22 @@ function PromptHistoryPanelMenuItem({ groupId }: { groupId: string }) {
   );
 }
 
+/** "+" menu row that opens the per-agent Usage panel in the given group. */
+function UsagePanelMenuItem({ groupId }: { groupId: string }) {
+  const { t } = useTranslation();
+  const addUsagePanel = useDockviewStore((s) => s.addUsagePanel);
+  return (
+    <DropdownMenuItem
+      data-testid="add-panel-usage-item"
+      onClick={() => addUsagePanel({ groupId })}
+      className={MENU_ITEM_CLASS}
+    >
+      <IconChartBar className={MENU_ICON_CLASS} />
+      {t("task:panelUsage")}
+    </DropdownMenuItem>
+  );
+}
+
 /** Filters the linked PRs/MRs down to those whose review panel isn't already
  * open, so the "+" menu doesn't offer duplicates. */
 function missingBuiltInReviews(
@@ -389,6 +406,7 @@ export function AddPanelMenuItems({
         </DropdownMenuItem>
       )}
       {!state.isPassthrough && <PromptHistoryPanelMenuItem groupId={groupId} />}
+      {!state.isPassthrough && <UsagePanelMenuItem groupId={groupId} />}
       {!state.hasChanges && (
         <DropdownMenuItem onClick={() => addChangesPanel(groupId)} className={MENU_ITEM_CLASS}>
           <IconGitBranch className={MENU_ICON_CLASS} />

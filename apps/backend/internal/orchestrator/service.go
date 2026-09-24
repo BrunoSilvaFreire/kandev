@@ -864,6 +864,11 @@ type Service struct {
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
 
+	// workflowEntryProfileSelector resolves a tag-configured step's concrete
+	// profile for engine/CAS transitions and the read-only move preview.
+	// Optional; without it tagged steps keep fixed-profile behavior.
+	workflowEntryProfileSelector OrchestratorEntryProfileSelector
+
 	// stepHistoryRecorder persists the ADR 0015 audit row for orchestrator
 	// step transitions: auto-advance (StepTransitionTriggerAutoComplete) and
 	// the deferred move_task_kandev path (StepTransitionTriggerManual).
@@ -2406,6 +2411,7 @@ func (s *Service) initWorkflowEngine() {
 	}
 	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger, &s.operationLedger, s.publishTaskMoved, s.publishTaskQueuePromoted, s.publishTaskStateChanged, s.stepHistoryRecorder)
 	store.setGuardedTransitionLifecycle(s.applyGuardedTransitionLifecycle)
+	store.setEntryRouteAttacher(s.attachEngineEntryRoute)
 	callbacks := buildWorkflowCallbacks(s)
 	s.workflowStore = store
 	// AC-24/24a: the engine's own structured "guard did not fire" log needs

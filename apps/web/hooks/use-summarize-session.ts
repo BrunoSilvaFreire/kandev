@@ -9,15 +9,47 @@ export type SummarizeSessionResult = {
   error?: string;
 };
 
+export type TranscriptUtilityResult =
+  | { status: "empty" }
+  | { status: "failed"; error?: string }
+  | { status: "ok"; text: string | null };
+
 function formatTranscript(messages: Message[]): string {
   return messages
     .filter((m) => m.type === "message" || m.type === "content")
     .map((m) => {
-      // i18n-exempt: transcript role markers sent verbatim to the summarizing model, not shown to a user.
+      // i18n-exempt: transcript role markers sent verbatim to the utility model, not shown to a user.
       const role = m.author_type === "user" ? "User" : "Agent";
       return `${role}: ${m.content}`;
     })
     .join("\n\n");
+}
+
+/**
+ * Fetches a session's transcript and runs it through a transcript-consuming
+ * utility agent. Network and transport failures throw; a utility that ran but
+ * did not succeed resolves as `failed`.
+ */
+export async function runTranscriptUtility(
+  sessionId: string,
+  utilityAgentId: string,
+): Promise<TranscriptUtilityResult> {
+  // Fetch messages from API; they may not be in the store for non-active sessions.
+  const resp = await listTaskSessionMessages(sessionId, { sort: "asc" });
+  const messages = resp.messages ?? [];
+  if (!messages.length) return { status: "empty" };
+
+  const transcript = formatTranscript(messages);
+  if (!transcript) return { status: "empty" };
+
+  const result = await executeUtilityPrompt({
+    utility_agent_id: utilityAgentId,
+    conversation_history: transcript,
+  });
+  if (!result.success) {
+    return { status: "failed", error: result.error };
+  }
+  return { status: "ok", text: result.response ?? null };
 }
 
 export function useSummarizeSession() {
@@ -26,24 +58,14 @@ export function useSummarizeSession() {
   const summarize = useCallback(async (sessionId: string): Promise<SummarizeSessionResult> => {
     setIsSummarizing(true);
     try {
-      // Fetch messages from API — they may not be in the store for non-active sessions
-      const resp = await listTaskSessionMessages(sessionId, { sort: "asc" });
-      const messages = resp.messages ?? [];
-      if (!messages.length) return { summary: null };
-
-      const transcript = formatTranscript(messages);
-      if (!transcript) return { summary: null };
-
       // Sessionless: handoff often runs against a completed session whose
       // agentctl is gone. Host utility executes the builtin summarize agent.
-      const result = await executeUtilityPrompt({
-        utility_agent_id: "builtin-summarize-session",
-        conversation_history: transcript,
-      });
-      if (!result.success) {
+      const result = await runTranscriptUtility(sessionId, "builtin-summarize-session");
+      if (result.status === "empty") return { summary: null };
+      if (result.status === "failed") {
         return { summary: null, error: result.error || t("task:summarizeReturnedNoResult") };
       }
-      return { summary: result.response ?? null };
+      return { summary: result.text };
     } catch (error) {
       return {
         summary: null,

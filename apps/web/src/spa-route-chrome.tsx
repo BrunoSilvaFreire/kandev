@@ -17,6 +17,18 @@ export function RouteLoading({ routeNameKey }: { routeNameKey: string }) {
   );
 }
 
+/** Fallback for a lazily loaded route chunk with no single display name. */
+export function RouteChunkLoading() {
+  const { t } = useTranslation();
+  return (
+    <div className="flex h-full min-h-0 w-full items-center justify-center bg-background">
+      <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
+        {t("common:loading")}
+      </p>
+    </div>
+  );
+}
+
 export function AuthRouteRedirect() {
   const router = useRouter();
   useEffect(() => {

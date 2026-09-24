@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { IconHistory, IconLayoutGrid } from "@tabler/icons-react";
+import { IconChartBar, IconHistory, IconLayoutGrid } from "@tabler/icons-react";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 import { pluginPanelId } from "@/lib/state/layout-manager/plugin-panels";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
@@ -16,6 +16,7 @@ type PluginPanelPickerProps = {
   onOpenChange: (open: boolean) => void;
   onSelect: (panel: MobileSessionPanel) => void;
   showPromptHistory?: boolean;
+  showUsage?: boolean;
   taskCanvases?: Canvas[];
   onOpenCanvas?: (canvasId: string) => void;
   taskId?: string | null;
@@ -23,12 +24,16 @@ type PluginPanelPickerProps = {
   sessionKind?: "managed" | "passthrough" | null;
 };
 
+const PICKER_OPTION_CLASS =
+  "flex min-h-11 w-full min-w-0 cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
 /** One grouped, scrollable phone picker for all mobile-enabled plugin panels. */
 export function PluginPanelPicker({
   open,
   onOpenChange,
   onSelect,
   showPromptHistory = false,
+  showUsage = false,
   taskCanvases = [],
   onOpenCanvas,
   taskId = null,
@@ -61,7 +66,7 @@ export function PluginPanelPicker({
             key={canvas.id}
             type="button"
             data-testid={`mobile-canvas-option-${canvas.id}`}
-            className="flex min-h-11 w-full min-w-0 cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className={PICKER_OPTION_CLASS}
             onClick={() => {
               onOpenCanvas?.(canvas.id);
               onOpenChange(false);
@@ -75,7 +80,7 @@ export function PluginPanelPicker({
           <button
             type="button"
             data-testid="mobile-prompt-history-option"
-            className="flex min-h-11 w-full min-w-0 cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className={PICKER_OPTION_CLASS}
             onClick={() => {
               onSelect("prompt-history");
               onOpenChange(false);
@@ -83,6 +88,20 @@ export function PluginPanelPicker({
           >
             <IconHistory className="h-5 w-5 shrink-0 text-muted-foreground" />
             <span className="min-w-0 truncate">{t("task:promptHistory")}</span>
+          </button>
+        )}
+        {showUsage && (
+          <button
+            type="button"
+            data-testid="mobile-usage-option"
+            className={PICKER_OPTION_CLASS}
+            onClick={() => {
+              onSelect("usage");
+              onOpenChange(false);
+            }}
+          >
+            <IconChartBar className="h-5 w-5 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 truncate">{t("task:panelUsage")}</span>
           </button>
         )}
         {registrations.map((registration) => {
@@ -94,7 +113,7 @@ export function PluginPanelPicker({
               type="button"
               data-testid={`mobile-plugin-panel-option-${registration.pluginId}-${registration.id}`}
               data-panel-id={panelId}
-              className="flex min-h-11 w-full min-w-0 cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className={PICKER_OPTION_CLASS}
               onClick={() => {
                 onSelect(panelId as MobileSessionPanel);
                 onOpenChange(false);

@@ -89,6 +89,7 @@ func (r *Registry) LoadDefaults() {
 		agents.NewGooseACP(),
 		agents.NewMuseACP(),
 		agents.NewAntigravityACP(),
+		agents.NewAgyACP(),
 		agents.NewMockAgent(),
 	}
 

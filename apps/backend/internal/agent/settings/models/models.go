@@ -220,6 +220,11 @@ type AgentProfile struct {
 	// Empty / "{}" means "no special permissions".
 	Permissions string `json:"permissions,omitempty" db:"permissions"`
 
+	// Tags are free-form canonical labels used to match a profile to a
+	// workflow step's allowed tags. Stored as a JSON-array TEXT column
+	// (default '[]'); the store handles the JSON conversion.
+	Tags []string `json:"tags" db:"-"`
+
 	// Utilization is populated for subscription-billed agents only. nil
 	// for api_key billing. Computed at read time — not stored in the DB.
 	Utilization *agentusage.ProviderUsage `json:"utilization,omitempty" db:"-"`

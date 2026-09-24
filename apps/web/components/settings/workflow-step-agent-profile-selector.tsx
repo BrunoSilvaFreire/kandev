@@ -50,6 +50,13 @@ function targetStepFor(step: WorkflowStep, steps: WorkflowStep[]): WorkflowStep 
   return steps.find((candidate) => candidate.id === target.step_id);
 }
 
+// helpKey names the profile-help copy for the current step configuration.
+function helpKey(hasConditionalSessionConfig: boolean, tagsConfigured: boolean): string {
+  if (hasConditionalSessionConfig) return "workflows:removeConditionalSessionConfigBeforeProfile";
+  if (tagsConfigured) return "workflows:sessionTargetUnavailableWithTags";
+  return "workflows:overrideAgentProfileHelp";
+}
+
 function targetLabel(
   step: WorkflowStep,
   steps: WorkflowStep[],
@@ -284,6 +291,7 @@ type SelectorChoicePopupProps = {
   selectedProfile: ReturnType<typeof useHealthyAgentProfiles>[number] | undefined;
   readOnly: boolean;
   profileSelectionDisabled: boolean;
+  targetsDisabled: boolean;
   selectionLabel: string;
   summary: string;
   dirty: boolean;
@@ -305,6 +313,7 @@ function SelectorChoicePopup({
   selectedProfile,
   readOnly,
   profileSelectionDisabled,
+  targetsDisabled,
   selectionLabel,
   summary,
   dirty,
@@ -337,6 +346,7 @@ function SelectorChoicePopup({
       profiles={profiles}
       readOnly={readOnly}
       profileSelectionDisabled={profileSelectionDisabled}
+      targetsDisabled={targetsDisabled}
       view={view}
       setView={setView}
       onUpdate={onUpdate}
@@ -352,6 +362,7 @@ function SelectorChoicePopup({
       profiles={profiles}
       readOnly={readOnly}
       profileSelectionDisabled={profileSelectionDisabled}
+      targetsDisabled={targetsDisabled}
       view={view}
       setView={setView}
       onUpdate={onUpdate}
@@ -395,6 +406,7 @@ function SelectorContent({
     (profile) => profile.id === (targetStep?.agent_profile_id ?? step.agent_profile_id),
   );
   const hasConditionalSessionConfig = hasOnEnterAction(step, "configure_session");
+  const tagsConfigured = (step.allowed_tags?.length ?? 0) > 0;
   const dirty = isWorkflowStepValueDirty(step, savedStep, (item) =>
     JSON.stringify({
       agent_profile_id: item.agent_profile_id ?? "",
@@ -418,14 +430,17 @@ function SelectorContent({
   };
 
   const selectTarget = (target: WorkflowSessionTarget) => {
-    if (readOnly || hasConditionalSessionConfig) return;
+    if (readOnly || hasConditionalSessionConfig || tagsConfigured) return;
     onUpdate({ session_target: target, agent_profile_id: "" });
     handleOpenChange(false);
   };
 
-  const selectionLabel = step.session_target
+  const baseLabel = step.session_target
     ? targetLabel(step, steps, profiles, t)
     : (selectedProfile?.label ?? t("workflows:noProfileOverride"));
+  const selectionLabel = tagsConfigured
+    ? t("workflows:fallbackProfileLabel", { profile: baseLabel })
+    : baseLabel;
   const summary = lifecycleSummary(step, t);
 
   return (
@@ -437,6 +452,7 @@ function SelectorContent({
         selectedProfile={selectedProfile}
         readOnly={readOnly}
         profileSelectionDisabled={readOnly || hasConditionalSessionConfig}
+        targetsDisabled={readOnly || hasConditionalSessionConfig || tagsConfigured}
         selectionLabel={selectionLabel}
         summary={summary}
         dirty={dirty}
@@ -462,11 +478,7 @@ function SelectorContent({
       )}
       <HelpTip
         testId={step.id + "-agent-profile-help"}
-        text={
-          hasConditionalSessionConfig
-            ? t("workflows:removeConditionalSessionConfigBeforeProfile")
-            : t("workflows:overrideAgentProfileHelp")
-        }
+        text={t(helpKey(hasConditionalSessionConfig, tagsConfigured))}
       />
     </div>
   );

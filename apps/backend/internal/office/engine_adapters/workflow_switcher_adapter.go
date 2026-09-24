@@ -22,6 +22,14 @@ type TaskWorkflowMover interface {
 	AddTaskToWorkflow(ctx context.Context, taskID, workflowID, workflowStepID string, position int) error
 }
 
+// EntryRouteAttacher freezes a tagged destination step's concrete profile on
+// ctx before the transition write. Implemented by the task service's
+// AttachPendingEntryRouteForStep. Optional: when nil, a tagged destination is
+// written without a frozen route, so production wiring must supply it.
+type EntryRouteAttacher interface {
+	AttachPendingEntryRouteForStep(ctx context.Context, taskID, stepID string) (context.Context, error)
+}
+
 // WorkflowSwitcherAdapter implements engine.WorkflowSwitcher. It mutates
 // the task's workflow / step row and resolves a blank step id to the
 // workflow's first runnable step before the update.
@@ -31,12 +39,21 @@ type TaskWorkflowMover interface {
 type WorkflowSwitcherAdapter struct {
 	Resolver FirstStepResolver
 	Mover    TaskWorkflowMover
+	// Attacher freezes a tagged destination's profile before the move commits.
+	Attacher EntryRouteAttacher
 }
 
 // NewWorkflowSwitcherAdapter wires the first-step resolver and the task
 // workflow mover.
 func NewWorkflowSwitcherAdapter(resolver FirstStepResolver, mover TaskWorkflowMover) *WorkflowSwitcherAdapter {
 	return &WorkflowSwitcherAdapter{Resolver: resolver, Mover: mover}
+}
+
+// SetEntryRouteAttacher wires the tagged-entry preflight used to freeze a
+// tagged destination's profile. Optional for untagged workflows, required for
+// tagged ones.
+func (a *WorkflowSwitcherAdapter) SetEntryRouteAttacher(attacher EntryRouteAttacher) {
+	a.Attacher = attacher
 }
 
 // SwitchTaskWorkflow satisfies engine.WorkflowSwitcher.
@@ -65,6 +82,14 @@ func (a *WorkflowSwitcherAdapter) SwitchTaskWorkflow(
 			return "", fmt.Errorf("workflow %s has no runnable first step", newWorkflowID)
 		}
 		resolvedStepID = resolved
+	}
+	if a.Attacher != nil {
+		attached, err := a.Attacher.AttachPendingEntryRouteForStep(ctx, taskID, resolvedStepID)
+		if err != nil {
+			return "", fmt.Errorf("freeze tagged entry profile for workflow %s/%s: %w",
+				newWorkflowID, resolvedStepID, err)
+		}
+		ctx = attached
 	}
 	attachCtx := steptelemetry.WithAttribution(ctx, workflowAttachedAttribution(ctx))
 	if err := a.Mover.AddTaskToWorkflow(attachCtx, taskID, newWorkflowID, resolvedStepID, 0); err != nil {

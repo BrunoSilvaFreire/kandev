@@ -374,6 +374,31 @@ the selected snapshot already matches the current plan. These tools accept
 another task ID only when that task is within the caller's reachable workspace
 or task tree.
 
+### Task documents
+
+Task documents are keyed, revisioned Markdown records attached to a task. They
+are a separate store from the task plan, so a workflow can keep more than one
+durable artifact: an investigation report and an implementation plan can coexist
+and neither overwrites the other.
+
+Every task-mode session can call `list_task_documents_kandev`,
+`get_task_document_kandev`, and `write_task_document_kandev`. `task_id` is
+optional on all three and defaults to the calling task; a caller may read the
+current task, its ancestors, descendants in the same workspace, and siblings
+sharing a parent, but may only write to itself or an ancestor. Document writes
+never modify the task plan; rapid same-author writes coalesce into one revision.
+
+Task documents are listed in the task's Plan panel below the plan. A document of
+type `spike` renders with a `SPIKE` badge, so a cheap investigation step can
+leave a report the planning step and the human approval gate both read.
+
+Writing to an existing `document_key` replaces that document and keeps its
+history as revisions; use a new key (for example `spike-2`) for a separate
+document of the same type. To supersede a task plan without merging into the
+previous revision, pass `new_revision: true` to `update_task_plan_kandev`: the
+write always appends a revision, so the earlier plan stays readable through
+`get_task_plan_revision_kandev`.
+
 ### Native rich output
 
 Task and Office agents can call `show_rich_output_kandev` when a workspace file,
@@ -602,7 +627,11 @@ Optional capability groups, such as task titles, provider automation, user
 questions, and parent questions, are added or removed from that base profile.
 This keeps tool discovery small and makes a context change atomic.
 
-For a Kanban task, normal sessions receive `ask_user_question_kandev`.
+For a Kanban task, normal sessions receive `ask_user_question_kandev` and
+`request_approval_kandev`. The latter asks a human to approve, revise, or reject
+the task plan or a task document, and while it waits the user may edit the
+subject and add plan comments; the result carries the decision, feedback, the
+rendered plan comments, whether the subject was edited, and its current version.
 An autopilot child receives `ask_parent_question_kandev` instead. An autopilot
 root receives neither question tool. Kandev never registers both question
 tools for one task session. Office sessions use their smaller skill/CLI
@@ -731,6 +760,7 @@ The task server runs inside agentctl's local runtime boundary. Its MCP routes do
 Office runs use a smaller MCP surface than regular task-mode sessions. The built-in Office server registers exactly these tools:
 
 - `ask_user_question_kandev`;
+- `request_approval_kandev`;
 - `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`;
 - `edit_task_plan_kandev`, `list_task_plan_revisions_kandev`, `get_task_plan_revision_kandev`, and `restore_task_plan_revision_kandev`;
 - `list_related_tasks_kandev`;

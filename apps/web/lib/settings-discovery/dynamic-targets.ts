@@ -3,6 +3,7 @@ export type WorkspaceDiscoveryTarget = "name" | "default-executor" | "default-ag
 export type AgentProfileDiscoveryTarget =
   | "profile-settings"
   | "cli-flags"
+  | "profile-tags"
   | "environment-variables"
   | "command-preview";
 

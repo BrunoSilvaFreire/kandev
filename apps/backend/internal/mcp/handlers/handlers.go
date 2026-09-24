@@ -101,7 +101,7 @@ type clarificationInputPauserWithOptions interface {
 
 // MessageCreator creates messages for clarification requests.
 type MessageCreator interface {
-	CreateClarificationRequestMessages(ctx context.Context, taskID, sessionID, pendingID string, questions []clarification.Question, clarificationContext string) ([]string, error)
+	CreateClarificationRequestMessages(ctx context.Context, taskID, sessionID, pendingID string, questions []clarification.Question, clarificationContext string, approval *clarification.ApprovalMeta) ([]string, error)
 }
 
 // SessionRepository interface for updating session state.
@@ -289,6 +289,9 @@ type Handlers struct {
 	settingsRegistry       *settingscatalog.Registry
 	settingsOperations     SettingsOperations
 	logger                 *logger.Logger
+	// approvalVersionFiller records an approval subject's version at request
+	// time (optional, set via SetApprovalVersionFiller).
+	approvalVersionFiller ApprovalVersionFiller
 
 	// Config-mode dependencies (optional, set via SetConfigDeps)
 	workflowSvc         *workflowsvc.Service
@@ -397,6 +400,17 @@ func NewHandlers(
 // a clarification tool call ends without delivering an answer to the agent.
 func (h *Handlers) SetClarificationInputPauser(pauser ClarificationInputPauser) {
 	h.inputPauser = pauser
+}
+
+// ApprovalVersionFiller records an approval subject's version at request time
+// so a later resolution can detect that the user edited the subject.
+type ApprovalVersionFiller interface {
+	FillApprovalVersion(ctx context.Context, taskID string, meta *clarification.ApprovalMeta)
+}
+
+// SetApprovalVersionFiller wires the approval subject version recorder.
+func (h *Handlers) SetApprovalVersionFiller(filler ApprovalVersionFiller) {
+	h.approvalVersionFiller = filler
 }
 
 // SetSessionCeilingReleaser wires the orchestrator-owned session-ceiling
@@ -4054,10 +4068,11 @@ func (h *Handlers) publishQueueStatusEvent(
 // the event-based fallback in the orchestrator handles resuming with a new turn.
 func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		SessionID string                   `json:"session_id"`
-		TaskID    string                   `json:"task_id"`
-		Questions []clarification.Question `json:"questions"`
-		Context   string                   `json:"context"`
+		SessionID string                      `json:"session_id"`
+		TaskID    string                      `json:"task_id"`
+		Questions []clarification.Question    `json:"questions"`
+		Context   string                      `json:"context"`
+		Approval  *clarification.ApprovalMeta `json:"approval"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -4086,11 +4101,15 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 	}
 
 	// Create the clarification request
+	if req.Approval != nil && h.approvalVersionFiller != nil {
+		h.approvalVersionFiller.FillApprovalVersion(ctx, taskID, req.Approval)
+	}
 	clarificationReq := &clarification.Request{
 		SessionID: req.SessionID,
 		TaskID:    taskID,
 		Questions: req.Questions,
 		Context:   req.Context,
+		Approval:  req.Approval,
 	}
 	pendingID, isNew := h.clarificationSvc.CreateRequest(clarificationReq)
 
@@ -4101,7 +4120,7 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 	// When dedup fires (isNew=false) the messages already exist, so skip creation.
 	if isNew && h.messageCreator != nil {
 		if _, err := h.messageCreator.CreateClarificationRequestMessages(
-			ctx, taskID, req.SessionID, pendingID, req.Questions, req.Context,
+			ctx, taskID, req.SessionID, pendingID, req.Questions, req.Context, req.Approval,
 		); err != nil {
 			h.logger.Error("failed to create clarification request messages",
 				zap.String("pending_id", pendingID),
@@ -4462,6 +4481,7 @@ func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		Mode            string `json:"mode"`
 		ExpectedVersion string `json:"expected_version"`
 		AllowTruncation bool   `json:"allow_truncation"`
+		NewRevision     bool   `json:"new_revision"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -4486,6 +4506,7 @@ func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		AgentWrite:         true,
 		ExpectedVersion:    req.ExpectedVersion,
 		AllowTruncation:    req.AllowTruncation,
+		ForceNewRevision:   req.NewRevision,
 	})
 	if err != nil {
 		return planws.UpdateError(msg, err)

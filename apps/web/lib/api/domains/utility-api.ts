@@ -1,4 +1,4 @@
-import { fetchJson, type ApiRequestOptions } from "../client";
+import { fetchJson, fetchResponse, type ApiRequestOptions } from "../client";
 
 // Types
 export type UtilityAgent = {
@@ -191,14 +191,106 @@ export async function refreshInferenceAgent(
   });
 }
 
+export type ExecutePromptProgress = {
+  phase: "starting" | "analyzing" | "generating" | "tool" | "completed" | "failed";
+  tool?: string;
+};
+
+export type ExecuteUtilityPromptOptions = ApiRequestOptions & {
+  onProgress?: (progress: ExecutePromptProgress) => void;
+};
+
 export async function executeUtilityPrompt(
   req: ExecutePromptRequest,
-  options?: ApiRequestOptions,
+  options?: ExecuteUtilityPromptOptions,
 ): Promise<ExecutePromptResponse> {
-  return fetchJson<ExecutePromptResponse>("/api/v1/utility/execute", {
-    ...options,
-    init: { method: "POST", body: JSON.stringify(req), ...(options?.init ?? {}) },
+  if (!options?.onProgress) {
+    return fetchJson<ExecutePromptResponse>("/api/v1/utility/execute", {
+      ...options,
+      init: { method: "POST", body: JSON.stringify(req), ...(options?.init ?? {}) },
+    });
+  }
+  const { onProgress, ...requestOptions } = options;
+  const response = await fetchResponse("/api/v1/utility/execute", {
+    ...requestOptions,
+    init: {
+      method: "POST",
+      body: JSON.stringify(req),
+      headers: { Accept: "application/x-ndjson" },
+      ...(requestOptions.init ?? {}),
+    },
   });
+  if (!response.headers.get("Content-Type")?.includes("application/x-ndjson")) {
+    return (await response.json()) as ExecutePromptResponse;
+  }
+  return readExecutePromptStream(response, onProgress);
+}
+
+async function readExecutePromptStream(
+  response: Response,
+  onProgress: (progress: ExecutePromptProgress) => void,
+): Promise<ExecutePromptResponse> {
+  if (!response.body) {
+    return (await response.json()) as ExecutePromptResponse;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: ExecutePromptResponse | undefined;
+  for (;;) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+    const consumed = consumeStreamLines(buffer, onProgress);
+    buffer = consumed.rest;
+    if (consumed.result) result = consumed.result;
+    if (done) break;
+  }
+  if (buffer.trim()) {
+    const found = applyStreamFrame(parseStreamLine(buffer), onProgress);
+    if (found) result = found;
+  }
+  if (!result) throw new Error("utility prompt stream ended without a result");
+  return result;
+}
+
+// consumeStreamLines applies every complete line and returns the trailing
+// partial line plus the last result frame seen.
+function consumeStreamLines(
+  text: string,
+  onProgress: (progress: ExecutePromptProgress) => void,
+): { rest: string; result?: ExecutePromptResponse } {
+  const lines = text.split("\n");
+  const rest = lines.pop() ?? "";
+  let result: ExecutePromptResponse | undefined;
+  for (const line of lines) {
+    const found = applyStreamFrame(parseStreamLine(line), onProgress);
+    if (found) result = found;
+  }
+  return { rest, result };
+}
+
+function applyStreamFrame(
+  frame: { progress?: ExecutePromptProgress; result?: ExecutePromptResponse } | undefined,
+  onProgress: (progress: ExecutePromptProgress) => void,
+): ExecutePromptResponse | undefined {
+  if (!frame) return undefined;
+  if (frame.progress) onProgress(frame.progress);
+  return frame.result;
+}
+
+function parseStreamLine(
+  line: string,
+): { progress?: ExecutePromptProgress; result?: ExecutePromptResponse } | undefined {
+  const trimmed = line.trim();
+  if (!trimmed) return undefined;
+  try {
+    return JSON.parse(trimmed) as {
+      progress?: ExecutePromptProgress;
+      result?: ExecutePromptResponse;
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 export async function listUtilityCalls(

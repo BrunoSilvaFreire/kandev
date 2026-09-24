@@ -30,6 +30,7 @@ type moveTaskRequest struct {
 	TaskID          string                     `json:"task_id"`
 	WorkflowID      string                     `json:"workflow_id"`
 	WorkflowStepID  string                     `json:"workflow_step_id"`
+	Transition      string                     `json:"transition"`
 	Position        int                        `json:"position"`
 	Prompt          string                     `json:"prompt"`
 	SenderSessionID string                     `json:"sender_session_id"`
@@ -52,6 +53,22 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
+	if req.Transition != "" && req.WorkflowStepID != "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"supply either transition or workflow_step_id, not both", nil)
+	}
+	if req.Transition != "" && req.WorkflowID != "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"workflow_id is resolved from the task's current step when a transition is given", nil)
+	}
+	var transition *wfmodels.StepTransition
+	if req.Transition != "" {
+		var err error
+		transition, err = h.resolveTransitionMove(ctx, &req)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
+	}
 	if req.WorkflowID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
@@ -66,6 +83,9 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	entryOptions, err := workflowmove.NormalizeEntryOptions(req.EntryOptions, req.Prompt)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+	if transition != nil {
+		entryOptions = mergeTransitionEntryOptions(transition, entryOptions)
 	}
 	req.EntryOptions = entryOptions
 	req.Prompt = ""
@@ -207,6 +227,77 @@ func (h *Handlers) deferMoveTask(
 		EntryOptions: req.EntryOptions,
 		Disposition:  moveDispositionDeferred,
 	})
+}
+
+// resolveTransitionMove resolves a named transition on the task's current
+// step into the concrete workflow_id/workflow_step_id the unchanged move paths
+// consume, and returns the transition so its one-shot entry options can be
+// merged after normalization. It fails closed on an unknown name, a missing
+// target, a cross-workflow target, or a direction mismatch.
+func (h *Handlers) resolveTransitionMove(ctx context.Context, req *moveTaskRequest) (*wfmodels.StepTransition, error) {
+	if h.taskSvc == nil || h.workflowCtrl == nil {
+		return nil, errors.New("named transitions are unavailable in this mode")
+	}
+	task, err := h.taskSvc.GetTask(ctx, req.TaskID)
+	if err != nil || task == nil {
+		return nil, errors.New("failed to load task for transition")
+	}
+	sourceResp, err := h.workflowCtrl.GetStep(ctx, task.WorkflowStepID)
+	if err != nil || sourceResp == nil || sourceResp.Step == nil {
+		return nil, errors.New("failed to load the task's current step")
+	}
+	source := sourceResp.Step
+	transition, err := wfmodels.FindTransition(source.Events, req.Transition)
+	if err != nil {
+		return nil, err
+	}
+	targetResp, err := h.workflowCtrl.GetStep(ctx, transition.ToStepID)
+	if err != nil || targetResp == nil || targetResp.Step == nil {
+		return nil, errors.New("transition target step does not exist")
+	}
+	target := targetResp.Step
+	if target.WorkflowID != source.WorkflowID {
+		return nil, errors.New("transition target must be a step in the same workflow")
+	}
+	if err := wfmodels.ValidateTransitionDirection(transition, source.Position, target.Position); err != nil {
+		return nil, err
+	}
+	req.WorkflowID = source.WorkflowID
+	req.WorkflowStepID = target.ID
+	return transition, nil
+}
+
+// mergeTransitionEntryOptions folds a transition's configured one-shot options
+// into the caller's normalized options. Transition instructions are prepended
+// so the agent reads the step's intent before the caller's context; the
+// boolean flags are OR-ed.
+//
+// There is no instructions-length cap in the move layer (neither
+// NormalizeEntryOptions nor ValidateEntryOptions applies one), so the merge has
+// no cap to re-check: the result is bounded only by the transition's
+// step-authored config plus the caller's own text, each already accepted by
+// the transports above this function.
+func mergeTransitionEntryOptions(transition *wfmodels.StepTransition, caller *workflowmove.EntryOptions) *workflowmove.EntryOptions {
+	if transition == nil {
+		return caller
+	}
+	merged := &workflowmove.EntryOptions{}
+	if caller != nil {
+		*merged = *caller
+	}
+	if strings.TrimSpace(transition.Instructions) != "" {
+		if strings.TrimSpace(merged.Instructions) == "" {
+			merged.Instructions = strings.TrimSpace(transition.Instructions)
+		} else {
+			merged.Instructions = strings.TrimSpace(transition.Instructions) + "\n\n" + strings.TrimSpace(merged.Instructions)
+		}
+	}
+	merged.SkipStepPrompt = merged.SkipStepPrompt || transition.SkipStepPrompt
+	merged.ResetContext = merged.ResetContext || transition.ResetContext
+	if *merged == (workflowmove.EntryOptions{}) {
+		return nil
+	}
+	return merged
 }
 
 // moveChange classifies a move as a workflow step change or position-only based

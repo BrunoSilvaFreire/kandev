@@ -5,6 +5,7 @@ import { WorkflowStepAgentProfileSelector } from "./workflow-step-agent-profile-
 
 const breakpoint = { isMobile: false };
 const ARIA_PRESSED = "aria-pressed";
+const DATA_DISABLED = "data-disabled";
 const ARIA_TRUE = "true";
 const START_NEW_TEST_ID = "step-1-profile-session-start-new";
 const LIFECYCLE_TEST_ID = "step-1-profile-session-lifecycle-select";
@@ -152,7 +153,7 @@ describe("WorkflowStepAgentProfileSelector", () => {
     fireEvent.click(trigger);
     expect(screen.getByTestId("step-1-agent-profile-help")).toBeTruthy();
     expect(
-      screen.getByTestId("step-1-profile-option-profile-b").getAttribute("data-disabled"),
+      screen.getByTestId("step-1-profile-option-profile-b").getAttribute(DATA_DISABLED),
     ).toBe("true");
 
     fireEvent.click(screen.getByTestId(LIFECYCLE_TEST_ID));
@@ -179,7 +180,7 @@ describe("read-only workflow selector", () => {
     const { onUpdate, trigger } = renderSelector(undefined, true);
     fireEvent.click(trigger);
     expect(
-      screen.getByTestId("step-1-profile-option-profile-b").getAttribute("data-disabled"),
+      screen.getByTestId("step-1-profile-option-profile-b").getAttribute(DATA_DISABLED),
     ).toBe("true");
     fireEvent.click(screen.getByTestId(LIFECYCLE_TEST_ID));
     expect((screen.getByTestId(START_NEW_TEST_ID) as HTMLButtonElement).disabled).toBe(true);
@@ -279,5 +280,48 @@ describe("workflow session targets", () => {
 
     fireEvent.click(screen.getByTestId("workflow-session-target-clear"));
     expect(onUpdate).toHaveBeenCalledWith({ session_target: null, agent_profile_id: "" });
+  });
+
+  it("disables session targets when allowed tags are configured", () => {
+    const destination = {
+      ...step,
+      id: "step-2",
+      name: "Review",
+      position: 1,
+      agent_profile_id: "",
+      session_target: null,
+      allowed_tags: ["review"],
+    } as WorkflowStep;
+
+    const { onUpdate, trigger } = renderSelector(destination, false, [step, destination]);
+
+    fireEvent.click(trigger);
+    const target = screen.getByTestId(SOURCE_TARGET_TEST_ID);
+    expect(target.getAttribute(DATA_DISABLED)).toBe("true");
+    fireEvent.click(target);
+    expect(onUpdate).not.toHaveBeenCalledWith(
+      expect.objectContaining({ session_target: expect.anything() }),
+    );
+    // The fallback profile choice stays usable alongside tags.
+    expect(
+      screen.getByTestId("step-2-profile-option-profile-a").getAttribute(DATA_DISABLED),
+    ).not.toBe("true");
+  });
+
+  it("never offers a tagged earlier step as a session target", () => {
+    const taggedSource = { ...step, allowed_tags: ["review"] } as WorkflowStep;
+    const destination = {
+      ...step,
+      id: "step-2",
+      name: "Review",
+      position: 1,
+      agent_profile_id: "profile-b",
+      session_target: null,
+    } as WorkflowStep;
+
+    const { trigger } = renderSelector(destination, false, [taggedSource, destination]);
+
+    fireEvent.click(trigger);
+    expect(screen.queryByTestId(SOURCE_TARGET_TEST_ID)).toBeNull();
   });
 });

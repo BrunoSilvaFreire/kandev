@@ -425,6 +425,52 @@ func TestStrategiesImplementInterface(t *testing.T) {
 	var _ PassthroughMCPStrategy = CursorStrategy{}
 	var _ PassthroughMCPStrategy = PiStrategy{}
 	var _ PassthroughMCPStrategy = OpenCodeStrategy{}
+	var _ PassthroughMCPStrategy = AntigravityStrategy{}
+}
+
+func TestAntigravityStrategy_WritesMergedProjectConfig(t *testing.T) {
+	art, err := (AntigravityStrategy{}).BuildPassthroughMCP(sampleServers, PassthroughPaths{WorkspaceDir: "/work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(art.Files) != 1 {
+		t.Fatalf("Files = %+v, want one", art.Files)
+	}
+	file := art.Files[0]
+	if file.Path != filepath.Join("/work", ".agents", "mcp_config.json") || file.MergeKey != "mcpServers" {
+		t.Fatalf("file = %+v", file)
+	}
+	var got struct {
+		MCPServers map[string]struct {
+			Command   string            `json:"command"`
+			Args      []string          `json:"args"`
+			Env       map[string]string `json:"env"`
+			ServerURL string            `json:"serverUrl"`
+			Headers   map[string]string `json:"headers"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(file.Content, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.MCPServers["github"].Command != "npx" || got.MCPServers["github"].Env["GITHUB_TOKEN"] != "tok" {
+		t.Fatalf("stdio = %+v", got.MCPServers["github"])
+	}
+	if got.MCPServers["stream"].ServerURL != "https://x/mcp" || got.MCPServers["stream"].Headers["Authorization"] != "Bearer t" {
+		t.Fatalf("remote = %+v", got.MCPServers["stream"])
+	}
+}
+
+func TestAntigravityStrategy_SkipsEmptyInputs(t *testing.T) {
+	for _, paths := range []PassthroughPaths{{}, {WorkspaceDir: "/work"}} {
+		art, err := (AntigravityStrategy{}).BuildPassthroughMCP(nil, paths)
+		if err != nil || len(art.Files) != 0 {
+			t.Fatalf("BuildPassthroughMCP = %+v, %v", art, err)
+		}
+	}
+	art, err := (AntigravityStrategy{}).BuildPassthroughMCP(sampleServers, PassthroughPaths{})
+	if err != nil || len(art.Files) != 0 {
+		t.Fatalf("BuildPassthroughMCP without workspace = %+v, %v", art, err)
+	}
 }
 
 // Each strategy reports a non-empty, distinct human-readable injection mechanism.
@@ -438,6 +484,7 @@ func TestStrategiesDescribe(t *testing.T) {
 		"cursor":   {CursorStrategy{}, "a project-local .cursor/mcp.json file (merged into an existing one)"},
 		"pi":       {PiStrategy{}, "a project-local .pi/mcp.json file (merged into an existing one)"},
 		"opencode": {OpenCodeStrategy{}, "a temp MCP config file referenced by the OPENCODE_CONFIG env var"},
+		"antigravity": {AntigravityStrategy{}, "a project-local .agents/mcp_config.json file (merged into an existing one)"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

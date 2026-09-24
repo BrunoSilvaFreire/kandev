@@ -117,4 +117,47 @@ test.describe("Agent settings profile layout on mobile", () => {
       }
     }
   });
+
+  test("persists profile tags with 44px remove targets", async ({ testPage, apiClient }) => {
+    test.setTimeout(90_000);
+    const { agents } = await apiClient.listAgents();
+    const agent = agents[0];
+    const profile = await apiClient.createAgentProfile(agent.id, "Mobile tagged profile", {
+      model: "mock-fast",
+    });
+
+    try {
+      await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
+      const input = testPage.getByTestId("profile-tags-input");
+      await expect(input).toBeVisible({ timeout: 15_000 });
+      await input.fill("review");
+      await input.press("Enter");
+      await expect(input).toHaveValue("");
+
+      const list = testPage.getByTestId("profile-tags-list");
+      await expect(list).toContainText("review");
+      // The tag remove control must meet the 44px phone target.
+      const removeButton = list.getByRole("button").first();
+      await expect
+        .poll(
+          async () => {
+            const box = await removeButton.boundingBox();
+            return box ? Math.min(box.width, box.height) : null;
+          },
+          { timeout: 10_000 },
+        )
+        .toBeGreaterThanOrEqual(44);
+
+      const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
+      await saveButton.click();
+      await expect(testPage.getByText(/unsaved changes/i)).toBeHidden({ timeout: 15_000 });
+
+      await testPage.reload();
+      await expect(testPage.getByTestId("profile-tags-list")).toContainText("review", {
+        timeout: 15_000,
+      });
+    } finally {
+      await apiClient.deleteAgentProfile(profile.id).catch(() => undefined);
+    }
+  });
 });

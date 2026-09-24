@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/workflow/entryroute"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 )
@@ -260,7 +261,18 @@ func (s *Service) resolveWorkflowMovePreviewRecipient(
 		profileID, err := s.previewStepAgentProfile(ctx, destination, task, input.SourceSession == nil)
 		input.TargetProfileID = profileID
 		if err != nil {
-			input.Notices = append(input.Notices, workflowMovePreviewNotice("profile_unavailable", nil))
+			code := "profile_unavailable"
+			if len(destination.AllowedTags) > 0 {
+				// Tagged steps fail closed: no-match or exhausted-without-safe
+				// -fallback surfaces the selector error instead of a fallback.
+				code = "tag_profile_unavailable"
+			}
+			input.Notices = append(input.Notices, workflowMovePreviewNotice(code, nil))
+		}
+		if len(destination.AllowedTags) > 0 && input.TargetProfileID != "" {
+			// Advisory only: the committed move selects and freezes its own
+			// profile, which may differ if quota changed since this preview.
+			input.Notices = append(input.Notices, workflowMovePreviewNotice("tag_quota_advisory", nil))
 		}
 	}
 	if input.TargetProfileID == "" {
@@ -290,6 +302,17 @@ func (s *Service) previewStepAgentProfile(ctx context.Context, step *wfmodels.Wo
 		if replacement, ok := task.WorkflowAgentOverrides.ReplacementFor(task.WorkflowID, step.ID); ok {
 			return replacement, nil
 		}
+	}
+	// A tag-configured step previews its current best candidate. The selection
+	// is read-only: it never creates an entry or reserves a route. A no-match
+	// or exhausted/no-safe-fallback outcome surfaces the selector's typed error
+	// instead of falling through to a profile the actual move would reject.
+	if len(step.AllowedTags) > 0 {
+		if s.workflowEntryProfileSelector == nil {
+			return "", entryroute.ErrNoFrozenProfile
+		}
+		executor, executorProfile := s.selectionExecutor(ctx, task, "")
+		return s.workflowEntryProfileSelector.SelectEntryProfile(ctx, step.ID, step.AllowedTags, step.AgentProfileID, executor, executorProfile)
 	}
 	if profileID := strings.TrimSpace(step.AgentProfileID); profileID != "" {
 		return profileID, nil

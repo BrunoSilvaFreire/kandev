@@ -531,7 +531,10 @@ func (s *Service) relaunchRecoveredTask(ctx context.Context, req *TaskLaunchReco
 	if err := s.resetFailedTaskEnvironmentForRecovery(ctx, req.TaskID); err != nil {
 		return "", err
 	}
-	agentProfileID, _ := s.resolveTaskAgentProfile(ctx, source.task)
+	agentProfileID, _, err := s.resolveTaskAgentProfileError(ctx, source.task)
+	if err != nil {
+		return "", err
+	}
 	response, err := s.LaunchSession(ctx, &LaunchSessionRequest{
 		TaskID:         req.TaskID,
 		AgentProfileID: agentProfileID,

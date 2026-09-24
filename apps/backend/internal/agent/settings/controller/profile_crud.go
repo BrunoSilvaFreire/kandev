@@ -51,7 +51,10 @@ type CreateProfileRequest struct {
 	ProviderKind           string
 	ProviderBaseURL        string
 	ProviderAPIKeySecretID string
-	Dynamic                *dto.DynamicAgentProfileDTO
+	// Tags is the concrete profile's canonical free-form tag list. Dynamic
+	// profiles reject tags.
+	Tags    []string
+	Dynamic *dto.DynamicAgentProfileDTO
 }
 
 func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -74,7 +77,18 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		return nil, err
 	}
 	if agent.Name == agents.DynamicAgentID {
+		tags, err := models.CanonicalTags(req.Tags)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidProfileTags, err)
+		}
+		if len(tags) > 0 {
+			return nil, fmt.Errorf("%w: dynamic profiles do not support tags", ErrInvalidProfileTags)
+		}
 		return c.createDynamicProfile(ctx, agent, displayName, req)
+	}
+	tags, err := models.CanonicalTags(req.Tags)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidProfileTags, err)
 	}
 	cliFlags := cliFlagsFromDTO(req.CLIFlags)
 	if req.CLIFlags == nil {
@@ -111,6 +125,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		ProviderKind:           req.ProviderKind,
 		ProviderBaseURL:        req.ProviderBaseURL,
 		ProviderAPIKeySecretID: req.ProviderAPIKeySecretID,
+		Tags:                   tags,
 		UserModified:           true,
 	}
 	if err := c.normalizeProviderConfig(ctx, profile, agent.Name); err != nil {
@@ -365,8 +380,10 @@ type UpdateProfileRequest struct {
 	ProviderKind           *string
 	ProviderBaseURL        *string
 	ProviderAPIKeySecretID *string
-	Dynamic                *dto.DynamicAgentProfileDTO
-	Force                  bool
+	// Tags replaces the entire canonical list when non-nil.
+	Tags    *[]string
+	Dynamic *dto.DynamicAgentProfileDTO
+	Force   bool
 }
 
 func (req UpdateProfileRequest) touchesProvider() bool {
@@ -378,7 +395,7 @@ func enabledOnlyUpdate(req UpdateProfileRequest) bool {
 		req.FallbackModel == nil && req.AutoFallback == nil && req.RequireExactModel == nil && req.Mode == nil &&
 		req.ConfigOptions == nil && req.AllowIndexing == nil && req.AutoApprove == nil &&
 		req.CLIPassthrough == nil && req.CLIFlags == nil && req.EnvVars == nil &&
-		req.CommandPrefix == nil && !req.touchesProvider() && req.Dynamic == nil
+		req.CommandPrefix == nil && !req.touchesProvider() && req.Tags == nil && req.Dynamic == nil
 }
 
 func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -492,6 +509,16 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 			return nil, err
 		}
 		profile.CommandPrefix = strings.TrimSpace(*req.CommandPrefix)
+	}
+	if req.Tags != nil {
+		tags, err := models.CanonicalTags(*req.Tags)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidProfileTags, err)
+		}
+		if isDynamic && len(tags) > 0 {
+			return nil, fmt.Errorf("%w: dynamic profiles do not support tags", ErrInvalidProfileTags)
+		}
+		profile.Tags = tags
 	}
 	if err := c.applyProviderConfigUpdate(ctx, req, profile); err != nil {
 		return nil, err
@@ -732,6 +759,7 @@ func duplicateClone(source *models.AgentProfile) *models.AgentProfile {
 		ProviderKind:               source.ProviderKind,
 		ProviderBaseURL:            source.ProviderBaseURL,
 		ProviderAPIKeySecretID:     source.ProviderAPIKeySecretID,
+		Tags:                       append([]string{}, source.Tags...),
 		UserModified:               true,
 		Enabled:                    source.Enabled,
 		WorkspaceID:                source.WorkspaceID,
@@ -1292,6 +1320,7 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		ProviderKind:           profile.ProviderKind,
 		ProviderBaseURL:        profile.ProviderBaseURL,
 		ProviderAPIKeySecretID: profile.ProviderAPIKeySecretID,
+		Tags:                   append([]string{}, profile.Tags...),
 		UserModified:           profile.UserModified,
 		WorkspaceID:            profile.WorkspaceID,
 		CreatedAt:              profile.CreatedAt,

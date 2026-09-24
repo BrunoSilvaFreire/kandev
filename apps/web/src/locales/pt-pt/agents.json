@@ -317,5 +317,11 @@
   "providerApiKeyLabel": "Chave de API",
   "providerApiKeyHelp": "Segredo do Kandev que contém o token de portador enviado ao fornecedor. Deixe por definir para um router que não precisa de autenticação.",
   "providerModelSlash": "Remova a barra do nome do modelo: um fornecedor compatível com OpenAI espera um ID de modelo simples.",
-  "providerPassthroughUnsupported": "Desative o passthrough da CLI para usar um fornecedor compatível com OpenAI."
+  "providerPassthroughUnsupported": "Desative o passthrough da CLI para usar um fornecedor compatível com OpenAI.",
+  "profileTagsTitle": "Etiquetas",
+  "profileTagsDescription": "Etiquetas livres que permitem a um passo de fluxo escolher este perfil automaticamente.",
+  "profileTagsLabel": "Etiquetas do agente",
+  "profileTagsPlaceholder": "Escreva uma etiqueta e prima Enter",
+  "profileTagsRemove": "Remover etiqueta {{tag}}",
+  "profileTagsHelp": "Etiquetas em minúsculas, no máximo 32. Um passo de fluxo com etiquetas permitidas pode selecionar este perfil quando existir sobreposição."
 }

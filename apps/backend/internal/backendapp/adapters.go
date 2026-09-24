@@ -1560,7 +1560,7 @@ func (a *messageCreatorAdapter) GetPermissionResolutionAudit(ctx context.Context
 // in the bundle is deleted so we don't leave a half-rendered group dangling in
 // the chat. Best-effort: if cleanup itself fails the caller still receives the
 // original error and the orphan messages stay (logged at warn-level).
-func (a *messageCreatorAdapter) CreateClarificationRequestMessages(ctx context.Context, taskID, sessionID, pendingID string, questions []clarification.Question, clarificationContext string) ([]string, error) {
+func (a *messageCreatorAdapter) CreateClarificationRequestMessages(ctx context.Context, taskID, sessionID, pendingID string, questions []clarification.Question, clarificationContext string, approval *clarification.ApprovalMeta) ([]string, error) {
 	ids := make([]string, 0, len(questions))
 	total := len(questions)
 	for i, question := range questions {
@@ -1588,6 +1588,9 @@ func (a *messageCreatorAdapter) CreateClarificationRequestMessages(ctx context.C
 			"question_total": total,
 			"context":        clarificationContext,
 			"status":         "pending",
+		}
+		if approval != nil {
+			metadata["approval"] = approval
 		}
 
 		// Only the last message marks the session as waiting for input so the

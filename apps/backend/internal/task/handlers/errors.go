@@ -246,6 +246,12 @@ func isValidationError(err error) bool {
 	if errors.Is(err, service.ErrExternalIDInvalid) {
 		return true
 	}
+	// A tag-configured step with no eligible candidate and no safe fallback is
+	// a configuration fault the caller can fix; surface its message rather than
+	// a generic 500.
+	if errors.Is(err, service.ErrNoEligibleEntryProfile) {
+		return true
+	}
 	if errors.Is(err, workflowmove.ErrConflictingInstructions) ||
 		errors.Is(err, workflowmove.ErrEntryOptionsRequireStepChange) ||
 		errors.Is(err, workflowmove.ErrEntryOptionsUnsupported) ||

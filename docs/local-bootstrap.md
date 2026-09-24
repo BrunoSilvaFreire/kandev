@@ -84,7 +84,26 @@ make start      # production build (web embedded in the Go binary), prod profile
 Prod profile differences: Office off, no mock agent, no debug endpoints. Toggle experimental features under
 **Settings > System > Feature Toggles** (restart required).
 
-## 6. Smoke checklist
+## 6. Desktop app (Tauri) via Kartographer (`karto.kts`)
+
+A `karto.kts` pipeline automates building and installing the desktop application with safeguards against missing runtime binaries and slow RPM packaging:
+
+```bash
+karto tasks                   # inspect the pipeline graph
+karto run build/web           # build @kandev/web frontend
+karto run build/backend       # build Go backend
+karto run build/runtime       # package the runtime bundle (web + backend + agentctl) into dist/kandev
+karto run desktop/runtime     # stage the runtime bundle into the Tauri resources (dependsOn build/runtime)
+karto run desktop/verify      # pre-flight check of staged runtime resources (dependsOn desktop/runtime)
+karto run desktop/fork-setup  # build agy-acp bridge and link ~/.local/bin/agy-acp (fork/setup)
+karto run desktop/build       # build .deb bundle (dependsOn verify -> desktop/runtime -> build/runtime)
+karto run desktop/install     # install built .deb via apt-get with elevation and wire /usr/local/bin/agy-acp (alias: desktop/aptInstall; dependsOn build, fork-setup)
+karto run desktop/all         # full pipeline: desktop/runtime -> verify -> build -> fork-setup -> install
+```
+
+The shared `build/*` tasks are the single build path: `build/runtime` packages the runtime bundle into `dist/kandev`, and both pipelines consume it. `desktop/runtime` stages that bundle into the Tauri resources for packaging, while the systemd service runs it directly, so `karto run service/install` depends on `build/runtime` (via `service/setup-host`) and no longer requires any desktop task. `desktop/build` and `desktop/install` (or `desktop/aptInstall`) automatically trigger the chain through their dependencies, ensuring backend, web changes, and fork bridges (`agy-acp`) are always built, linked, and wired during packaging and installation. To iterate only on the desktop shell without rebuilding the runtime, pass `--skip` (e.g. `karto run desktop/build --skip`); the flag reaches the shared `build/runtime` task through the dependency closure.
+
+## 7. Smoke checklist
 
 1. `curl localhost:38429/health` is ok.
 2. UI loads; the first **New Task** opens an onboarding wizard (agents, executors, workflows, command panel).

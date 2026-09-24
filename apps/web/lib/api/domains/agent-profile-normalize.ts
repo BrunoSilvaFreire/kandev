@@ -46,6 +46,12 @@ function pickEnvVars(raw: RawProfile): ProfileEnvVar[] {
   return Array.isArray(value) ? (value as ProfileEnvVar[]) : [];
 }
 
+function pickTags(raw: RawProfile): string[] {
+  const value = raw.tags;
+  if (!Array.isArray(value)) return [];
+  return value.filter((tag): tag is string => typeof tag === "string");
+}
+
 function pickConfigOptions(raw: RawProfile): Record<string, string> | undefined {
   const value = raw.configOptions ?? raw.config_options;
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
@@ -240,6 +246,7 @@ export function normalizeAgentProfile(raw: unknown): AgentProfile {
     ),
     providerSupported: pickBool(profile, "providerSupported", "provider_supported"),
     envVars: pickEnvVars(profile),
+    tags: pickTags(profile),
     cliPassthrough: pickBool(profile, "cliPassthrough", "cli_passthrough"),
     // Absent on legacy payloads → enabled by default.
     enabled: pickBool(profile, "enabled", "enabled", true),
@@ -301,6 +308,7 @@ export function toAgentProfilePayload(
   setPayloadField(payload, "provider_base_url", profile.providerBaseUrl);
   setPayloadField(payload, "provider_api_key_secret_id", profile.providerApiKeySecretId);
   setPayloadField(payload, "env_vars", profile.envVars);
+  setPayloadField(payload, "tags", profile.tags);
   setPayloadField(payload, "cli_passthrough", profile.cliPassthrough);
   setPayloadField(payload, "enabled", profile.enabled);
   setPayloadField(payload, "user_modified", profile.userModified);

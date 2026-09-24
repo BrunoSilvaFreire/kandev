@@ -24,13 +24,15 @@ Open **Settings > Agents** (`/settings/agents`). Kandev scans the host on which 
 
 ![Settings > Agents showing detected agent CLIs, profiles, configured status, unavailable status, update indicators, and New profile controls.](../screenshots/settings-agents.png)
 
-The production registry currently shows Auggie, Claude, Codex, Copilot, Gemini, OpenCode, Amp, Qwen, iFlow (beta), Droid, Kilocode, Pi, Cursor, Kimi, Kiro, Qoder, Trae, `omp`, Devin, Grok, Hermes, Goose, Muse, and Antigravity. An entry is usable only when its executable is supported on the current platform and available to the Kandev process. Development and E2E profiles can add mock agents that are not product integrations.
+The production registry currently shows Auggie, Claude, Codex, Copilot, Gemini, OpenCode, Amp, Qwen, iFlow (beta), Droid, Kilocode, Pi, Cursor, Kimi, Kiro, Qoder, Trae, `omp`, Devin, Grok, Hermes, Goose, Muse, Antigravity, and Antigravity CLI. An entry is usable only when its executable is supported on the current platform and available to the Kandev process. Development and E2E profiles can add mock agents that are not product integrations.
 
 Hermes launches with `hermes acp`. Install the required `hermes` executable from its **Settings > Agents** card, which runs the official Hermes installer. Hermes currently supports task and workspace sessions. Office-assigned skill injection is not yet supported.
 
 Goose launches with `goose acp`. Its **Settings > Agents** card runs only the official `download_cli.sh` installer. Homebrew (`block-goose-cli`) and pip (`pip install goose-ai`) are manual alternatives. Configure your model provider with `goose configure`. Goose currently supports task and workspace sessions.
 
 Antigravity has no automated install: Google distributes `agy_acp_server.par` (`agy_acp_server.exe` on Windows) and its `localharness_external` or `localharness` sibling (`localharness_external.exe` or `localharness.exe` on Windows) as a signed archive through the [ACP registry](https://github.com/agentclientprotocol/registry/tree/main/antigravity-acp) rather than npm, so extract both files into one directory and add it to PATH yourself. Kandev fails discovery closed when the harness sibling is missing or not executable, so a partial extraction reports as not installed rather than as a broken session.
+
+Antigravity CLI is different from that official kernel. It detects an already-installed, logged-in `agy` on the backend host and runs structured sessions through the third-party `agy-acp@0.5.2` bridge (Node.js 22 or newer); CLI Passthrough runs native `agy` directly. Use its Login action to complete local sign-in and quit. The bridge discovers models, modes, and effort from ACP, preserves its native sessions through the isolated local home, and receives Kandev plus workspace MCP servers through merged workspace `.agents/mcp_config.json`. It does not copy OS-keyring credentials to containers or remote executors. Third-party access may violate Google's terms and can suspend the account; use it only if you accept that risk.
 
 ### Muse command surfaces
 
@@ -211,6 +213,7 @@ Select an agent, create a profile, then open **Settings > Agents > _Agent_ > _Pr
 | Provider                     | Native uses the agent default. OpenAI-compatible sends ACP requests to the configured HTTP(S) router and can use a Kandev global API-key secret.                 |
 | CLI passthrough              | Uses the CLI's native terminal interface instead of a structured ACP conversation.                                                                               |
 | Enabled                      | Keeps the profile available to existing sessions and settings while hiding it from new task, session, handoff, and Quick Chat selectors.                         |
+| Tags                         | Free-form lowercase labels used to match this profile to a workflow step's **Allowed tags**. A step with allowed tags selects one matching profile by remaining subscription quota. |
 | Auto-approve all permissions | Answers automatically: the first `allow_once`/`allow_always` option, otherwise the first option supplied by the agent; no options cancels. It is off by default. |
 | MCP servers                  | Adds profile-specific external MCP servers when the agent supports MCP.                                                                                          |
 
@@ -223,6 +226,27 @@ return environment values or MCP credentials; use references or the existing
 interactive credential flow when a secret is required.
 
 Model, mode, command, and configuration choices are probed from the locally installed CLI and cached. The managed **Update agent** action refreshes them automatically; after other CLI changes, refresh the profile manually. Probe status can report **auth required**, **not installed**, **not configured**, or **failed**; a saved model name does not prove that the current provider account can use it.
+
+### Use tags to choose a workflow agent
+
+A profile's **Tags** are free-form lowercase labels. A workflow step's
+**Allowed tags** make the step choose one eligible profile automatically: a
+profile qualifies when it shares at least one allowed tag (OR), and Kandev
+selects the candidate with the most remaining subscription quota. Known
+remaining quota ranks above unknown or unavailable telemetry, which ranks above
+known zero; ties break on the profile ID.
+
+The step's **Fallback profile** (its `agent_profile_id`) still applies when no
+tagged candidate matches, and a task's fixed-step agent override always wins
+over both. The **Candidate preview** in the step editor shows each matching
+profile's quota state as known, unknown, or unavailable.
+
+The choice is frozen when the task actually enters the step and is reused for
+that entry across launch, restart, and replay. Enabling or changing allowed tags
+affects the next entry: a task already on the step keeps the profile frozen when
+it arrived. Clearing a step's allowed tags restores fixed-profile behavior
+immediately and is the intended way to turn the feature off. Allowed tags cannot
+be combined with a session target or a `configure_session` action.
 
 ### Use an OpenAI-compatible provider
 

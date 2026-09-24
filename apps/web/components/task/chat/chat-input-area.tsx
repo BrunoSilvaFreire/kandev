@@ -396,6 +396,12 @@ type ChatInputAreaProps = {
   hideAgentControls?: boolean;
   /** Hide the plan mode toggle button (for ephemeral/quick chat sessions) */
   hidePlanMode?: boolean;
+  /** Offer the cache-expired resume-with-handoff flow above the composer.
+   *  Task chat opts in; quick chat, run transcripts and passthrough composers
+   *  leave it off. */
+  showResumeHandoff?: boolean;
+  /** Enable the usage/cost inspector on the token indicator (task chat only). */
+  showUsageInspector?: boolean;
   placeholderOverride?: string;
   surfaceClassName?: string;
   /** Always-on affordance: scrolls the transcript to the top of the last

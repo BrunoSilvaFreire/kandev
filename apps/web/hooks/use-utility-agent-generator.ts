@@ -1,8 +1,12 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { executeUtilityPrompt, type ExecutePromptRequest } from "@/lib/api/domains/utility-api";
+import {
+  executeUtilityPrompt,
+  type ExecutePromptRequest,
+  type ExecutePromptProgress,
+} from "@/lib/api/domains/utility-api";
 import { useToast } from "@/components/toast-provider";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import type { FileInfo } from "@/lib/state/slices";
@@ -47,12 +51,44 @@ type GenerateOptions = {
   userPrompt?: string;
 };
 
+// useGenerationPhases tracks one live progress phase per generator type and
+// clears it about two seconds after it becomes terminal.
+function useGenerationPhases() {
+  const [phases, setPhases] = useState<Partial<Record<GeneratorType, ExecutePromptProgress>>>({});
+  const phaseTimers = useRef<Partial<Record<GeneratorType, ReturnType<typeof setTimeout>>>>({});
+  useEffect(
+    () => () => {
+      Object.values(phaseTimers.current).forEach((timer) => {
+        if (timer) clearTimeout(timer);
+      });
+    },
+    [],
+  );
+  const setPhase = useCallback((type: GeneratorType, phase: ExecutePromptProgress) => {
+    setPhases((prev) => ({ ...prev, [type]: phase }));
+  }, []);
+  const clearPhaseLater = useCallback((type: GeneratorType) => {
+    const existing = phaseTimers.current[type];
+    if (existing) clearTimeout(existing);
+    phaseTimers.current[type] = setTimeout(() => {
+      setPhases((prev) => {
+        const next = { ...prev };
+        delete next[type];
+        return next;
+      });
+      delete phaseTimers.current[type];
+    }, 2000);
+  }, []);
+  return { phases, setPhase, clearPhaseLater };
+}
+
 export function useUtilityAgentGenerator({
   sessionId,
   taskTitle,
   taskDescription,
 }: UseUtilityAgentGeneratorOptions) {
   const [generating, setGenerating] = useState<Set<GeneratorType>>(new Set());
+  const { phases, setPhase, clearPhaseLater } = useGenerationPhases();
   const { t } = useTranslation();
   const { toast } = useToast();
   const gitStatus = useSessionGitStatus(sessionId);
@@ -113,8 +149,11 @@ export function useUtilityAgentGenerator({
       }
 
       setGenerating((prev) => new Set(prev).add(type));
+      setPhase(type, { phase: "starting" });
       try {
-        const resp = await executeUtilityPrompt(buildRequest(type, options));
+        const resp = await executeUtilityPrompt(buildRequest(type, options), {
+          onProgress: (progress) => setPhase(type, progress),
+        });
         if (!resp.success || !resp.response) {
           toast({
             title: t("task:generationFailed"),
@@ -136,17 +175,19 @@ export function useUtilityAgentGenerator({
         });
       } finally {
         clearType(type);
+        clearPhaseLater(type);
       }
     },
-    [sessionId, buildRequest, clearType, t, toast],
+    [sessionId, buildRequest, clearType, setPhase, clearPhaseLater, t, toast],
   );
 
-  return useGeneratorCallbacks(generate, generating);
+  return useGeneratorCallbacks(generate, generating, phases);
 }
 
 function useGeneratorCallbacks(
   generate: (type: GeneratorType, options?: GenerateOptions) => Promise<void>,
   generating: Set<GeneratorType>,
+  phases: Partial<Record<GeneratorType, ExecutePromptProgress>>,
 ) {
   const generateCommitMessage = useCallback(
     (onSuccess: (message: string) => void) =>
@@ -210,6 +251,7 @@ function useGeneratorCallbacks(
     isGeneratingPRTitle: generating.has("pr-title"),
     isGeneratingPRDescription: generating.has("pr-description"),
     isEnhancingPrompt: generating.has(ENHANCE_PROMPT),
+    enhancePromptPhase: phases[ENHANCE_PROMPT],
     generateCommitMessage,
     generateCommitDescription,
     generatePRTitle,

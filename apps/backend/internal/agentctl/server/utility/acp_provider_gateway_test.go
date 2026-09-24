@@ -89,7 +89,7 @@ func TestExecuteACPSession_GatewayAuthFailureAborts(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err := e.executeACPSession(ctx, stdin, stdout, t.TempDir(), "codex-acp", "hi", "", nil, "", nil, nil, &gw)
+	_, err := e.executeACPSession(ctx, stdin, stdout, t.TempDir(), "codex-acp", "hi", "", nil, "", nil, nil, &gw, nil)
 	if err == nil {
 		t.Fatal("executeACPSession succeeded despite gateway auth failure")
 	}

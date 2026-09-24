@@ -56,6 +56,8 @@ export type ChatInputToolbarProps = {
   hideAgentControls?: boolean;
   /** Hide the plan mode toggle button (for ephemeral/quick chat sessions) */
   hidePlanMode?: boolean;
+  /** Enable the usage/cost inspector on the token indicator (task chat only). */
+  showUsageInspector?: boolean;
   composerCapability?: PluginComposerCapability;
   composerSurface?: "task-chat" | "quick-chat";
 };
@@ -124,6 +126,7 @@ const toolbarDefaults = {
   isUtilityConfigured: false,
   hideAgentControls: false,
   hidePlanMode: false,
+  showUsageInspector: false,
 };
 
 export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInputToolbarProps) {
@@ -190,6 +193,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
         isSending={props.isSending}
         onCancel={props.onCancel}
         onSubmit={props.onSubmit}
+        showUsageInspector={props.showUsageInspector}
         submitShortcut={submitShortcut}
         composerCapability={props.composerCapability}
         composerSurface={props.composerSurface}

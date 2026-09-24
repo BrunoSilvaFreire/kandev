@@ -1,0 +1,94 @@
+version: 2
+type: kandev_workflow
+workflows:
+  - name: Repo Onboarding
+    description: A cheap agent discovers an unfamiliar repository, an architect verifies and writes a durable repo map, and the result is ready for future work.
+    steps:
+      - name: Backlog
+        position: 0
+        color: bg-neutral-400
+        events: {}
+        is_start_step: false
+        show_in_command_panel: false
+        allow_manual_move: true
+        complete_task_on_enter: false
+      - name: Discovery
+        position: 1
+        color: bg-cyan-500
+        prompt: |
+          ROLE: Discovery (cheap context agent). Read only. Do NOT modify repository files.
+
+          Follow the `kandev-repo-onboarding` skill.
+
+          {{task_prompt}}
+
+          Map the repository from evidence, not assumptions:
+          - languages, package managers, and build tooling
+          - exact build, test, lint, and run commands (verified, not guessed)
+          - top-level directories and what each is responsible for
+          - entrypoints, services, and how they connect
+          - configuration, secrets handling, and environment assumptions
+          - conventions and known traps
+
+          Cite files with file:line for every claim. Mark anything you could not verify as
+          unknown. Save your findings as this task's plan with create_task_plan_kandev,
+          then call step_complete_kandev.
+        events:
+          on_enter:
+            - type: auto_start_agent
+          on_turn_complete:
+            - type: move_to_next
+        is_start_step: true
+        show_in_command_panel: true
+        allow_manual_move: true
+        auto_advance_requires_signal: true
+        cancel_triggers_turn_complete: false
+        agent_profile:
+          agent_name: OpenCode
+          model: opencode-go/deepseek-v4.1-flash
+        profile_session_start_policy: new
+        profile_session_end_policy: complete
+        complete_task_on_enter: false
+      - name: Map
+        position: 2
+        color: bg-purple-500
+        prompt: |
+          ROLE: Architect. Read the discovery report with get_task_plan_kandev and verify
+          its claims against the repository. Correct anything wrong or missing.
+
+          Produce the durable repo map:
+          1. One-paragraph system summary
+          2. Repository layout table (directory -> responsibility)
+          3. Build / test / run / debug command reference
+          4. Component and data-flow overview (mermaid where useful)
+          5. Conventions, external dependencies, and known traps
+          6. Open questions
+
+          Write it to the durable Notion Technical Wiki (or the repo's docs/ if the task
+          says so), then update the task plan with the location and call
+          step_complete_kandev.
+        events:
+          on_enter:
+            - type: auto_start_agent
+          on_turn_complete:
+            - type: move_to_next
+        is_start_step: false
+        show_in_command_panel: true
+        allow_manual_move: true
+        auto_advance_requires_signal: true
+        cancel_triggers_turn_complete: false
+        agent_profile:
+          agent_name: Codex
+          model: gpt-5.6-sol
+          mode: agent-full-access
+        profile_session_start_policy: new
+        profile_session_end_policy: park
+        complete_task_on_enter: false
+      - name: Done
+        position: 3
+        color: bg-green-500
+        events: {}
+        is_start_step: false
+        show_in_command_panel: false
+        allow_manual_move: true
+        complete_task_on_enter: true

@@ -571,6 +571,7 @@ export function DialogPromptSection({
         placeholder={descriptionPlaceholder}
         onEnhancePrompt={enhance?.onEnhance}
         isEnhancingPrompt={enhance?.isLoading}
+        enhancePromptPhase={enhance?.enhancePromptPhase}
         isUtilityConfigured={enhance?.isConfigured}
         launchPreview={launchPreview}
         jiraImport={importBindings(importsEnabled, ws, onJiraImport)}

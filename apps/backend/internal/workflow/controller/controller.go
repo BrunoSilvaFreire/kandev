@@ -144,6 +144,8 @@ type CreateStepRequest struct {
 	SessionTarget              SessionTargetPatch `json:"session_target,omitempty"`
 	WIPLimit                   *int               `json:"wip_limit,omitempty"`
 	PullFromStepID             *string            `json:"pull_from_step_id,omitempty"`
+	// AllowedTags selects an eligible concrete profile by tag at step entry.
+	AllowedTags *[]string `json:"allowed_tags,omitempty"`
 }
 
 func rejectNullCompleteTaskOnEnter(data []byte) error {
@@ -235,6 +237,9 @@ func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*Ge
 	if req.PullFromStepID != nil {
 		step.PullFromStepID = strings.TrimSpace(*req.PullFromStepID)
 	}
+	if req.AllowedTags != nil {
+		step.AllowedTags = *req.AllowedTags
+	}
 	if err := c.validateStepReferences(ctx, step); err != nil {
 		return nil, err
 	}
@@ -267,6 +272,8 @@ type UpdateStepRequest struct {
 	SessionTarget              SessionTargetPatch `json:"session_target,omitempty"`
 	WIPLimit                   *int               `json:"wip_limit,omitempty"`
 	PullFromStepID             *string            `json:"pull_from_step_id,omitempty"`
+	// AllowedTags selects an eligible concrete profile by tag at step entry.
+	AllowedTags *[]string `json:"allowed_tags,omitempty"`
 }
 
 // UnmarshalJSON rejects null while preserving omission semantics for updates.
@@ -355,6 +362,9 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 	if req.PullFromStepID != nil {
 		step.PullFromStepID = strings.TrimSpace(*req.PullFromStepID)
 	}
+	if req.AllowedTags != nil {
+		step.AllowedTags = *req.AllowedTags
+	}
 	if err := c.validateStepReferences(ctx, step); err != nil {
 		return nil, err
 	}
@@ -363,6 +373,12 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 		return nil, err
 	}
 	return &GetStepResponse{Step: step, DemotedStartSteps: demotedStartSteps}, nil
+}
+
+// validateAllowedTags canonicalizes a step's allowed tags and rejects the
+// combination with a concrete session target or a configure_session action.
+func validateAllowedTags(step *models.WorkflowStep) error {
+	return models.ValidateAllowedTags(step)
 }
 
 // validateStepReferences checks every ID the step carries that names another
@@ -375,6 +391,12 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 // the reason, because there is nothing to hide from them and the editor has to
 // be able to explain it.
 func (c *Controller) validateStepReferences(ctx context.Context, step *models.WorkflowStep) error {
+	if err := models.ValidateTransitions(step.Events.Transitions); err != nil {
+		return err
+	}
+	if err := validateAllowedTags(step); err != nil {
+		return err
+	}
 	if err := c.validateSessionTarget(ctx, step); err != nil {
 		return err
 	}
@@ -496,7 +518,7 @@ func validateIncomingSessionTarget(
 	if sourcePosition >= currentPosition {
 		return fmt.Errorf("session_target source step %q must remain earlier than %q", source.ID, current.ID)
 	}
-	if source.AgentProfileID == "" || source.SessionTarget != nil {
+	if source.AgentProfileID == "" || source.SessionTarget != nil || len(source.AllowedTags) > 0 {
 		return fmt.Errorf("session_target source step %q must keep a direct agent profile", source.ID)
 	}
 	return nil

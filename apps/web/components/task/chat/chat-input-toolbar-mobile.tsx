@@ -52,6 +52,7 @@ type MobileToolbarProps = {
   isSending: boolean;
   onCancel: () => void | Promise<void>;
   onSubmit: () => void;
+  showUsageInspector?: boolean;
   submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
   composerCapability?: PluginComposerCapability;
   composerSurface?: "task-chat" | "quick-chat";
@@ -217,7 +218,10 @@ export function MobileChatInputToolbar(props: MobileToolbarProps) {
       />
       {!resetConfirmationOpen ? (
         <div className="flex shrink-0 items-center gap-1">
-          <TokenUsageDisplay sessionId={props.sessionId} />
+          <TokenUsageDisplay
+            sessionId={props.sessionId}
+            taskId={props.showUsageInspector ? props.taskId : undefined}
+          />
           {props.planModeEnabled && !props.isAgentBusy && props.onImplementPlan && (
             <ImplementPlanButton onClick={props.onImplementPlan} presentation={presentation} />
           )}

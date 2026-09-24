@@ -53,6 +53,7 @@ export type ChatInputEditorAreaProps = {
   minimalToolbar?: boolean;
   hideAgentControls?: boolean;
   hidePlanMode?: boolean;
+  showUsageInspector?: boolean;
   isAgentBusy: boolean;
   canCancelAgent?: boolean;
   onPlanModeChange: (enabled: boolean) => void;
@@ -280,6 +281,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
         minimalToolbar={minimalToolbar}
         hideAgentControls={hideAgentControls}
         hidePlanMode={hidePlanMode}
+        showUsageInspector={p.showUsageInspector}
       />
     </div>
   );

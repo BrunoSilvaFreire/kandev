@@ -705,6 +705,7 @@ type routeParams struct {
 	persistenceHealth             *requiredstores.Health
 	agentSettingsController       *agentsettingscontroller.Controller
 	agentSettingsRepo             settingsstore.Repository
+	profileUsageProvider          agentsettingshandlers.ProfileUsageProvider
 	agentList                     taskhandlers.AgentLister
 	agentRegistry                 *registry.Registry
 	userCtrl                      *usercontroller.Controller
@@ -787,6 +788,10 @@ func registerRoutes(p routeParams) {
 	// into TaskHandlers.SetHandoffService and registerMCPAndDebugRoutes
 	// reuses the same instance via SetHandoffService on mcpHandlers.
 	handoffDocSvc := taskservice.NewDocumentService(p.taskRepo, p.log)
+	// Approval bundles read the plan/document version and render pending plan
+	// comments pre-claim, then consume them best-effort after delivery.
+	approvalSupport := taskservice.NewApprovalSupport(planService, handoffDocSvc, p.log)
+	clarificationResolver.SetApprovalSupport(approvalSupport, approvalSupport)
 	handoffSvc := taskservice.NewHandoffService(p.taskRepo, p.taskRepo, handoffDocSvc,
 		p.officeRepo, p.officeRepo, p.log)
 	p.taskSvc.SetAutoArchiveCoordinator(handoffSvc)
@@ -909,6 +914,7 @@ func registerRoutes(p routeParams) {
 	}
 
 	p.gateway.SetupRoutes(p.router)
+	mountTaskDocumentRoutes(p.router, handoffDocSvc, p.taskSvc, p.homeDir, p.log)
 	registerTaskRoutes(p, planService, handoffSvc)
 	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, clarificationResolver, planService, handoffSvc)
 	if p.authSvc != nil {
@@ -1325,26 +1331,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	if p.workspaceRestorer != nil {
 		taskH.SetWorkspaceQuarantineRestorer(p.workspaceRestorer)
 	}
-	if p.services.GitHub != nil {
-		ghSvc := p.services.GitHub
-		taskH.SetOnTaskCreatedWithPR(func(ctx context.Context, taskID, sessionID, prURL, branch string) {
-			// Task-create-from-PR runs once per task and the PR maps to the
-			// primary repository (first task_repository row). Resolve to that
-			// repository_id so the resulting TaskPR/PRWatch are scoped per-repo.
-			repositoryID := resolvePrimaryTaskRepositoryID(ctx, p.taskRepo, taskID, p.log)
-			task, taskErr := p.taskRepo.GetTask(ctx, taskID)
-			if taskErr != nil || task == nil || task.WorkspaceID == "" {
-				p.log.Warn("cannot associate GitHub PR without task workspace", zap.String("task_id", taskID), zap.Error(taskErr))
-				return
-			}
-			if err := ghSvc.AssociatePRByURLForWorkspace(
-				ctx, task.WorkspaceID, github.DefaultUserID,
-				sessionID, taskID, repositoryID, prURL, branch,
-			); err != nil {
-				p.log.Warn("failed to associate task GitHub PR", zap.String("task_id", taskID), zap.Error(err))
-			}
-		})
-	}
+	wireGitHubTaskPRAssociation(p, taskH)
 	taskhandlers.RegisterRepositoryRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterRepositorySetRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterRepositoryBranchPolicyRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
@@ -1352,8 +1339,8 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	taskhandlers.RegisterExecutorProfileRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.agentList, p.log)
 	taskhandlers.RegisterEnvironmentRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	var referenceValidators []entityrefs.SubmissionValidator
-	if p.services != nil && p.services.Mentions != nil && p.services.Mentions.Submission != nil {
-		referenceValidators = append(referenceValidators, p.services.Mentions.Submission)
+	if v := mentionReferenceValidator(p); v != nil {
+		referenceValidators = append(referenceValidators, v)
 	}
 	taskhandlers.RegisterMessageRoutes(
 		p.router, p.gateway.Dispatcher, p.taskSvc,
@@ -1370,6 +1357,41 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	p.log.Debug("Registered Task Service handlers (HTTP + WebSocket)")
 }
 
+// wireGitHubTaskPRAssociation wires the task-create-from-PR association when a
+// GitHub service is configured.
+func wireGitHubTaskPRAssociation(p routeParams, taskH *taskhandlers.TaskHandlers) {
+	if p.services.GitHub == nil {
+		return
+	}
+	ghSvc := p.services.GitHub
+	taskH.SetOnTaskCreatedWithPR(func(ctx context.Context, taskID, sessionID, prURL, branch string) {
+		// Task-create-from-PR runs once per task and the PR maps to the
+		// primary repository (first task_repository row). Resolve to that
+		// repository_id so the resulting TaskPR/PRWatch are scoped per-repo.
+		repositoryID := resolvePrimaryTaskRepositoryID(ctx, p.taskRepo, taskID, p.log)
+		task, taskErr := p.taskRepo.GetTask(ctx, taskID)
+		if taskErr != nil || task == nil || task.WorkspaceID == "" {
+			p.log.Warn("cannot associate GitHub PR without task workspace", zap.String("task_id", taskID), zap.Error(taskErr))
+			return
+		}
+		if err := ghSvc.AssociatePRByURLForWorkspace(
+			ctx, task.WorkspaceID, github.DefaultUserID,
+			sessionID, taskID, repositoryID, prURL, branch,
+		); err != nil {
+			p.log.Warn("failed to associate task GitHub PR", zap.String("task_id", taskID), zap.Error(err))
+		}
+	})
+}
+
+// mentionReferenceValidator returns the submission validator when mentions are
+// configured, else nil.
+func mentionReferenceValidator(p routeParams) entityrefs.SubmissionValidator {
+	if p.services == nil || p.services.Mentions == nil || p.services.Mentions.Submission == nil {
+		return nil
+	}
+	return p.services.Mentions.Submission
+}
+
 // registerSecondaryRoutes registers workflow, agent settings, user, notification, editor,
 // prompt, clarification, MCP, and debug routes.
 func registerSecondaryRoutes(
@@ -1384,7 +1406,8 @@ func registerSecondaryRoutes(
 	workflowhandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, workflowCtrl, p.eventBus, p.log)
 	p.log.Info("Registered Workflow handlers (HTTP + WebSocket)")
 
-	agentsettingshandlers.RegisterRoutes(p.router, p.agentSettingsController, p.gateway.Hub, p.log, p.interimSettingsInterlockToken)
+	agentSettingsHandlers := agentsettingshandlers.RegisterRoutes(p.router, p.agentSettingsController, p.gateway.Hub, p.log, p.interimSettingsInterlockToken)
+	agentSettingsHandlers.SetProfileUsageProvider(p.profileUsageProvider)
 	p.log.Debug("Registered Agent Settings handlers (HTTP)")
 
 	// Login PTY: spawns agent login commands under a PTY on the kandev host
@@ -2070,6 +2093,7 @@ func registerMCPAndDebugRoutes(
 		))
 	}
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
+	mcpHandlers.SetApprovalVersionFiller(clarificationResolver)
 	mcpHandlers.SetSessionCeilingReleaser(p.orchestratorSvc)
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
 	mcpHandlers.SetPromptReader(p.services.Prompts)

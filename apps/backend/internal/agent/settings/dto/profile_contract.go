@@ -26,6 +26,7 @@ type ProfileCreateRequest struct {
 	ProviderKind           string                  `json:"provider_kind,omitempty"`
 	ProviderBaseURL        string                  `json:"provider_base_url,omitempty"`
 	ProviderAPIKeySecretID string                  `json:"provider_api_key_secret_id,omitempty"`
+	Tags                   []string                `json:"tags,omitempty"`
 	Dynamic                *DynamicAgentProfileDTO `json:"dynamic,omitempty"`
 }
 
@@ -50,11 +51,13 @@ type ProfileUpdateRequest struct {
 	CommandPrefix     *string             `json:"command_prefix,omitempty"`
 	// Provider* replace their value when non-nil. The settings editor always
 	// sends the full triple on save, so a switch back to Native persists.
-	ProviderKind           *string                 `json:"provider_kind,omitempty"`
-	ProviderBaseURL        *string                 `json:"provider_base_url,omitempty"`
-	ProviderAPIKeySecretID *string                 `json:"provider_api_key_secret_id,omitempty"`
-	Dynamic                *DynamicAgentProfileDTO `json:"dynamic,omitempty"`
-	Force                  bool                    `json:"force,omitempty"`
+	ProviderKind           *string `json:"provider_kind,omitempty"`
+	ProviderBaseURL        *string `json:"provider_base_url,omitempty"`
+	ProviderAPIKeySecretID *string `json:"provider_api_key_secret_id,omitempty"`
+	// Tags replaces the canonical list when non-nil.
+	Tags    *[]string               `json:"tags,omitempty"`
+	Dynamic *DynamicAgentProfileDTO `json:"dynamic,omitempty"`
+	Force   bool                    `json:"force,omitempty"`
 }
 
 func (r ProfileCreateRequest) Validate() error {
@@ -106,6 +109,7 @@ func ProfileContractFields() []ProfileContractField {
 		{Path: "provider_kind", JSONType: "string", Support: "read_write", Description: "Provider routing kind."},
 		{Path: "provider_base_url", JSONType: "string", Support: "read_write", Description: "OpenAI-compatible provider base URL."},
 		{Path: "provider_api_key_secret_id", JSONType: "string", Support: "read_write", Description: "Global secret reference for the provider API key.", Sensitive: true},
+		{Path: "tags", JSONType: "array", Support: "read_write", Description: "Canonical free-form tags for workflow matching.", Replacement: true},
 		{Path: "dynamic", JSONType: "object", Support: "read_write", Description: "Versioned dynamic routing document.", Replacement: true},
 	}
 }

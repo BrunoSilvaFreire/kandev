@@ -99,6 +99,9 @@ type inboxBundleView struct {
 	CreatedAt    string        `json:"created_at"`
 	Context      string        `json:"context"`
 	Messages     []*v1.Message `json:"messages"`
+	// Approval is set when the bundle is a request_approval_kandev request, so
+	// the inbox can surface an Approval badge.
+	Approval *ApprovalMeta `json:"approval,omitempty"`
 }
 
 // inboxListResponse is GET /api/v1/clarification-inbox's response envelope.
@@ -333,6 +336,7 @@ func (h *Handlers) buildInboxBundleViews(
 			Messages:     renderInboxMessages(ordered),
 			TaskTitle:    taskTitles[b.TaskID],
 			SessionState: sessionStates[b.SessionID],
+			Approval:     approvalMetaFromMessages(ordered),
 		})
 	}
 	return views, nil

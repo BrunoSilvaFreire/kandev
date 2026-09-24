@@ -30,6 +30,7 @@ import { TaskPlanPanel } from "./task-plan-panel";
 import { TerminalPanel } from "./terminal-panel";
 import { PromptHistoryContent } from "./prompt-history-panel-host";
 import { TodosContent } from "./todos-panel-content";
+import { UsagePanelHost } from "./usage-panel/usage-panel-host";
 import { VscodePanel } from "./vscode-panel";
 import { useTranslation } from "react-i18next";
 
@@ -291,6 +292,7 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   plan: () => <PlanContent />,
   todos: () => <TodosContent />,
   "prompt-history": () => <PromptHistoryContent />,
+  usage: () => <UsagePanelHost />,
   canvas: (_panelId, params) => <CanvasContent params={params} />,
   "pr-detail": (panelId, params) => (
     <ReviewDetailPanelComponent panelId={panelId} params={params} />

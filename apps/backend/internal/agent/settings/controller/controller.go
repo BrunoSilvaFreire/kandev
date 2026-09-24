@@ -48,6 +48,7 @@ var (
 	ErrInvalidSlug                          = errors.New("display name must produce a valid slug")
 	ErrCommandRequired                      = errors.New("command is required")
 	ErrInvalidProfileEnvVars                = errors.New("invalid profile env vars")
+	ErrInvalidProfileTags                   = errors.New("invalid profile tags")
 	ErrInvalidCommandPrefix                 = errors.New("invalid command prefix")
 	ErrInvalidProviderConfig                = errors.New("invalid OpenAI-compatible provider configuration")
 	ErrRequireExactModelNeedsModel          = errors.New("exact model requires a concrete model")

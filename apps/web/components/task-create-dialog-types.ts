@@ -15,6 +15,7 @@ import type { UseBranchesByURLResult } from "@/hooks/domains/github/use-branches
 import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by-url";
 import type { RepositoryInspection } from "@/lib/plugins/types";
 import type { UtilityGenerationResult } from "@/hooks/use-utility-agent-generator";
+import type { ExecutePromptProgress } from "@/lib/api/domains/utility-api";
 import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
 import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
 import type { TaskEditDialogDependenciesState } from "@/hooks/domains/task/use-task-edit-dialog-dependencies";
@@ -108,6 +109,7 @@ export type DialogPromptEnhance = {
   onEnhance: () => void;
   isLoading: boolean;
   isConfigured: boolean;
+  enhancePromptPhase?: ExecutePromptProgress | null;
   pendingResult: UtilityGenerationResult | null;
   onApplyPending: () => void;
   onCopyPending: () => Promise<void> | void;

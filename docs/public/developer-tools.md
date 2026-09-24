@@ -104,6 +104,7 @@ The built-in actions are:
 - `pr-description`
 - `enhance-prompt`
 - `summarize-session`
+- `extract-resume-handoff`
 
 Set a global **Default utility agent profile** by choosing an enabled, global, ACP inference profile. Each built-in action can inherit that profile or select another profile, and its prompt template is editable. The profile owns the agent, model, mode, launch flags, environment, and permission policy.
 

@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/profileconfig"
 	"github.com/kandev/kandev/internal/common/logger"
+	tagutil "github.com/kandev/kandev/internal/common/tags"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 )
@@ -91,6 +92,7 @@ func (r *sqliteRepository) initSchema() error {
 		reports_to TEXT NOT NULL DEFAULT '',
 		skill_ids TEXT NOT NULL DEFAULT '[]',
 		desired_skills TEXT NOT NULL DEFAULT '[]',
+		tags TEXT NOT NULL DEFAULT '[]',
 		custom_prompt TEXT NOT NULL DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'idle'
 			CHECK (status IN ('idle','working','paused','stopped','pending_approval')),
@@ -226,6 +228,7 @@ func (r *sqliteRepository) migrateOfficeEnrichmentColumns() error {
 		{"agent_profiles.reports_to", `ALTER TABLE agent_profiles ADD COLUMN reports_to TEXT NOT NULL DEFAULT ''`},
 		{"agent_profiles.skill_ids", `ALTER TABLE agent_profiles ADD COLUMN skill_ids TEXT NOT NULL DEFAULT '[]'`},
 		{"agent_profiles.desired_skills", `ALTER TABLE agent_profiles ADD COLUMN desired_skills TEXT NOT NULL DEFAULT '[]'`},
+		{"agent_profiles.tags", `ALTER TABLE agent_profiles ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'`},
 		{"agent_profiles.custom_prompt", `ALTER TABLE agent_profiles ADD COLUMN custom_prompt TEXT NOT NULL DEFAULT ''`},
 		{"agent_profiles.status", `ALTER TABLE agent_profiles ADD COLUMN status TEXT NOT NULL DEFAULT 'idle'`},
 		{"agent_profiles.pause_reason", `ALTER TABLE agent_profiles ADD COLUMN pause_reason TEXT NOT NULL DEFAULT ''`},
@@ -1017,7 +1020,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 			auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough,
 			enabled, user_modified, plan, cli_flags, env_vars, created_at, updated_at, deleted_at,
 			workspace_id, role, icon, reports_to,
-			skill_ids, desired_skills, custom_prompt,
+			skill_ids, desired_skills, tags, custom_prompt,
 			status, pause_reason, last_run_finished_at,
 			max_concurrent_sessions, cooldown_sec, skip_idle_runs,
 			consecutive_failures, failure_threshold,
@@ -1029,7 +1032,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 			?, ?, ?, ?,
 			?, ?, '', ?, ?, ?, ?, ?,
 			?, ?, ?, ?,
-			?, ?, ?,
+			?, ?, ?, ?,
 			?, ?, ?,
 			?, ?, ?,
 			?, ?,
@@ -1044,7 +1047,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing), dialect.BoolToInt(profile.CLIPassthrough),
 		dialect.BoolToInt(profile.Enabled), dialect.BoolToInt(profile.UserModified), cliFlagsJSON, envVarsJSON, profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt,
 		enrich.workspaceID, enrich.role, enrich.icon, enrich.reportsTo,
-		enrich.skillIDs, enrich.desiredSkills, enrich.customPrompt,
+		enrich.skillIDs, enrich.desiredSkills, enrich.tags, enrich.customPrompt,
 		enrich.status, enrich.pauseReason, profile.LastRunFinishedAt,
 		enrich.maxConcurrentSessions, profile.CooldownSec, dialect.BoolToInt(profile.SkipIdleRuns),
 		profile.ConsecutiveFailures, enrich.failureThreshold,
@@ -1073,6 +1076,7 @@ type profileEnrichmentValues struct {
 	reportsTo             string
 	skillIDs              string
 	desiredSkills         string
+	tags                  string
 	customPrompt          string
 	status                string
 	pauseReason           string
@@ -1107,6 +1111,19 @@ func enrichmentValues(profile *models.AgentProfile) (profileEnrichmentValues, er
 	if permissions == "" {
 		permissions = "{}"
 	}
+	// Canonicalize at the persistence boundary so a direct repository write
+	// (duplicate, import, sync, tests) cannot persist a noncanonical or invalid
+	// tag list even when it bypasses the controller. The canonical list is
+	// written back onto the model so callers echo what is persisted.
+	canonicalTags, err := tagutil.Canonical(profile.Tags)
+	if err != nil {
+		return profileEnrichmentValues{}, fmt.Errorf("canonicalize agent profile tags: %w", err)
+	}
+	profile.Tags = canonicalTags
+	tagsJSON, err := profileTagsToJSON(canonicalTags)
+	if err != nil {
+		return profileEnrichmentValues{}, err
+	}
 	return profileEnrichmentValues{
 		workspaceID:           profile.WorkspaceID,
 		role:                  string(profile.Role),
@@ -1114,6 +1131,7 @@ func enrichmentValues(profile *models.AgentProfile) (profileEnrichmentValues, er
 		reportsTo:             profile.ReportsTo,
 		skillIDs:              normalizeJSONArray(profile.SkillIDs),
 		desiredSkills:         normalizeJSONArray(profile.DesiredSkills),
+		tags:                  tagsJSON,
 		customPrompt:          profile.CustomPrompt,
 		status:                status,
 		pauseReason:           profile.PauseReason,
@@ -1259,6 +1277,19 @@ func envVarsToJSON(envVars []models.ProfileEnvVar) (string, error) {
 	return string(data), nil
 }
 
+// profileTagsToJSON marshals the canonical tag list for the tags TEXT column.
+// A nil slice persists as "[]" so the NOT NULL constraint is satisfied.
+func profileTagsToJSON(tags []string) (string, error) {
+	if tags == nil {
+		tags = []string{}
+	}
+	data, err := json.Marshal(tags)
+	if err != nil {
+		return "", fmt.Errorf("marshal tags: %w", err)
+	}
+	return string(data), nil
+}
+
 func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *models.AgentProfile) error {
 	return r.updateAgentProfile(ctx, r.db, profile)
 }
@@ -1283,7 +1314,7 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profil
 			auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?,
 			cli_passthrough = ?, enabled = ?, user_modified = ?, cli_flags = ?, env_vars = ?, updated_at = ?,
 			workspace_id = ?, role = ?, icon = ?, reports_to = ?,
-			skill_ids = ?, desired_skills = ?, custom_prompt = ?,
+			skill_ids = ?, desired_skills = ?, tags = ?, custom_prompt = ?,
 			status = CASE
 				WHEN (status = 'working' AND working_run_id <> '') OR ? = 'working' THEN status
 				ELSE ?
@@ -1310,7 +1341,7 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profil
 		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing),
 		dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(profile.Enabled), dialect.BoolToInt(profile.UserModified), cliFlagsJSON, envVarsJSON, profile.UpdatedAt,
 		enrich.workspaceID, enrich.role, enrich.icon, enrich.reportsTo,
-		enrich.skillIDs, enrich.desiredSkills, enrich.customPrompt,
+		enrich.skillIDs, enrich.desiredSkills, enrich.tags, enrich.customPrompt,
 		enrich.status, enrich.status, enrich.status, enrich.pauseReason, profile.LastRunFinishedAt,
 		enrich.maxConcurrentSessions, profile.CooldownSec, dialect.BoolToInt(profile.SkipIdleRuns),
 		profile.ConsecutiveFailures, enrich.failureThreshold,
@@ -1382,7 +1413,7 @@ const agentProfileSelectColumns = `
 		created_at, updated_at, deleted_at,
 		COALESCE(workspace_id, ''), COALESCE(role, ''), COALESCE(icon, ''),
 		COALESCE(reports_to, ''), COALESCE(skill_ids, '[]'),
-		COALESCE(desired_skills, '[]'), COALESCE(custom_prompt, ''),
+		COALESCE(desired_skills, '[]'), COALESCE(tags, '[]'), COALESCE(custom_prompt, ''),
 		COALESCE(status, 'idle'), COALESCE(pause_reason, ''),
 		last_run_finished_at,
 		COALESCE(max_concurrent_sessions, 1), COALESCE(cooldown_sec, 0),
@@ -1570,6 +1601,7 @@ func scanAgentProfile(scanner interface {
 	var plan string // unused, kept for backwards compatibility
 	var cliFlagsRaw sql.NullString
 	var envVarsRaw sql.NullString
+	var tagsRaw sql.NullString
 	var role, status string
 	var skipIdleRuns int
 	var failureThreshold int
@@ -1601,6 +1633,7 @@ func scanAgentProfile(scanner interface {
 		&profile.ReportsTo,
 		&profile.SkillIDs,
 		&profile.DesiredSkills,
+		&tagsRaw,
 		&profile.CustomPrompt,
 		&status,
 		&profile.PauseReason,
@@ -1655,6 +1688,14 @@ func scanAgentProfile(scanner interface {
 		if err := json.Unmarshal([]byte(envVarsRaw.String), &profile.EnvVars); err != nil {
 			return nil, fmt.Errorf("failed to parse env_vars for profile %s: %w", profile.ID, err)
 		}
+	}
+	if tagsRaw.Valid && tagsRaw.String != "" {
+		if err := json.Unmarshal([]byte(tagsRaw.String), &profile.Tags); err != nil {
+			return nil, fmt.Errorf("failed to parse tags for profile %s: %w", profile.ID, err)
+		}
+	}
+	if profile.Tags == nil {
+		profile.Tags = []string{}
 	}
 	// When cli_flags is NULL the caller (GetAgentProfile / ListAgentProfiles)
 	// runs applyLegacyBackfill to seed the list scoped to the owning agent.

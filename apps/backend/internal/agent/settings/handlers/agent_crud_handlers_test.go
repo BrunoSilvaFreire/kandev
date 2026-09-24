@@ -80,6 +80,7 @@ func wantProfileDTO(id, agentID, name, billingType string) dto.AgentProfileDTO {
 		Model:            "model-a",
 		CLIFlags:         []dto.CLIFlagDTO{},
 		Enabled:          true,
+		Tags:             []string{},
 		BillingType:      billingType,
 		CreatedAt:        fixedSettingsTime,
 		UpdatedAt:        fixedSettingsTime,

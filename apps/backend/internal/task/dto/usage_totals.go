@@ -14,6 +14,9 @@ type TaskUsageTotalsScope string
 const (
 	TaskUsageTotalsScopeTask    TaskUsageTotalsScope = "task"
 	TaskUsageTotalsScopeSession TaskUsageTotalsScope = "session"
+	// TaskUsageTotalsScopeGroup is the scope of one finest-grain breakdown
+	// group (session, agent profile, agent type, model, provider).
+	TaskUsageTotalsScopeGroup TaskUsageTotalsScope = "group"
 )
 
 // TaskUsageTotalsDTO is the exact JSON shape both usage-totals HTTP routes
@@ -35,6 +38,53 @@ type TaskUsageTotalsDTO struct {
 	OutputTokensComplete bool                 `json:"output_tokens_complete"`
 	FirstEventAt         *time.Time           `json:"first_event_at"`
 	LastEventAt          *time.Time           `json:"last_event_at"`
+}
+
+// TaskUsageBreakdownDTO is the JSON shape of GET /tasks/:id/usage/breakdown:
+// the task total plus the finest-grain groups the client rolls up into the
+// per-agent, per-model and per-session views. Groups is always a JSON array
+// (never null) so an empty ledger serializes as `[]`.
+type TaskUsageBreakdownDTO struct {
+	TaskID string              `json:"task_id"`
+	Task   TaskUsageTotalsDTO  `json:"task"`
+	Groups []TaskUsageGroupDTO `json:"groups"`
+}
+
+// TaskUsageGroupDTO is one finest-grain group. SessionID serializes to JSON
+// null (never omitted) for rows whose session was deleted.
+type TaskUsageGroupDTO struct {
+	SessionID      *string            `json:"session_id"`
+	AgentProfileID string             `json:"agent_profile_id"`
+	AgentType      string             `json:"agent_type"`
+	Model          string             `json:"model"`
+	Provider       string             `json:"provider"`
+	Totals         TaskUsageTotalsDTO `json:"totals"`
+}
+
+// ToTaskUsageBreakdownDTO combines the task total and the grouped rows the
+// repository returned into the breakdown response, reusing
+// ToTaskUsageTotalsDTO for both scopes.
+func ToTaskUsageBreakdownDTO(
+	taskID string,
+	taskTotals *models.TaskUsageTotals,
+	groups []*models.TaskUsageTotalsGroup,
+) TaskUsageBreakdownDTO {
+	out := TaskUsageBreakdownDTO{
+		TaskID: taskID,
+		Task:   ToTaskUsageTotalsDTO(TaskUsageTotalsScopeTask, taskID, taskTotals),
+		Groups: make([]TaskUsageGroupDTO, 0, len(groups)),
+	}
+	for _, group := range groups {
+		out.Groups = append(out.Groups, TaskUsageGroupDTO{
+			SessionID:      group.SessionID,
+			AgentProfileID: group.AgentProfileID,
+			AgentType:      group.AgentType,
+			Model:          group.Model,
+			Provider:       group.Provider,
+			Totals:         ToTaskUsageTotalsDTO(TaskUsageTotalsScopeGroup, "", &group.Totals),
+		})
+	}
+	return out
 }
 
 // ToTaskUsageTotalsDTO combines a repository-layer aggregate with the scope

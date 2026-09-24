@@ -44,4 +44,45 @@ test.describe("Agent settings profile layout", () => {
         .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-testid"))),
     ).resolves.toEqual(["open-host-shell", "rescan-agents-button", "new-agent-button"]);
   });
+
+  test("persists canonical profile tags across reload", async ({ testPage, apiClient }) => {
+    test.setTimeout(90_000);
+    const { agents } = await apiClient.listAgents();
+    const agent = agents[0];
+    const profile = await apiClient.createAgentProfile(agent.id, "Tagged profile", {
+      model: "mock-fast",
+    });
+
+    try {
+      await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
+      const input = testPage.getByTestId("profile-tags-input");
+      await expect(input).toBeVisible({ timeout: 15_000 });
+
+      await input.fill("Review");
+      await input.press("Enter");
+      await input.fill("security");
+      await input.press("Enter");
+
+      const list = testPage.getByTestId("profile-tags-list");
+      await expect(list).toContainText("review");
+      await expect(list).toContainText("security");
+
+      const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
+      await saveButton.click();
+      await expect(testPage.getByText(/unsaved changes/i)).toBeHidden({ timeout: 15_000 });
+
+      await testPage.reload();
+      const reloadedList = testPage.getByTestId("profile-tags-list");
+      await expect(reloadedList).toContainText("review", { timeout: 15_000 });
+      await expect(reloadedList).toContainText("security");
+
+      const { agents: reloadedAgents } = await apiClient.listAgents();
+      const stored = reloadedAgents
+        .flatMap((item) => item.profiles ?? [])
+        .find((item) => item.id === profile.id);
+      expect(stored?.tags).toEqual(["review", "security"]);
+    } finally {
+      await apiClient.deleteAgentProfile(profile.id).catch(() => undefined);
+    }
+  });
 });

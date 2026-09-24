@@ -25,3 +25,18 @@ type TaskUsageTotals struct {
 	FirstEventAt         *time.Time
 	LastEventAt          *time.Time
 }
+
+// TaskUsageTotalsGroup is one finest-grain group of the task-cost-ledger
+// breakdown (docs/specs/task-cost-ledger/spec.md): the aggregate over every
+// task_usage_events row sharing the same (session, agent profile, agent type,
+// model, provider) tuple. SessionID is nil for rows whose session was deleted
+// (the column is ON DELETE SET NULL). The per-agent, per-model and per-session
+// views are client-side roll-ups over these groups.
+type TaskUsageTotalsGroup struct {
+	SessionID      *string
+	AgentProfileID string
+	AgentType      string
+	Model          string
+	Provider       string
+	Totals         TaskUsageTotals
+}

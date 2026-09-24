@@ -626,9 +626,42 @@ func (s *Service) MoveTaskWithOptions(
 		return nil, err
 	}
 
+	// Resolve the active session once: credential preflight and the entry's
+	// frozen profile both need it, and selection must run before preflight so
+	// the preflight resolves the selected profile rather than failing closed.
+	activeSession := (*models.TaskSession)(nil)
+	if stepChanged {
+		activeSession = s.resolvePrimaryOrActiveSession(ctx, id)
+	}
+	// manual_move only applies when no outer caller already declared a
+	// trigger — an mcp_move set by the MCP handler must survive this inner
+	// board-move default, since the agent (not a board click) is what caused
+	// the move.
+	moveCtx := ctx
+	if !steptelemetry.HasTrigger(moveCtx) {
+		actorKind, actorID := steptelemetry.HumanOrSystemActor(moveCtx)
+		moveCtx = steptelemetry.WithAttribution(moveCtx, steptelemetry.Attribution{
+			Trigger:   steptelemetry.TriggerManualMove,
+			ActorKind: actorKind,
+			ActorID:   actorID,
+		})
+	}
+	sessionID := ""
+	if activeSession != nil {
+		sessionID = activeSession.ID
+	}
+	// A tag-configured destination resolves one concrete profile now and
+	// carries it into the transition write, which persists it atomically with
+	// the new entry identity. A diverted or raced move discards it.
+	if stepChanged {
+		moveCtx, err = s.attachPendingEntryRoute(moveCtx, task, targetStep, activeSession)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if stepChanged && targetStep != nil && s.workflowMovePreflight != nil {
-		currentSession := s.resolvePrimaryOrActiveSession(ctx, id)
-		if err := s.workflowMovePreflight.PreflightWorkflowStepMove(ctx, id, currentSession, targetStep); err != nil {
+		if err := s.workflowMovePreflight.PreflightWorkflowStepMove(moveCtx, id, activeSession, targetStep); err != nil {
 			return nil, fmt.Errorf("failed to preflight workflow move: %w", err)
 		}
 	}
@@ -685,13 +718,9 @@ func (s *Service) MoveTaskWithOptions(
 	// the move whenever an active session exists. The admission repository removes
 	// the queued-exit marker for admitted tasks, so this separate marker carries
 	// the barrier across the task.moved event without changing WIP admission.
-	sessionID := ""
-	if stepChanged {
-		if activeSession := s.resolvePrimaryOrActiveSession(ctx, id); activeSession != nil {
-			sessionID = activeSession.ID
-			task.Metadata[models.MetaKeyManualMoveLifecyclePending] = map[string]interface{}{
-				"from_step_id": oldStepID,
-			}
+	if stepChanged && activeSession != nil {
+		task.Metadata[models.MetaKeyManualMoveLifecyclePending] = map[string]interface{}{
+			"from_step_id": oldStepID,
 		}
 	}
 
@@ -707,20 +736,6 @@ func (s *Service) MoveTaskWithOptions(
 		if terminal {
 			task.State = v1.TaskStateCompleted
 		}
-	}
-
-	// manual_move only applies when no outer caller already declared a
-	// trigger — an mcp_move set by the MCP handler must survive this inner
-	// board-move default, since the agent (not a board click) is what caused
-	// the move.
-	moveCtx := ctx
-	if !steptelemetry.HasTrigger(moveCtx) {
-		actorKind, actorID := steptelemetry.HumanOrSystemActor(moveCtx)
-		moveCtx = steptelemetry.WithAttribution(moveCtx, steptelemetry.Attribution{
-			Trigger:   steptelemetry.TriggerManualMove,
-			ActorKind: actorKind,
-			ActorID:   actorID,
-		})
 	}
 
 	_, err = s.updateMovedTask(moveCtx, task, oldStepID, targetStep, admittedState, opts)
@@ -1049,6 +1064,13 @@ func (s *Service) promoteSameStepQueuedTask(ctx context.Context, candidate *mode
 		skipped[candidate.ID] = struct{}{}
 		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 	}
+	ctx, err := s.attachPendingEntryRoute(ctx, candidate, targetStep, nil)
+	if err != nil {
+		s.logger.Warn("failed to freeze tagged step entry profile for queued promotion",
+			zap.String("task_id", candidate.ID), zap.Error(err))
+		skipped[candidate.ID] = struct{}{}
+		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
+	}
 	supported, claimed, err := promoteQueuedTaskAtomically(ctx, s.tasks, candidate, fromStepID, targetStep.ID, targetStep.WIPLimit)
 	if supported {
 		return s.finishAtomicQueuedPromotion(ctx, candidate, targetStep, position, skipped, claimed, err, oldState)
@@ -1116,6 +1138,13 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 	candidate.WorkflowStepID = targetStep.ID
 	if err := s.syncTaskStateForQueuePromotion(ctx, candidate, targetStep); err != nil {
 		s.logger.Warn("failed to prepare feeder queued promotion", zap.String("task_id", candidate.ID), zap.Error(err))
+		skipped[candidate.ID] = struct{}{}
+		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
+	}
+	ctx, err := s.attachPendingEntryRoute(ctx, candidate, targetStep, nil)
+	if err != nil {
+		s.logger.Warn("failed to freeze tagged step entry profile for feeder promotion",
+			zap.String("task_id", candidate.ID), zap.Error(err))
 		skipped[candidate.ID] = struct{}{}
 		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 	}

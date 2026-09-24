@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { usePathname, useRouter, useSearchParams } from "@/lib/routing/client-router";
 import ReactMarkdown from "react-markdown";
@@ -17,7 +17,7 @@ import {
 } from "@kandev/ui/pagination";
 import { IconExternalLink } from "@tabler/icons-react";
 import { remarkPlugins, markdownComponents } from "@/components/shared/markdown-components";
-import { getChangelog, type ChangelogEntry } from "@/lib/changelog";
+import { loadChangelog, type ChangelogEntry } from "@/lib/changelog";
 import { getReleaseUrl } from "@/lib/release-notes";
 
 const PAGE_SIZE = 10;
@@ -86,7 +86,16 @@ function buildPageNumbers(currentPage: number, totalPages: number): (number | "e
 
 export function ChangelogList() {
   const { t } = useTranslation();
-  const changelog = getChangelog();
+  const [changelog, setChangelog] = useState<ChangelogEntry[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void loadChangelog().then((entries) => {
+      if (!cancelled) setChangelog(entries);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();

@@ -8,6 +8,7 @@ import {
   IconMessageQuestion,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { Badge } from "@kandev/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -228,7 +229,18 @@ export function NeedsYouInboxRow({
             <IconMessageQuestion className="h-4 w-4 text-yellow-500" />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium">{primaryText}</span>
+            <span className="block truncate text-sm font-medium">
+              {bundle.approval ? (
+                <Badge
+                  variant="secondary"
+                  className="mr-1.5 align-middle text-[10px]"
+                  data-testid="needs-you-inbox-approval-badge"
+                >
+                  {t("needsYouInbox:approvalBadge")}
+                </Badge>
+              ) : null}
+              {primaryText}
+            </span>
             <span className="block truncate text-xs text-muted-foreground">{secondaryText}</span>
             {questionCount > 1 && (
               <span

@@ -2,13 +2,63 @@ package backendapp
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
 
 	agentregistry "github.com/kandev/kandev/internal/agent/registry"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	agentusage "github.com/kandev/kandev/internal/agent/usage"
 )
+
+// mockUsageTagPrefix marks an E2E-only profile tag carrying a deterministic
+// provider utilization percentage (for example "mock-quota-10" means 10%
+// utilization, 90% remaining). It is read only under the e2e mock profile so
+// production telemetry can never be faked.
+const mockUsageTagPrefix = "mock-quota-"
+
+func e2eMockUsageEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("KANDEV_E2E_MOCK"))) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+func mockUsageFromTags(profile *settingsmodels.AgentProfile) (*agentusage.ProviderUsage, bool) {
+	if profile == nil {
+		return nil, false
+	}
+	for _, tag := range profile.Tags {
+		if !strings.HasPrefix(tag, mockUsageTagPrefix) {
+			continue
+		}
+		pct, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimPrefix(tag, mockUsageTagPrefix)), 64)
+		if err != nil {
+			continue
+		}
+		if pct < 0 {
+			pct = 0
+		}
+		if pct > 100 {
+			pct = 100
+		}
+		return &agentusage.ProviderUsage{
+			Provider: "mock",
+			Windows: []agentusage.UtilizationWindow{{
+				Label:          "5-hour",
+				UtilizationPct: pct,
+				ResetAt:        time.Now().UTC().Add(time.Hour),
+			}},
+		}, true
+	}
+	return nil, false
+}
 
 // usageProviderAdapter implements officeagents.UsageProvider by:
 //  1. Looking up the agent profile by ID from the settings store.
@@ -25,7 +75,16 @@ type usageProviderAdapter struct {
 func (a *usageProviderAdapter) GetUsage(ctx context.Context, profileID string) (*agentusage.ProviderUsage, error) {
 	profile, err := a.settingsStore.GetAgentProfile(ctx, profileID)
 	if err != nil {
-		return nil, nil //nolint:nilerr // profile missing or settings unavailable — fail-open
+		// A profile lookup failure is unavailable, not unknown: the consumer
+		// can distinguish "no telemetry" from "could not resolve the profile"
+		// and keeps the three-state contract.
+		return nil, fmt.Errorf("load agent profile %s for usage: %w", profileID, err)
+	}
+	if e2eMockUsageEnabled() {
+		if usage, ok := mockUsageFromTags(profile); ok {
+			return usage, nil
+		}
+		return nil, nil
 	}
 	ag, ok := a.agentRegistry.Get(profile.AgentID)
 	if !ok {

@@ -91,6 +91,11 @@ type Resolver struct {
 	primaryAnsweredNotifier PrimaryAnsweredNotifier
 	logger                  *logger.Logger
 	now                     func() time.Time // seam for deterministic tests
+	// approvalReader/approvalConsumer support approval bundles. Nil is safe:
+	// a normal clarification bundle never touches them, and an approval
+	// bundle without them degrades to an empty current version.
+	approvalReader   ApprovalSubjectReader
+	approvalConsumer ApprovalCommentConsumer
 }
 
 // NewResolver creates a Resolver.
@@ -115,6 +120,14 @@ func NewResolver(
 		logger:                  log.WithFields(zap.String("component", "clarification-resolver")),
 		now:                     time.Now,
 	}
+}
+
+// SetApprovalSupport injects the approval subject reader and comment consumer.
+// Both are optional; when unset an approval bundle still resolves but reports
+// an empty current version and skips comment rendering/consumption.
+func (r *Resolver) SetApprovalSupport(reader ApprovalSubjectReader, consumer ApprovalCommentConsumer) {
+	r.approvalReader = reader
+	r.approvalConsumer = consumer
 }
 
 // AuthorizeBundleAccess resolves a bundle's identity (M5) and authorizes the
@@ -235,13 +248,48 @@ func (r *Resolver) ResolveBundle(ctx context.Context, pendingID string, outcome 
 		r.logResponsePhase(pendingID, clarificationResponsePhaseValidation, validationStarted, "invalid")
 		return nil, false, err // N8c, R2c: validation runs before the claim
 	}
+	approval, err := r.validateApprovalPhase(preClaimCtx, taskID, questions, msgs, outcome)
+	if err != nil {
+		if timeoutErr := classifyPreClaimError(ctx, preClaimCtx, clarificationResponsePhaseValidation, err); IsPreClaimTimeoutError(timeoutErr) {
+			r.logResponsePhase(pendingID, clarificationResponsePhaseValidation, validationStarted, responsePhaseOutcome(timeoutErr))
+			return nil, false, timeoutErr
+		}
+		r.logResponsePhase(pendingID, clarificationResponsePhaseValidation, validationStarted, "invalid")
+		return nil, false, err
+	}
 	if err := classifyPreClaimError(ctx, preClaimCtx, clarificationResponsePhaseValidation, nil); err != nil {
 		r.logResponsePhase(pendingID, clarificationResponsePhaseValidation, validationStarted, responsePhaseOutcome(err))
 		return nil, false, err
 	}
 	r.logResponsePhase(pendingID, clarificationResponsePhaseValidation, validationStarted, "success")
 
-	return r.claimAndDeliver(preClaimCtx, pendingID, sessionID, taskID, questions, outcome)
+	return r.claimAndDeliver(preClaimCtx, pendingID, sessionID, taskID, questions, outcome, approval)
+}
+
+// validateApprovalPhase runs the approval-specific pre-claim validation for an
+// approval bundle and returns the filled outcome. A normal bundle returns nil.
+func (r *Resolver) validateApprovalPhase(
+	ctx context.Context,
+	taskID string,
+	questions []Question,
+	msgs []*taskmodels.Message,
+	outcome Outcome,
+) (*ApprovalOutcome, error) {
+	meta := approvalMetaFromMessages(msgs)
+	if meta == nil {
+		return nil, nil
+	}
+	if err := validateApprovalBundle(questions, meta); err != nil {
+		return nil, err
+	}
+	filled, err := r.buildApprovalOutcome(ctx, taskID, meta, outcome)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateApprovalOutcome(meta, outcome, filled.SubjectEdited); err != nil {
+		return nil, err
+	}
+	return filled, nil
 }
 
 // claimAndDeliver is steps 4 and 5. R4: the durable claim commits before any
@@ -251,8 +299,10 @@ func (r *Resolver) claimAndDeliver(
 	pendingID, sessionID, taskID string,
 	questions []Question,
 	outcome Outcome,
+	approval *ApprovalOutcome,
 ) (*Resolution, bool, error) {
 	status, response := buildOutcomeResponse(pendingID, questions, outcome, r.now())
+	response.Approval = approval
 
 	claimCtx, cancel := clarificationClaimContext(ctx)
 	defer cancel()
@@ -261,7 +311,7 @@ func (r *Resolver) claimAndDeliver(
 		claimCtx,
 		pendingID,
 		status,
-		responsesFromAnswers(response.Answers),
+		responsesFromAnswers(response.Answers, approval),
 	)
 	if claimErr != nil {
 		responseErr := fmt.Errorf("failed to update clarification state: %w", claimErr)
@@ -297,6 +347,8 @@ func (r *Resolver) claimAndDeliver(
 	}
 	r.logResponsePhase(pendingID, clarificationResponsePhaseDelivery, deliveryStarted, "success")
 
+	r.consumeApprovalComments(ctx, taskID, pendingID, outcome, response.Approval)
+
 	return &Resolution{
 		PendingID: pendingID,
 		SessionID: sessionID,
@@ -329,15 +381,29 @@ func (r *Resolver) logResponsePhase(pendingID, phase string, started time.Time, 
 	)
 }
 
+// storedApprovalResponse is the durable per-question response value for an
+// approval bundle: the ordinary Answer plus the resolver-filled outcome, so a
+// loser's replay (R2b) and the detached fallback carry identical content.
+type storedApprovalResponse struct {
+	Answer
+	Approval *ApprovalOutcome `json:"approval,omitempty"`
+}
+
 // responsesFromAnswers builds the map CompleteActiveClarificationBundle
 // requires for an answered outcome, keyed by question_id. Returns nil for a
-// rejection (empty Answers), matching upstream's own claim call.
-func responsesFromAnswers(answers []Answer) map[string]interface{} {
+// rejection (empty Answers), matching upstream's own claim call. An approval
+// outcome is folded into the single answer so it survives the durable round
+// trip.
+func responsesFromAnswers(answers []Answer, approval *ApprovalOutcome) map[string]interface{} {
 	if len(answers) == 0 {
 		return nil
 	}
 	out := make(map[string]interface{}, len(answers))
 	for _, a := range answers {
+		if approval != nil {
+			out[a.QuestionID] = storedApprovalResponse{Answer: a, Approval: approval}
+			continue
+		}
 		out[a.QuestionID] = a
 	}
 	return out
@@ -391,9 +457,15 @@ func reconstructWinnerResolution(pendingID string, msgs []*taskmodels.Message, l
 	}
 
 	answers := make([]Answer, 0, len(ordered))
+	var approval *ApprovalOutcome
 	for _, m := range ordered {
 		if a, ok := answerFromMessageMetadata(m.ID, m.Metadata, log); ok {
 			answers = append(answers, a)
+		}
+		if approval == nil {
+			if a := approvalOutcomeFromMetadata(m.Metadata); a != nil {
+				approval = a
+			}
 		}
 	}
 
@@ -403,7 +475,51 @@ func reconstructWinnerResolution(pendingID string, msgs []*taskmodels.Message, l
 		Rejected:     status == string(StatusRejected),
 		RejectReason: "",
 		RespondedAt:  respondedAt,
+		Approval:     approval,
 	}, true
+}
+
+// approvalOutcomeFromMetadata reads the resolver-filled ApprovalOutcome stored
+// inside a message's `response` value (storedApprovalResponse), if present.
+func approvalOutcomeFromMetadata(meta map[string]any) *ApprovalOutcome {
+	raw, ok := meta["response"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	approvalRaw, ok := raw["approval"]
+	if !ok {
+		return nil
+	}
+	return decodeApprovalOutcome(approvalRaw)
+}
+
+func decodeApprovalOutcome(raw any) *ApprovalOutcome {
+	switch v := raw.(type) {
+	case *ApprovalOutcome:
+		return v
+	case ApprovalOutcome:
+		return &v
+	case map[string]any:
+		out := &ApprovalOutcome{}
+		out.Decision, _ = v["decision"].(string)
+		out.Feedback, _ = v["feedback"].(string)
+		out.PlanComments, _ = v["plan_comments"].(string)
+		out.CurrentVersion, _ = v["current_version"].(string)
+		out.SubjectEdited, _ = v["subject_edited"].(bool)
+		if ids, ok := v["comment_ids"].([]interface{}); ok {
+			for _, id := range ids {
+				if s, ok := id.(string); ok {
+					out.CommentIDs = append(out.CommentIDs, s)
+				}
+			}
+		}
+		if out.Decision == "" {
+			return nil
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 // answerFromMessageMetadata reads one message's stored metadata.response, if
@@ -433,6 +549,25 @@ func answerFromMessageMetadata(messageID string, meta map[string]any, log *logge
 	}
 	if s, ok := rawMap["custom_text"].(string); ok {
 		answer.CustomText = s
+	}
+	if refsRaw, ok := rawMap["plan_comment_refs"].([]interface{}); ok {
+		for _, r := range refsRaw {
+			rm, ok := r.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			var ref taskmodels.TaskPlanCommentRef
+			ref.ID, _ = rm["id"].(string)
+			switch v := rm["version"].(type) {
+			case float64:
+				ref.Version = int64(v)
+			case int64:
+				ref.Version = v
+			case int:
+				ref.Version = int64(v)
+			}
+			answer.PlanCommentRefs = append(answer.PlanCommentRefs, ref)
+		}
 	}
 	return answer, true
 }
@@ -479,6 +614,7 @@ func (r *Resolver) deliverClaimedResolution(
 					response.Rejected,
 					response.RejectReason,
 					r.clarificationClaimTurnID(pendingID, finalized),
+					response.Approval,
 				)
 				finalizedMessages <- finalized
 			}
@@ -548,7 +684,7 @@ func (r *Resolver) deliverDetachedClarificationResponse(
 		zap.String("error", deliveryErr.Error()))
 
 	if err := r.resumeDetachedClarification(
-		ctx, pendingID, response.Answers, response.Rejected, response.RejectReason, claim.messages,
+		ctx, pendingID, response.Answers, response.Rejected, response.RejectReason, claim.messages, response.Approval,
 	); err != nil {
 		if detachedResumeWasAccepted(err) {
 			// The prompt reached agentctl. Keep the durable answer terminal so a
@@ -667,6 +803,7 @@ func (r *Resolver) notifyPrimaryAnsweredBeforeWaiter(
 	answers []Answer,
 	rejected bool,
 	rejectReason, clarificationTurnID string,
+	approval *ApprovalOutcome,
 ) {
 	if r.eventBus == nil && r.primaryAnsweredNotifier == nil {
 		return
@@ -688,6 +825,7 @@ func (r *Resolver) notifyPrimaryAnsweredBeforeWaiter(
 	}
 
 	answerText := buildAnswerSummary(clarificationCtx.Questions, answers, rejected, rejectReason)
+	answerText = appendApprovalBlock(answerText, approval)
 	answered := PrimaryAnswered{
 		SessionID:           clarificationCtx.SessionID,
 		TaskID:              clarificationCtx.TaskID,
@@ -817,6 +955,7 @@ func (r *Resolver) resumeDetachedClarification(
 	rejected bool,
 	rejectReason string,
 	claimedMessages []*taskmodels.Message,
+	approval *ApprovalOutcome,
 ) error {
 	if r.detachedResumer == nil {
 		return errors.New("detached clarification resumer unavailable")
@@ -836,6 +975,7 @@ func (r *Resolver) resumeDetachedClarification(
 	}
 
 	answerText := buildAnswerSummary(clarificationCtx.Questions, answers, rejected, rejectReason)
+	answerText = appendApprovalBlock(answerText, approval)
 	clarificationTurnID, claimedMessageIDs, err := clarificationClaimRecovery(claimedMessages)
 	if err != nil {
 		return fmt.Errorf("build clarification claim recovery: %w", err)

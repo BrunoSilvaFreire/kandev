@@ -1,7 +1,7 @@
 // Needs-you Inbox wire types (docs/specs/ui/system-design/needs-you-inbox-01.md
 // #Data-and-contracts). Mirrors apps/backend/internal/clarification/inbox_handlers.go's
 // inboxBundleView / inboxListResponse / inboxHiddenBundleView / inboxHiddenListResponse.
-import type { Message } from "@/lib/types/http";
+import type { ClarificationApprovalMeta, Message } from "@/lib/types/http";
 
 export type ClarificationInboxBundle = {
   pending_id: string;
@@ -12,6 +12,8 @@ export type ClarificationInboxBundle = {
   created_at: string;
   context: string;
   messages: Message[];
+  /** Present when the bundle is a request_approval_kandev approval. */
+  approval?: ClarificationApprovalMeta;
 };
 
 export type ClarificationInboxPage = {

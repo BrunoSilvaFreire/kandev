@@ -27,6 +27,7 @@ type SessionMobileBottomNavProps = {
   activePanel: MobileSessionPanel;
   onPanelChange: (panel: MobileSessionPanel) => void;
   showPromptHistory?: boolean;
+  showUsage?: boolean;
   planBadge?: boolean;
   changesBadge?: number;
   hasReview?: boolean;
@@ -66,6 +67,27 @@ function hasMobilePluginPanels(
   );
 }
 
+function isMorePanelActive(activePanel: MobileSessionPanel): boolean {
+  return (
+    parsePluginPanelId(activePanel) !== undefined ||
+    activePanel === "prompt-history" ||
+    activePanel === "usage"
+  );
+}
+
+function panelsNavItem(
+  activePanel: MobileSessionPanel,
+  onOpenPluginPicker: () => void,
+  t: (key: string) => string,
+): NavItem {
+  return {
+    label: t("common:panels"),
+    icon: <IconLayoutGrid className="h-5 w-5" />,
+    active: isMorePanelActive(activePanel),
+    onClick: onOpenPluginPicker,
+  };
+}
+
 function buildMobileNavItems({
   activePanel,
   planBadge,
@@ -75,6 +97,7 @@ function buildMobileNavItems({
   onOpenStatus,
   onOpenPluginPicker,
   showPromptHistory,
+  showUsage,
   hasTaskCanvases,
   mobilePluginPanelsAvailable,
   connectionIssueSeverity,
@@ -88,6 +111,7 @@ function buildMobileNavItems({
   onOpenStatus: () => void;
   onOpenPluginPicker: () => void;
   showPromptHistory: boolean;
+  showUsage: boolean;
   hasTaskCanvases: boolean;
   connectionIssueSeverity: ConnectionIssueSeverity;
   t: (key: string) => string;
@@ -140,16 +164,8 @@ function buildMobileNavItems({
       label: t("task:terminal"),
       icon: <IconTerminal2 className="h-5 w-5" />,
     },
-    ...(showPromptHistory || hasTaskCanvases || mobilePluginPanelsAvailable
-      ? [
-          {
-            label: t("common:panels"),
-            icon: <IconLayoutGrid className="h-5 w-5" />,
-            active:
-              parsePluginPanelId(activePanel) !== undefined || activePanel === "prompt-history",
-            onClick: onOpenPluginPicker,
-          },
-        ]
+    ...(showPromptHistory || showUsage || hasTaskCanvases || mobilePluginPanelsAvailable
+      ? [panelsNavItem(activePanel, onOpenPluginPicker, t)]
       : []),
     ...(showStatus
       ? [
@@ -168,6 +184,7 @@ export function SessionMobileBottomNav({
   activePanel,
   onPanelChange,
   showPromptHistory = false,
+  showUsage = false,
   planBadge = false,
   changesBadge = 0,
   hasReview = false,
@@ -196,6 +213,7 @@ export function SessionMobileBottomNav({
         onOpenStatus,
         onOpenPluginPicker: () => setPluginPickerOpen(true),
         showPromptHistory,
+        showUsage,
         hasTaskCanvases: taskCanvases.length > 0,
         mobilePluginPanelsAvailable,
         connectionIssueSeverity,
@@ -211,6 +229,7 @@ export function SessionMobileBottomNav({
       registryVersion,
       activePanel,
       showPromptHistory,
+      showUsage,
       taskCanvases.length,
       mobilePluginPanelsAvailable,
       t,
@@ -235,6 +254,7 @@ export function SessionMobileBottomNav({
         onOpenChange={setPluginPickerOpen}
         onSelect={onPanelChange}
         showPromptHistory={showPromptHistory}
+        showUsage={showUsage}
         taskCanvases={taskCanvases}
         onOpenCanvas={onOpenCanvas}
         taskId={taskId}

@@ -26,10 +26,11 @@ const queryTrue = "true"
 var availableAgentsBroadcastTimeout = 10 * time.Second
 
 type Handlers struct {
-	controller *controller.Controller
-	hub        Broadcaster
-	logger     *logger.Logger
-	interlock  gin.HandlerFunc
+	controller   *controller.Controller
+	hub          Broadcaster
+	logger       *logger.Logger
+	interlock    gin.HandlerFunc
+	profileUsage ProfileUsageProvider
 }
 
 type Broadcaster interface {
@@ -45,12 +46,13 @@ func NewHandlers(ctrl *controller.Controller, hub Broadcaster, log *logger.Logge
 	}
 }
 
-func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, hub Broadcaster, log *logger.Logger, interlockToken string) {
+func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, hub Broadcaster, log *logger.Logger, interlockToken string) *Handlers {
 	// Wire the install job store with the same broadcaster used by other
 	// agent-settings notifications so streaming install events reach the UI.
 	ctrl.SetJobBroadcaster(hub)
 	handlers := NewHandlers(ctrl, hub, log, interlockToken)
 	handlers.registerHTTP(router)
+	return handlers
 }
 
 func (h *Handlers) registerHTTP(router *gin.Engine) {
@@ -84,6 +86,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.POST("/agent-update/:agentName", cfg, h.interlock, h.httpUpdateAgentRuntime)
 	api.GET("/agent-update/jobs", h.httpListAgentUpdateJobs)
 	api.GET("/agent-update/jobs/:id", h.httpGetAgentUpdateJob)
+	api.POST("/agent-profiles/utilization", h.httpProfileUtilization)
 	api.PATCH("/agent-profiles/:id", cfg, h.interlock, h.httpUpdateProfile)
 	api.DELETE("/agent-profiles/:id", cfg, h.interlock, h.httpDeleteProfile)
 	api.POST("/agent-profiles/:id/duplicate", cfg, h.interlock, h.httpDuplicateProfile)
@@ -451,6 +454,7 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 	})
 	if err != nil {
 		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
+			errors.Is(err, controller.ErrInvalidProfileTags) ||
 			errors.Is(err, controller.ErrInvalidProviderConfig) ||
 			errors.Is(err, controller.ErrRequireExactModelNeedsModel) || errors.Is(err, controller.ErrRequireExactModelUnsupported) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -626,6 +630,7 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 			return
 		}
 		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
+			errors.Is(err, controller.ErrInvalidProfileTags) ||
 			errors.Is(err, controller.ErrInvalidProviderConfig) ||
 			errors.Is(err, controller.ErrRequireExactModelNeedsModel) || errors.Is(err, controller.ErrRequireExactModelUnsupported) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -664,6 +669,7 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 			return
 		}
 		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
+			errors.Is(err, controller.ErrInvalidProfileTags) ||
 			errors.Is(err, controller.ErrInvalidProviderConfig) ||
 			errors.Is(err, controller.ErrRequireExactModelNeedsModel) || errors.Is(err, controller.ErrRequireExactModelUnsupported) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

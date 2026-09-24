@@ -480,7 +480,7 @@ type nativeServiceUnitInput struct {
 }
 
 const (
-	systemdServicePath = "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin:%h/.local/bin:%h/.bun/bin:%h/.opencode/bin:%h/.npm-global/bin"
+	systemdServicePath = "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin:%h/.local/bin:%h/.cargo/bin:%h/.bun/bin:%h/.opencode/bin:%h/.npm-global/bin"
 	// launchd has no home-directory specifier; withLocalAgentPath adds the runtime user's bin directory.
 	launchdServicePath = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 )
@@ -495,6 +495,9 @@ func serviceNodeToolBinDirs() []string {
 		dirs = append(dirs, dir)
 	}
 	addPath(os.Getenv("npm_node_execpath"))
+	if nvmBin := os.Getenv("NVM_BIN"); nvmBin != "" {
+		addPath(filepath.Join(nvmBin, "node"))
+	}
 	for _, name := range []string{"node", "npm", "npx"} {
 		if resolved, err := exec.LookPath(name); err == nil {
 			addPath(resolved)
@@ -581,6 +584,7 @@ func renderSystemdUnit(input nativeServiceUnitInput) string {
 		serviceEnvLine("KANDEV_SERVICE_MANAGER", nativeServiceManagerSystemd),
 		serviceEnvLine("KANDEV_INSTALL_KIND", nativeInstallKind(input.Executable, input.BundleDir)),
 		serviceEnvLine("KANDEV_SERVICE_METADATA", nativeServiceMetadataPath(input.HomeDir)),
+		serviceEnvLine("MISE_YES", "1"),
 	}
 	if !input.HomeDirFromConfig {
 		env = append([]string{serviceEnvLine("KANDEV_HOME_DIR", input.HomeDir)}, env...)

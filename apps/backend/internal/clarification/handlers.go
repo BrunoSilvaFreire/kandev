@@ -82,8 +82,9 @@ type MessageCreator interface {
 	// a multi-question clarification request, all sharing the given pending_id.
 	// Only the last message returned should set RequestsInput=true so the chat
 	// scrolls to the bottom of the group. Returns the created message IDs in the
-	// same order as the input questions.
-	CreateClarificationRequestMessages(ctx context.Context, taskID, sessionID, pendingID string, questions []Question, clarificationContext string) ([]string, error)
+	// same order as the input questions. approval, when non-nil, marks the
+	// bundle as an approval request and is persisted with the messages.
+	CreateClarificationRequestMessages(ctx context.Context, taskID, sessionID, pendingID string, questions []Question, clarificationContext string, approval *ApprovalMeta) ([]string, error)
 	// UpdateClarificationMessage updates the per-question clarification message's
 	// status (and stores the matching answer if any) for a (pending_id, question_id)
 	// pair within the session. Used only by cancel (A9), which never goes through
@@ -254,6 +255,9 @@ type CreateRequestBody struct {
 	TaskID    string     `json:"task_id"`
 	Questions []Question `json:"questions" binding:"required,min=1,dive"`
 	Context   string     `json:"context"`
+	// Approval marks the bundle as an approval request. request_approval_kandev
+	// sends it through this same path.
+	Approval *ApprovalMeta `json:"approval"`
 }
 
 // CreateRequestResponse is the response for creating a clarification request.
@@ -292,6 +296,10 @@ func (h *Handlers) httpCreateRequest(c *gin.Context) {
 		TaskID:    taskID,
 		Questions: body.Questions,
 		Context:   body.Context,
+		Approval:  body.Approval,
+	}
+	if req.Approval != nil {
+		h.resolver.FillApprovalVersion(c.Request.Context(), taskID, req.Approval)
 	}
 
 	pendingID, isNew := h.store.CreateRequest(req)
@@ -310,6 +318,7 @@ func (h *Handlers) httpCreateRequest(c *gin.Context) {
 			pendingID,
 			body.Questions,
 			body.Context,
+			body.Approval,
 		)
 		if err != nil {
 			h.logger.Error("failed to create clarification request messages",

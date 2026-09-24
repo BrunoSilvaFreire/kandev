@@ -60,6 +60,12 @@ fn main() {
                 eprintln!("Could not initialize desktop window state: {err}");
             }
             app.manage(window_state);
+            #[cfg(feature = "devtools")]
+            {
+                if std::env::var("KANDEV_PROFILE").is_ok() || std::env::var("KANDEV_DEVTOOLS").is_ok() {
+                    window.open_devtools();
+                }
+            }
             window.show()?;
             backend::start_desktop_backend(app.handle().clone(), window);
             Ok(())
@@ -152,19 +158,32 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let fullscreen = MenuItemBuilder::with_id(shell::MENU_FULLSCREEN, "Toggle Full Screen")
         .accelerator(FULLSCREEN_ACCELERATOR)
         .build(app)?;
-    let view_menu = Submenu::with_items(
-        app,
-        "View",
-        true,
-        &[
-            &zoom_in,
-            &zoom_in_equals,
-            &zoom_out,
-            &actual_size,
-            &PredefinedMenuItem::separator(app)?,
-            &fullscreen,
-        ],
-    )?;
+    #[cfg(feature = "devtools")]
+    let devtools = MenuItemBuilder::with_id(shell::MENU_TOGGLE_DEVTOOLS, "Toggle Developer Tools")
+        .accelerator("F12")
+        .build(app)?;
+
+    #[cfg(feature = "devtools")]
+    let view_items: &[&dyn tauri::menu::IsMenuItem<tauri::Wry>] = &[
+        &zoom_in,
+        &zoom_in_equals,
+        &zoom_out,
+        &actual_size,
+        &PredefinedMenuItem::separator(app)?,
+        &fullscreen,
+        &PredefinedMenuItem::separator(app)?,
+        &devtools,
+    ];
+    #[cfg(not(feature = "devtools"))]
+    let view_items: &[&dyn tauri::menu::IsMenuItem<tauri::Wry>] = &[
+        &zoom_in,
+        &zoom_in_equals,
+        &zoom_out,
+        &actual_size,
+        &PredefinedMenuItem::separator(app)?,
+        &fullscreen,
+    ];
+    let view_menu = Submenu::with_items(app, "View", true, view_items)?;
 
     let window_menu = Submenu::with_items(
         app,
@@ -273,6 +292,16 @@ fn handle_menu_event(app: &tauri::AppHandle, event: tauri::menu::MenuEvent) {
         MenuAction::HelpDocs => open_help_url(app, "https://github.com/kdlbs/kandev#readme"),
         MenuAction::HelpRepository => open_help_url(app, "https://github.com/kdlbs/kandev"),
         MenuAction::HelpReleases => open_help_url(app, "https://github.com/kdlbs/kandev/releases"),
+        MenuAction::ToggleDevTools => {
+            #[cfg(feature = "devtools")]
+            if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+                if window.is_devtools_open() {
+                    window.close_devtools();
+                } else {
+                    window.open_devtools();
+                }
+            }
+        }
     }
 }
 

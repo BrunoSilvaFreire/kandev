@@ -36,6 +36,7 @@ import {
   TaskCreateLaunchPreviewToggle,
 } from "@/components/task-create-dialog-launch-preview-control";
 import { EnhancePromptButton } from "@/components/enhance-prompt-button";
+import type { ExecutePromptProgress } from "@/lib/api/domains/utility-api";
 import { JiraImportBar } from "@/components/jira/jira-import-bar";
 import { LinearImportBar } from "@/components/linear/linear-import-bar";
 import type { JiraTicket } from "@/lib/types/jira";
@@ -292,6 +293,7 @@ type TaskFormInputsProps = {
   placeholder?: string;
   onEnhancePrompt?: () => void;
   isEnhancingPrompt?: boolean;
+  enhancePromptPhase?: ExecutePromptProgress | null;
   isUtilityConfigured?: boolean;
   launchPreview?: TaskCreateLaunchPreview | null;
   jiraImport?: {
@@ -649,6 +651,7 @@ type FormInputsToolbarProps = {
   disabled?: boolean;
   onEnhancePrompt?: () => void;
   isEnhancingPrompt?: boolean;
+  enhancePromptPhase?: ExecutePromptProgress | null;
   isUtilityConfigured?: boolean;
   launchPreview?: TaskCreateLaunchPreview | null;
   isLaunchPromptPreview: boolean;
@@ -663,6 +666,7 @@ function FormInputsToolbar({
   disabled,
   onEnhancePrompt,
   isEnhancingPrompt,
+  enhancePromptPhase,
   isUtilityConfigured,
   launchPreview,
   isLaunchPromptPreview,
@@ -678,6 +682,7 @@ function FormInputsToolbar({
         <EnhancePromptButton
           onClick={onEnhancePrompt}
           isLoading={isEnhancingPrompt ?? false}
+          phase={enhancePromptPhase ?? null}
           isConfigured={isUtilityConfigured}
         />
       )}
@@ -931,6 +936,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   placeholder,
   onEnhancePrompt,
   isEnhancingPrompt,
+  enhancePromptPhase,
   isUtilityConfigured,
   launchPreview,
   jiraImport,
@@ -1070,6 +1076,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
           disabled={disabled}
           onEnhancePrompt={onEnhancePrompt}
           isEnhancingPrompt={isEnhancingPrompt}
+          enhancePromptPhase={enhancePromptPhase}
           isUtilityConfigured={isUtilityConfigured}
           launchPreview={launchPreview}
           isLaunchPromptPreview={isLaunchPromptPreview}

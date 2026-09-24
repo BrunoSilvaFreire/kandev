@@ -389,6 +389,7 @@ func (s *Service) CreateStepsFromTemplate(ctx context.Context, workflowID, templ
 			ShowInCommandPanel:         stepDef.ShowInCommandPanel,
 			AutoArchiveAfterHours:      stepDef.AutoArchiveAfterHours,
 			AgentProfileID:             stepDef.AgentProfileID,
+			AllowedTags:                append([]string{}, stepDef.AllowedTags...),
 			ProfileSessionStartPolicy:  taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(stepDef.ProfileSessionStartPolicy)),
 			ProfileSessionEndPolicy:    taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(stepDef.ProfileSessionEndPolicy)),
 			SessionTarget:              models.RemapWorkflowSessionTarget(stepDef.SessionTarget, idMap),
@@ -881,7 +882,7 @@ func validateWorkflowSessionTargets(steps []*models.WorkflowStep) error {
 		if source.Position >= step.Position {
 			return fmt.Errorf("step %q session target source %q must be earlier", step.Name, source.Name)
 		}
-		if source.AgentProfileID == "" || source.SessionTarget != nil {
+		if source.AgentProfileID == "" || source.SessionTarget != nil || len(source.AllowedTags) > 0 {
 			return fmt.Errorf("step %q session target source %q must use a direct agent profile", step.Name, source.Name)
 		}
 	}
@@ -929,6 +930,7 @@ func (s *Service) stepFromPortableWithMatcherOptions(
 		ShowInCommandPanel:         sp.ShowInCommandPanel,
 		AllowManualMove:            sp.AllowManualMove,
 		AutoArchiveAfterHours:      sp.AutoArchiveAfterHours,
+		AllowedTags:                append([]string{}, sp.AllowedTags...),
 		ProfileSessionStartPolicy:  taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(sp.ProfileSessionStartPolicy)),
 		ProfileSessionEndPolicy:    taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(sp.ProfileSessionEndPolicy)),
 		SessionTarget:              sp.WorkflowSessionTarget(posToID),

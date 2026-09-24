@@ -168,6 +168,12 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 	}
 	a.trackToolCallLineage(emittedToolCallID, parentToolCallID)
 
+	if normalizedPayload != nil && normalizedPayload.Kind() == streams.ToolKindModifyFile {
+		if mf := normalizedPayload.ModifyFile(); mf != nil {
+			enrichModifyFileFromContents(mf, tc.Content)
+		}
+	}
+
 	return &AgentEvent{
 		Type:              eventType,
 		SessionID:         sessionID,
@@ -178,6 +184,16 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 		ToolStatus:        status,
 		NormalizedPayload: normalizedPayload,
 		ToolCallContents:  a.convertToolCallContents(tc.Content),
+	}
+}
+
+func isTerminalToolStatus(status string) bool {
+	switch status {
+	case toolStatusComplete, toolStatusCompleted, toolStatusError, toolStatusErrored,
+		"failed", toolStatusCancelled, toolStatusInterrupted, toolStatusShutdown:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -201,7 +217,9 @@ func (a *Adapter) trackToolCallPayload(
 	defer a.mu.Unlock()
 	if signal == codexSubagentSignalNone {
 		a.applyPendingCursorTaskMetaLocked(sessionID, toolCallID, payload)
-		a.activeToolCalls[toolCallID] = payload
+		if !isTerminalToolStatus(status) {
+			a.activeToolCalls[toolCallID] = payload
+		}
 		return payload, eventType, signal, toolCallID, "", false
 	}
 
@@ -876,7 +894,7 @@ func enrichModifyFileFromContents(mf *streams.ModifyFilePayload, contents []acp.
 			mf.FilePath = c.Diff.Path
 		}
 		if len(mf.Mutations) == 0 {
-			continue
+			mf.Mutations = append(mf.Mutations, streams.FileMutation{Type: streams.MutationPatch})
 		}
 		mut := &mf.Mutations[0]
 		if mut.Diff != "" {

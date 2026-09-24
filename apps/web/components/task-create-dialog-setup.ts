@@ -48,7 +48,7 @@ function useEnhanceForDialog(
 ) {
   const isConfigured = useIsUtilityConfigured();
   const { toast } = useToast();
-  const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
+  const { enhancePrompt, isEnhancingPrompt, enhancePromptPhase } = useUtilityAgentGenerator({
     sessionId: null,
     taskTitle: fs.taskName,
   });
@@ -81,6 +81,7 @@ function useEnhanceForDialog(
   return {
     onEnhance,
     isLoading: isEnhancingPrompt,
+    enhancePromptPhase,
     isConfigured,
     pendingResult: promptDelivery.pendingResult,
     onApplyPending: promptDelivery.applyPending,

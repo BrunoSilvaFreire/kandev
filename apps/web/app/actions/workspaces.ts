@@ -425,6 +425,7 @@ type BackendWorkflowStep = {
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
+  allowed_tags?: string[];
   session_target?: WorkflowStep["session_target"];
   profile_session_start_policy?: WorkflowStep["profile_session_start_policy"];
   profile_session_end_policy?: WorkflowStep["profile_session_end_policy"];
@@ -451,6 +452,7 @@ const transformWorkflowStep = (step: BackendWorkflowStep): WorkflowStep => ({
   show_in_command_panel: step.show_in_command_panel,
   auto_archive_after_hours: step.auto_archive_after_hours,
   agent_profile_id: step.agent_profile_id,
+  allowed_tags: step.allowed_tags ?? [],
   session_target: step.session_target ?? null,
   profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
     step.profile_session_start_policy,
@@ -505,6 +507,7 @@ export async function createWorkflowStepAction(payload: {
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
   agent_profile_id?: string;
+  allowed_tags?: string[];
   session_target?: WorkflowStep["session_target"];
   allow_manual_move?: boolean;
   auto_advance_requires_signal?: boolean;
@@ -526,6 +529,7 @@ export async function createWorkflowStepAction(payload: {
     is_start_step: payload.is_start_step ?? false,
     show_in_command_panel: payload.show_in_command_panel ?? true,
     agent_profile_id: payload.agent_profile_id,
+    allowed_tags: payload.allowed_tags ?? [],
     session_target: payload.session_target,
     wip_limit: payload.wip_limit ?? 0,
     pull_from_step_id: payload.pull_from_step_id ?? "",
@@ -558,6 +562,7 @@ export async function updateWorkflowStepAction(
       | "show_in_command_panel"
       | "auto_archive_after_hours"
       | "agent_profile_id"
+      | "allowed_tags"
       | "session_target"
       | "auto_advance_requires_signal"
       | "cancel_triggers_turn_complete"

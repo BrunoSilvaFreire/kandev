@@ -731,6 +731,7 @@ export class ApiClient {
       cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
       command_prefix?: string;
       env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;
+      tags?: string[];
     },
   ): Promise<AgentProfile> {
     const response = await this.request<unknown>("POST", `/api/v1/agents/${agentId}/profiles`, {
@@ -746,6 +747,7 @@ export class ApiClient {
       cli_flags: opts.cli_flags,
       command_prefix: opts.command_prefix,
       env_vars: opts.env_vars,
+      tags: opts.tags,
     });
     return normalizeAgentProfile(response);
   }
@@ -1343,6 +1345,7 @@ export class ApiClient {
     updates: {
       prompt?: string;
       agent_profile_id?: string;
+      allowed_tags?: string[];
       /** Promotes this step to the workflow's start step, demoting the previous one. */
       is_start_step?: boolean;
       events?: {

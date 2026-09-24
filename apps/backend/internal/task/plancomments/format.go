@@ -75,6 +75,13 @@ func MetadataRefsMatch(metadata map[string]interface{}, refs []models.TaskPlanCo
 	return true
 }
 
+// FormatComments renders comments as the canonical "### Plan Comments" block.
+// It is the read-only sibling of ResolvePlaceholder for callers that already
+// hold the resolved comments (for example an approval answer).
+func FormatComments(comments []*models.TaskPlanComment) string {
+	return formatMarkdown(comments)
+}
+
 func formatMarkdown(comments []*models.TaskPlanComment) string {
 	var out strings.Builder
 	out.WriteString("### Plan Comments\n\n")

@@ -58,4 +58,14 @@ describe("workflow dirty state", () => {
     expect(isWorkflowStepValueDirty(draft, step, (item) => item.name)).toBe(true);
     expect(isWorkflowStepValueDirty(draft, step, (item) => item.color)).toBe(false);
   });
+
+  it("marks a changed allowed_tags list dirty", () => {
+    expect(isWorkflowStepDirty({ ...step, allowed_tags: ["review"] }, step)).toBe(true);
+    expect(
+      isWorkflowStepDirty(
+        { ...step, allowed_tags: ["review"] },
+        { ...step, allowed_tags: ["review"] },
+      ),
+    ).toBe(false);
+  });
 });

@@ -100,10 +100,10 @@ const baseProps: FileEditorContentProps = {
 };
 
 describe("FileEditorContent preview selection", () => {
-  it("replaces HTML source with the published iframe and restores the unchanged buffer", () => {
+  it("replaces HTML source with the published iframe and restores the unchanged buffer", async () => {
     render(<FileEditorContent {...baseProps} sessionId={SESSION_ID} previewKind="html" />);
 
-    expect(screen.getByTestId(MONACO_EDITOR_TEST_ID).getAttribute("data-content")).toBe(
+    expect((await screen.findByTestId(MONACO_EDITOR_TEST_ID)).getAttribute("data-content")).toBe(
       HTML_CONTENT,
     );
     fireEvent.click(screen.getByRole("button", { name: PREVIEW_HTML_LABEL }));

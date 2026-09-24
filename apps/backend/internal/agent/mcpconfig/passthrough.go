@@ -329,6 +329,53 @@ func (CursorStrategy) Describe() string {
 	return "a project-local .cursor/mcp.json file (merged into an existing one)"
 }
 
+// AntigravityStrategy writes the project file read by the native agy CLI. The
+// agy-acp bridge does not forward ACP session/new MCP servers to agy.
+type AntigravityStrategy struct{}
+
+type antigravityMCPFile struct {
+	MCPServers map[string]antigravityServerEntry `json:"mcpServers"`
+}
+
+type antigravityServerEntry struct {
+	Command   string            `json:"command,omitempty"`
+	Args      []string          `json:"args,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+	ServerURL string            `json:"serverUrl,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
+}
+
+func (AntigravityStrategy) BuildPassthroughMCP(servers []types.McpServer, paths PassthroughPaths) (PassthroughArtifacts, error) {
+	if len(servers) == 0 || paths.WorkspaceDir == "" {
+		return PassthroughArtifacts{}, nil
+	}
+	entries := make(map[string]antigravityServerEntry, len(servers))
+	for _, srv := range servers {
+		if srv.Name == "" {
+			continue
+		}
+		if isStdioServer(srv) {
+			entries[srv.Name] = antigravityServerEntry{Command: srv.Command, Args: srv.Args, Env: srv.Env}
+		} else {
+			entries[srv.Name] = antigravityServerEntry{ServerURL: srv.URL, Headers: srv.Headers}
+		}
+	}
+	if len(entries) == 0 {
+		return PassthroughArtifacts{}, nil
+	}
+	content, err := marshalMCPFile(antigravityMCPFile{MCPServers: entries})
+	if err != nil {
+		return PassthroughArtifacts{}, err
+	}
+	return PassthroughArtifacts{Files: []PassthroughConfigFile{{
+		Path: filepath.Join(paths.WorkspaceDir, ".agents", "mcp_config.json"), Content: content, MergeKey: "mcpServers",
+	}}}, nil
+}
+
+func (AntigravityStrategy) Describe() string {
+	return "a project-local .agents/mcp_config.json file (merged into an existing one)"
+}
+
 // --- Pi ----------------------------------------------------------------------
 
 const piStreamableHTTPTransport = "streamable-http"

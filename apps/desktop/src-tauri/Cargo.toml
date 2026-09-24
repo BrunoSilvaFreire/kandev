@@ -29,6 +29,13 @@ desktop-runtime = [
   "dep:tauri-plugin-single-instance",
   "dep:tauri-runtime",
 ]
+devtools = [
+  "tauri/devtools",
+]
+
+[profile.profiling]
+inherits = "release"
+debug = true
 
 [build-dependencies]
 tauri-build = { version = "=2.6.3", features = [] }

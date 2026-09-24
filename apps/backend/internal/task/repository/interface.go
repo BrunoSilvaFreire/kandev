@@ -871,4 +871,9 @@ type SubagentContextRepository interface {
 type UsageRepository interface {
 	GetTaskUsageTotals(ctx context.Context, taskID string) (*models.TaskUsageTotals, error)
 	GetSessionUsageTotals(ctx context.Context, sessionID string) (*models.TaskUsageTotals, error)
+	// ListTaskUsageTotalGroups returns the ledger aggregate at the finest grain
+	// (session, agent profile, agent type, model, provider), newest activity
+	// first. Per-agent, per-model and per-session views are client-side
+	// roll-ups over these groups.
+	ListTaskUsageTotalGroups(ctx context.Context, taskID string) ([]*models.TaskUsageTotalsGroup, error)
 }

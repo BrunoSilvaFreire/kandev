@@ -135,7 +135,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		e.logger.Warn("ACP inference: dropping unsupported MCP server transport",
 			zap.String("name", name))
 	}
-	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.AgentID, req.Prompt, model, modelConfigOptions, req.Mode, req.AutoApprovePermissions, mcpServers, cfg.ProviderGatewayAuth)
+	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.AgentID, req.Prompt, model, modelConfigOptions, req.Mode, req.AutoApprovePermissions, mcpServers, cfg.ProviderGatewayAuth, ProgressReporterFrom(ctx))
 	if err != nil {
 		e.logger.Error("ACP inference failed",
 			zap.String("agent_id", req.AgentID),
@@ -174,12 +174,15 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	autoApprovePermissions *bool,
 	mcpServers []acp.McpServer,
 	gatewayAuth *acpprovider.GatewayAuth,
+	onProgress ProgressReporter,
 ) (string, error) {
+	emitter := newProgressEmitter(onProgress)
 	// Collect response text from updates
 	var responseText strings.Builder
 	var mu sync.Mutex
 
 	updateHandler := func(n acp.SessionNotification) {
+		emitter.observe(n)
 		if n.Update.AgentMessageChunk != nil && n.Update.AgentMessageChunk.Content.Text != nil {
 			chunk := sanitizeInferenceChunk(n.Update.AgentMessageChunk.Content.Text.Text)
 			if chunk == "" {
@@ -272,13 +275,16 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	}
 
 	// Send prompt and wait for completion
+	emitter.phase(PromptPhaseAnalyzing)
 	_, err = conn.Prompt(ctx, acp.PromptRequest{
 		SessionId: sessionID,
 		Prompt:    []acp.ContentBlock{acp.TextBlock(prompt)},
 	})
 	if err != nil {
+		emitter.phase(PromptPhaseFailed)
 		return "", fmt.Errorf("ACP prompt failed: %w", err)
 	}
+	emitter.phase(PromptPhaseCompleted)
 
 	mu.Lock()
 	result := strings.TrimSpace(responseText.String())
@@ -1225,6 +1231,7 @@ func derefString(p *string) string {
 // is not derived from untrusted input — even though the value is
 // semantically the same as the base name taken from InferenceConfig.Command.
 var allowedProbeCommands = map[string]string{
+	"agy-acp":            "agy-acp",
 	"agy_acp_server.par": "agy_acp_server.par",
 	"agy_acp_server.exe": "agy_acp_server.exe",
 	"auggie":             "auggie",

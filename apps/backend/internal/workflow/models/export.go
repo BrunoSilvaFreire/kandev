@@ -60,16 +60,18 @@ type WorkflowPortable struct {
 
 // StepPortable is a workflow step without instance-specific fields.
 type StepPortable struct {
-	Name                         string                                       `json:"name" yaml:"name"`
-	Position                     int                                          `json:"position" yaml:"position"`
-	Color                        string                                       `json:"color" yaml:"color"`
-	Prompt                       string                                       `json:"prompt,omitempty" yaml:"prompt,omitempty"`
-	Events                       StepEvents                                   `json:"events" yaml:"events"`
-	IsStartStep                  bool                                         `json:"is_start_step" yaml:"is_start_step"`
-	ShowInCommandPanel           bool                                         `json:"show_in_command_panel" yaml:"show_in_command_panel"`
-	AllowManualMove              bool                                         `json:"allow_manual_move" yaml:"allow_manual_move"`
-	AutoArchiveAfterHours        int                                          `json:"auto_archive_after_hours,omitempty" yaml:"auto_archive_after_hours,omitempty"`
-	AgentProfile                 *AgentProfilePortable                        `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
+	Name                  string                `json:"name" yaml:"name"`
+	Position              int                   `json:"position" yaml:"position"`
+	Color                 string                `json:"color" yaml:"color"`
+	Prompt                string                `json:"prompt,omitempty" yaml:"prompt,omitempty"`
+	Events                StepEvents            `json:"events" yaml:"events"`
+	IsStartStep           bool                  `json:"is_start_step" yaml:"is_start_step"`
+	ShowInCommandPanel    bool                  `json:"show_in_command_panel" yaml:"show_in_command_panel"`
+	AllowManualMove       bool                  `json:"allow_manual_move" yaml:"allow_manual_move"`
+	AutoArchiveAfterHours int                   `json:"auto_archive_after_hours,omitempty" yaml:"auto_archive_after_hours,omitempty"`
+	AgentProfile          *AgentProfilePortable `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
+	// AllowedTags selects an eligible concrete profile by tag at step entry.
+	AllowedTags                  []string                                     `json:"allowed_tags,omitempty" yaml:"allowed_tags,omitempty"`
 	ProfileSessionStartPolicy    taskmodels.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy,omitempty" yaml:"profile_session_start_policy,omitempty"`
 	ProfileSessionEndPolicy      taskmodels.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy,omitempty" yaml:"profile_session_end_policy,omitempty"`
 	AutoAdvanceRequiresSignal    bool                                         `json:"auto_advance_requires_signal" yaml:"auto_advance_requires_signal"`
@@ -210,6 +212,7 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 			ShowInCommandPanel:         s.ShowInCommandPanel,
 			AllowManualMove:            s.AllowManualMove,
 			AutoArchiveAfterHours:      s.AutoArchiveAfterHours,
+			AllowedTags:                append([]string{}, s.AllowedTags...),
 			ProfileSessionStartPolicy:  taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(s.ProfileSessionStartPolicy)),
 			ProfileSessionEndPolicy:    taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(s.ProfileSessionEndPolicy)),
 			SessionTarget:              sessionTarget,
@@ -500,6 +503,14 @@ func validateStepPositionRefs(steps []StepPortable, validPositions map[int]bool)
 		if err := validateGenericStepPositionRefs(step, validPositions); err != nil {
 			return err
 		}
+		for i, tr := range step.Events.Transitions {
+			if tr.ToStepPosition == nil {
+				return fmt.Errorf("step %q transitions[%d]: to_step_position is required in portable form", step.Name, i)
+			}
+			if !validPositions[*tr.ToStepPosition] {
+				return fmt.Errorf("step %q transitions[%d]: to_step_position %d does not match any step", step.Name, i, *tr.ToStepPosition)
+			}
+		}
 	}
 	return nil
 }
@@ -555,7 +566,7 @@ func checkPositionRef(config map[string]any, validPositions map[int]bool) error 
 
 // convertStepIDToPosition rewrites move_to_step events: step_id → step_position.
 func convertStepIDToPosition(events StepEvents, idToPos map[string]int) StepEvents {
-	return remapStepEvents(events, "step_id", "step_position", func(v any) (any, bool) {
+	result := remapStepEvents(events, "step_id", "step_position", func(v any) (any, bool) {
 		s, ok := v.(string)
 		if !ok {
 			return nil, false
@@ -563,6 +574,27 @@ func convertStepIDToPosition(events StepEvents, idToPos map[string]int) StepEven
 		pos, found := idToPos[s]
 		return pos, found
 	})
+	result.Transitions = transitionsToPosition(events.Transitions, idToPos)
+	return result
+}
+
+// transitionsToPosition rewrites named-transition targets: to_step_id → to_step_position.
+func transitionsToPosition(transitions []StepTransition, idToPos map[string]int) []StepTransition {
+	if len(transitions) == 0 {
+		return nil
+	}
+	out := make([]StepTransition, 0, len(transitions))
+	for _, tr := range transitions {
+		pos, found := idToPos[tr.ToStepID]
+		if !found {
+			// Leave the transition out rather than exporting a dangling target.
+			continue
+		}
+		tr.ToStepPosition = &pos
+		tr.ToStepID = ""
+		out = append(out, tr)
+	}
+	return out
 }
 
 // ReviewAgentProfilePortableKey is the on_enter config key that carries a
@@ -638,7 +670,7 @@ func remapReviewProfile(events StepEvents, fromKey, toKey string, lookup func(an
 // ConvertPositionToStepID rewrites move_to_step events: step_position → step_id.
 // posToID maps position → new step ID.
 func ConvertPositionToStepID(events StepEvents, posToID map[int]string) StepEvents {
-	return remapStepEvents(events, "step_position", "step_id", func(v any) (any, bool) {
+	result := remapStepEvents(events, "step_position", "step_id", func(v any) (any, bool) {
 		pos, ok := toInt(v)
 		if !ok {
 			return nil, false
@@ -646,6 +678,29 @@ func ConvertPositionToStepID(events StepEvents, posToID map[int]string) StepEven
 		id, found := posToID[pos]
 		return id, found
 	})
+	result.Transitions = transitionsToStepID(events.Transitions, posToID)
+	return result
+}
+
+// transitionsToStepID rewrites named-transition targets: to_step_position → to_step_id.
+func transitionsToStepID(transitions []StepTransition, posToID map[int]string) []StepTransition {
+	if len(transitions) == 0 {
+		return nil
+	}
+	out := make([]StepTransition, 0, len(transitions))
+	for _, tr := range transitions {
+		if tr.ToStepPosition == nil {
+			continue
+		}
+		id, found := posToID[*tr.ToStepPosition]
+		if !found {
+			continue
+		}
+		tr.ToStepID = id
+		tr.ToStepPosition = nil
+		out = append(out, tr)
+	}
+	return out
 }
 
 // remapStepEvents rewrites move_to_step config across every trigger —

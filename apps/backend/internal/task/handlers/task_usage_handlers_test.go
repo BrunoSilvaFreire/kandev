@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -22,6 +23,7 @@ type usageTotalsRepo struct {
 	foreignSessionRepo
 	taskTotals    *models.TaskUsageTotals
 	sessionTotals *models.TaskUsageTotals
+	groups        []*models.TaskUsageTotalsGroup
 }
 
 func (r *usageTotalsRepo) GetTaskUsageTotals(context.Context, string) (*models.TaskUsageTotals, error) {
@@ -32,10 +34,23 @@ func (r *usageTotalsRepo) GetSessionUsageTotals(context.Context, string) (*model
 	return r.sessionTotals, nil
 }
 
+func (r *usageTotalsRepo) ListTaskUsageTotalGroups(context.Context, string) ([]*models.TaskUsageTotalsGroup, error) {
+	return r.groups, nil
+}
+
 func newUsageTotalsHandlers(t *testing.T, taskTotals, sessionTotals *models.TaskUsageTotals) *TaskHandlers {
 	t.Helper()
+	return newUsageBreakdownHandlers(t, taskTotals, sessionTotals, nil)
+}
+
+func newUsageBreakdownHandlers(
+	t *testing.T,
+	taskTotals, sessionTotals *models.TaskUsageTotals,
+	groups []*models.TaskUsageTotalsGroup,
+) *TaskHandlers {
+	t.Helper()
 	log := newTestLogger(t)
-	repo := &usageTotalsRepo{taskTotals: taskTotals, sessionTotals: sessionTotals}
+	repo := &usageTotalsRepo{taskTotals: taskTotals, sessionTotals: sessionTotals, groups: groups}
 	svc := service.NewService(service.Repos{
 		Workspaces: repo, Tasks: repo, TaskRepos: repo,
 		Workflows: repo, Messages: repo, Turns: repo,
@@ -149,5 +164,91 @@ func TestHTTPGetTaskSessionUsageTotalsReturnsSessionScopedBody(t *testing.T) {
 	}
 	if body.EventCount != 3 {
 		t.Fatalf("EventCount = %d, want 3", body.EventCount)
+	}
+}
+
+// TestHTTPGetTaskUsageBreakdownReturnsGroups pins the breakdown route's shape:
+// the task total plus the finest-grain groups, with a deleted session's
+// session_id serialized as JSON null and scope stamped "group".
+func TestHTTPGetTaskUsageBreakdownReturnsGroups(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &models.TaskUsageTotalsGroup{
+		SessionID:      nil, // deleted session
+		AgentProfileID: "profile-1",
+		AgentType:      "claude",
+		Model:          "model-x",
+		Provider:       "provider-1",
+		Totals:         models.TaskUsageTotals{EventCount: 2, TokensIn: 200, OutputTokensComplete: true},
+	}
+	h := newUsageBreakdownHandlers(t,
+		&models.TaskUsageTotals{EventCount: 2, TokensIn: 200, OutputTokensComplete: true},
+		nil,
+		[]*models.TaskUsageTotalsGroup{group},
+	)
+
+	c, rec := taskUsageRequestAs(t, "/api/v1/tasks/task-b/usage/breakdown", "user-b", gin.Params{{Key: "id", Value: "task-b"}})
+	h.httpGetTaskUsageBreakdown(c)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	var body dto.TaskUsageBreakdownDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body.TaskID != "task-b" {
+		t.Errorf("TaskID = %q, want task-b", body.TaskID)
+	}
+	if body.Task.Scope != dto.TaskUsageTotalsScopeTask || body.Task.EventCount != 2 {
+		t.Errorf("task = %+v, want scope task with 2 events", body.Task)
+	}
+	if len(body.Groups) != 1 {
+		t.Fatalf("len(groups) = %d, want 1", len(body.Groups))
+	}
+	if body.Groups[0].SessionID != nil {
+		t.Errorf("SessionID = %v, want nil (deleted session)", body.Groups[0].SessionID)
+	}
+	if body.Groups[0].Totals.Scope != dto.TaskUsageTotalsScopeGroup {
+		t.Errorf("group scope = %q, want group", body.Groups[0].Totals.Scope)
+	}
+
+	// The raw JSON must keep session_id as an explicit null, not omit it.
+	if !strings.Contains(rec.Body.String(), `"session_id":null`) {
+		t.Errorf("body does not contain an explicit session_id null: %s", rec.Body.String())
+	}
+}
+
+// TestHTTPGetTaskUsageBreakdownEmptyGroupsSerializesAsArray pins that a task
+// with no usage returns `"groups":[]`, never `"groups":null`.
+func TestHTTPGetTaskUsageBreakdownEmptyGroupsSerializesAsArray(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := newUsageBreakdownHandlers(t, &models.TaskUsageTotals{OutputTokensComplete: true}, nil, nil)
+
+	c, rec := taskUsageRequestAs(t, "/api/v1/tasks/task-b/usage/breakdown", "user-b", gin.Params{{Key: "id", Value: "task-b"}})
+	h.httpGetTaskUsageBreakdown(c)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"groups":[]`) {
+		t.Errorf("body does not contain an empty groups array: %s", rec.Body.String())
+	}
+}
+
+// TestHTTPGetTaskUsageBreakdownDeniesForeignTaskWith404 mirrors the task-scope
+// denial test for the breakdown route.
+func TestHTTPGetTaskUsageBreakdownDeniesForeignTaskWith404(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := newUsageBreakdownHandlers(t, &models.TaskUsageTotals{OutputTokensComplete: true}, nil, nil)
+
+	c, rec := taskUsageRequestAs(t, "/api/v1/tasks/task-b/usage/breakdown", "user-a", gin.Params{{Key: "id", Value: "task-b"}})
+	h.httpGetTaskUsageBreakdown(c)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	ownerCtx, ownerRec := taskUsageRequestAs(t, "/api/v1/tasks/task-b/usage/breakdown", "user-b", gin.Params{{Key: "id", Value: "task-b"}})
+	h.httpGetTaskUsageBreakdown(ownerCtx)
+	if ownerRec.Code != http.StatusOK {
+		t.Fatalf("owner status = %d, want 200 (body: %s)", ownerRec.Code, ownerRec.Body.String())
 	}
 }

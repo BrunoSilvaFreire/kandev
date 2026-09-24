@@ -239,6 +239,8 @@ Task B processes each incoming message as a normal turn. When it receives Agent 
 
 The server normalizes this object once and omits empty optional strings. Reset is additive with the destination reset policy, and instructions are appended once after the normal destination prompt. When `skip_step_prompt` is set, the destination step's configured prompt and its task-description fallback are suppressed for this entry: with instructions the agent starts a turn carrying only those instructions, and without instructions no turn starts and the task lands idle. The destination and options are validated together. Every call returns a move-result envelope: `disposition` is `"deferred"` when the current agent is running (the options persist through the turn boundary, WIP queue promotion, and backend restart before they are applied) or `"applied"` when an idle move committed immediately, `task` is the moved (or target-step) task, and an optioned move also returns a `move_id` plus the accepted `entry_options` so you can correlate the retained one-shot override with the eventual step entry. The legacy top-level `prompt` argument remains accepted as an alias for `entry_options.instructions`; when both are non-empty, validation fails. Pull-request draft/readiness is not a generic move option.
 
+Instead of `workflow_id` + `workflow_step_id`, a call may pass `transition`: the name of a transition the current step declares under `events.transitions`. The target step is resolved from the task's current step, and the transition's own one-time options are merged with the caller's (transition instructions come first, boolean flags are OR-ed). Supply exactly one of `transition` or `workflow_step_id`. A forward transition must target a later step and a backward transition an earlier one; an unknown name fails and lists the available names.
+
 **No secrets or large dumps.** Messages are coordination, not a code-delivery channel. Do not send credentials, private keys, or large file contents through cross-task messages. Reference files by path; share access via the repository, not the message.
 
 **Failed/cancelled tasks cannot receive messages.** If `message_task_kandev` returns an error, the target task is in a terminal state. Create a fresh task with `create_task_kandev` and start over.
@@ -264,5 +266,6 @@ These tools complement cross-task communication for common coordination patterns
 | `restore_task_plan_revision_kandev` | Restore a revision after checking current and source versions |
 | `step_complete_kandev` | Signal that the current workflow step is done (task-mode only) |
 | `ask_user_question_kandev` | Escalate to a human when agent negotiation cannot resolve a question |
+| `request_approval_kandev` | Ask a human to approve, revise, or reject the task plan or a task document, with optional plan comments, and wait |
 
 Related: [Coordinate Work](coordination.md), [Automation and MCP](automation-and-mcp.md), [Tasks and workflows](tasks-and-workflows.md).

@@ -30,6 +30,7 @@ import {
 import { ClarificationOverlayTopBar } from "./clarification-overlay-header";
 import { ClarificationStatusBanner } from "./clarification-status-banner";
 import { ClarificationMarkdown } from "./clarification-markdown";
+import { ConnectedApprovalRequestCard } from "./approval-request-card";
 import { useTranslation } from "react-i18next";
 
 type ClarificationInputOverlayProps = {
@@ -566,6 +567,19 @@ function ClarificationCarouselBody({
   const isSingleQuestion = total === 1;
 
   if (!meta) return null;
+
+  const approval = meta.metadata.approval;
+  if (approval) {
+    return (
+      <ConnectedApprovalRequestCard
+        approval={approval}
+        summary={meta.metadata.context ?? null}
+        requestCreatedAt={meta.message.created_at ?? null}
+        isSubmitting={isSubmitting}
+        onSubmitAnswer={(answer) => submitAnswers({ [meta.questionId]: answer })}
+      />
+    );
+  }
 
   const { selectedOption, customCommittedText, draft, customActive } = deriveSelectionState(
     meta,

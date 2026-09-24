@@ -56,10 +56,14 @@ export function SessionConfigToggle({
   const isDirty = isWorkflowStepValueDirty(step, savedStep, (item) =>
     JSON.stringify(configureSessionAction(item)?.config?.rules ?? []),
   );
-  const disabled = readOnly || !!step.agent_profile_id || (!enabled && profiles.length === 0);
+  const disabled =
+    readOnly ||
+    !!step.agent_profile_id ||
+    (step.allowed_tags?.length ?? 0) > 0 ||
+    (!enabled && profiles.length === 0);
 
   const setEnabled = (nextEnabled: boolean) => {
-    if (readOnly) return;
+    if (readOnly || (step.allowed_tags?.length ?? 0) > 0) return;
     if (!nextEnabled) {
       onUpdate(withoutConfigureSession(step));
       return;

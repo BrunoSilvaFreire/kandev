@@ -40,7 +40,7 @@ func TestResolveStepAgentProfileForTaskKeepsThreeTasksIsolatedAfterWorkflowEdit(
 	}
 	wantBeforeEdit := []string{"profile-a", "profile-b", "profile-c"}
 	for i, task := range tasks {
-		if got := service.resolveStepAgentProfileForTask(context.Background(), task, implement); got != wantBeforeEdit[i] {
+		if got := resolveEntryProfile(t, service, task, implement); got != wantBeforeEdit[i] {
 			t.Fatalf("task %s profile before edit = %q, want %q", task.ID, got, wantBeforeEdit[i])
 		}
 	}
@@ -48,7 +48,7 @@ func TestResolveStepAgentProfileForTaskKeepsThreeTasksIsolatedAfterWorkflowEdit(
 	implement.AgentProfileID = "profile-c"
 	wantAfterEdit := []string{"profile-c", "profile-b", "profile-c"}
 	for i, task := range tasks {
-		if got := service.resolveStepAgentProfileForTask(context.Background(), task, implement); got != wantAfterEdit[i] {
+		if got := resolveEntryProfile(t, service, task, implement); got != wantAfterEdit[i] {
 			t.Fatalf("task %s profile after edit = %q, want %q", task.ID, got, wantAfterEdit[i])
 		}
 	}
@@ -56,7 +56,7 @@ func TestResolveStepAgentProfileForTaskKeepsThreeTasksIsolatedAfterWorkflowEdit(
 	newStep := &wfmodels.WorkflowStep{
 		ID: "later", WorkflowID: "workflow-1", AgentProfileID: "profile-c",
 	}
-	if got := service.resolveStepAgentProfileForTask(context.Background(), tasks[1], newStep); got != "profile-c" {
+	if got := resolveEntryProfile(t, service, tasks[1], newStep); got != "profile-c" {
 		t.Fatalf("new step inherited old replacement = %q, want profile-c", got)
 	}
 }
@@ -72,7 +72,7 @@ func TestResolveStepAgentProfileForTaskUsesTaskBindingBeforeWorkflowProfile(t *t
 	task := &models.Task{WorkflowID: "workflow-1", WorkflowAgentOverrides: overrides}
 	step := &wfmodels.WorkflowStep{ID: "implement", WorkflowID: "workflow-1", AgentProfileID: "profile-luna"}
 
-	if got := svc.resolveStepAgentProfileForTask(context.Background(), task, step); got != "profile-terra" {
+	if got := resolveEntryProfile(t, svc, task, step); got != "profile-terra" {
 		t.Fatalf("resolved profile = %q, want profile-terra", got)
 	}
 }
@@ -88,9 +88,20 @@ func TestResolveStepAgentProfileForTaskDoesNotApplyForeignWorkflowBinding(t *tes
 	task := &models.Task{WorkflowID: "workflow-2", WorkflowAgentOverrides: overrides}
 	step := &wfmodels.WorkflowStep{ID: "implement", WorkflowID: "workflow-2", AgentProfileID: "profile-sol"}
 
-	if got := svc.resolveStepAgentProfileForTask(context.Background(), task, step); got != "profile-sol" {
+	if got := resolveEntryProfile(t, svc, task, step); got != "profile-sol" {
 		t.Fatalf("resolved foreign profile = %q, want profile-sol", got)
 	}
+}
+
+// resolveEntryProfile is the test-facing helper for the entry-aware resolver:
+// an untagged step resolves its profile without error.
+func resolveEntryProfile(t *testing.T, svc *Service, task *models.Task, step *wfmodels.WorkflowStep) string {
+	t.Helper()
+	profile, err := svc.resolveStepAgentProfileForTaskError(context.Background(), task, step)
+	if err != nil {
+		t.Fatalf("resolve entry profile for step %s: %v", step.ID, err)
+	}
+	return profile
 }
 
 func TestWorkflowOverrideTaskReadFailureStopsRoutingPreflightAndStart(t *testing.T) {

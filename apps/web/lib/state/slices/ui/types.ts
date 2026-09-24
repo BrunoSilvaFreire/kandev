@@ -68,7 +68,8 @@ export type MobileSessionCorePanel =
   | "files"
   | "terminal"
   | "review"
-  | "prompt-history";
+  | "prompt-history"
+  | "usage";
 
 /** A plugin task panel id on mobile, `plugin:<pluginId>:<panelKey>` — see
  *  lib/state/layout-manager/plugin-panels.ts's pluginPanelId. */

@@ -232,6 +232,7 @@ func KandevContext() string {
 }
 
 const userQuestionSection = `- ask_user_question_kandev: Ask the user 1-4 related questions and wait for all answers. Use this whenever you need user input to proceed. Treat this call as a hard user-input barrier: do not call another tool, do not continue working, and do not provide a final response until the tool returns completed user answers or a structured rejection. If the tool reports a validation error before creating a question, correct the request and retry. If an accepted question returns without completed answers or a structured rejection, end your turn immediately. This includes a timeout, disconnect, or pending wait. For an incomplete result, do not infer an answer or continue the task.
+- request_approval_kandev: approve/revise/reject the plan or a document; same barrier. On revise, re-read it and keep user edits.
 `
 
 const parentQuestionSection = `- ask_parent_question_kandev: Ask the direct parent task one or more critical questions. Use this only when you cannot continue safely without a parent decision. The question is sent to the parent task, and this call MUST end your turn; do not use an operator-question tool.
@@ -245,7 +246,7 @@ const canvasGuidanceSection = `CANVAS AUTHORING:
 Use these tools only when the user explicitly asks for a Kandev canvas: create_canvas_kandev, read_canvas_authoring_skill_kandev, and publish_canvas_kandev. Create it in Kandev before writing app files. Read the skill once, edit only in its returned source directory, then publish through MCP. Report publication status, including failures. Local files or a successful build do not publish a canvas.
 `
 
-const richOutputSection = `- show_rich_output_kandev: For a chart, graph, plot, file preview, KPI, or metrics request with data, call this now. Do not implement it as ASCII, SVG, HTML, or another app. Otherwise use prose or a small Markdown table. Get the schema and examples from tool discovery. Paths are workspace-relative; Kandev owns layout, axes, legends, and tooltips. Label series with units.
+const richOutputSection = `- show_rich_output_kandev: For a chart, graph, plot, file preview, KPI, or metrics request with data, call this now. Do not implement it as ASCII, SVG, HTML, or another app. Get the schema and examples from tool discovery. Paths are workspace-relative.
 `
 
 // stepCompleteSection is the description + instruction block for the

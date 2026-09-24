@@ -173,6 +173,18 @@ func TestFormatKandevContext_UserQuestionIsHardInputBarrier(t *testing.T) {
 	assert.Contains(t, context, "until the tool returns completed user answers or a structured rejection")
 	assert.Contains(t, context, "If the tool reports a validation error before creating a question, correct the request and retry")
 	assert.Contains(t, context, "If an accepted question returns without completed answers or a structured rejection, end your turn immediately")
+	assert.Contains(t, context, "do not infer an answer")
+}
+
+func TestFormatKandevContext_RequestApprovalIsContract(t *testing.T) {
+	context := FormatKandevContextWithOptions("task-abc", "session-xyz", KandevContextOptions{
+		IncludeUserQuestionTool: true,
+	})
+
+	assert.Contains(t, context, "request_approval_kandev")
+	assert.Contains(t, context, "approve/revise/reject the plan or a document")
+	assert.Contains(t, context, "same barrier")
+	assert.Contains(t, context, "re-read it and keep user edits")
 }
 
 func TestFormatKandevContext_TitleToolFollowsCapability(t *testing.T) {

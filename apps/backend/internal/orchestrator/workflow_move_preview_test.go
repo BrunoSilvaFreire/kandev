@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/workflow/entryroute"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -786,4 +787,52 @@ func TestPreviewWorkflowMove_NoSessionLaunchGatesMatchActualMove(t *testing.T) {
 			t.Fatalf("preview model = %#v, want task profile model", preview.Model.After)
 		}
 	})
+}
+
+func TestPreviewStepAgentProfileUsesTagSelectionReadOnly(t *testing.T) {
+	task := &models.Task{ID: "t1", WorkflowID: "workflow-1"}
+	step := &wfmodels.WorkflowStep{
+		ID: "review", WorkflowID: "workflow-1", AgentProfileID: "profile-fallback",
+		AllowedTags: []string{"review"},
+	}
+	selector := &recordingOrchestratorSelector{profile: "profile-quota"}
+	svc := &Service{workflowEntryProfileSelector: selector}
+
+	got, err := svc.previewStepAgentProfile(context.Background(), step, task, false)
+	if err != nil {
+		t.Fatalf("previewStepAgentProfile: %v", err)
+	}
+	if got != "profile-quota" {
+		t.Fatalf("preview profile = %q, want the advisory tag candidate profile-quota", got)
+	}
+	if _, ok := models.LoadWorkflowSessionRoute(task.Metadata); ok {
+		t.Fatal("preview must not write a workflow-session route")
+	}
+}
+
+func TestPreviewStepAgentProfilePropagatesTagSelectionError(t *testing.T) {
+	task := &models.Task{ID: "t1", WorkflowID: "workflow-1"}
+	step := &wfmodels.WorkflowStep{
+		ID: "review", WorkflowID: "workflow-1", AgentProfileID: "profile-fallback",
+		AllowedTags: []string{"review"},
+	}
+	sentinel := errors.New("no eligible tagged profile")
+	svc := &Service{workflowEntryProfileSelector: &recordingOrchestratorSelector{err: sentinel}}
+
+	_, err := svc.previewStepAgentProfile(context.Background(), step, task, false)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("err = %v, want the selector error (no fallthrough to the static fallback)", err)
+	}
+}
+
+func TestPreviewStepAgentProfileTaggedWithoutSelectorFailsClosed(t *testing.T) {
+	task := &models.Task{ID: "t1", WorkflowID: "workflow-1"}
+	step := &wfmodels.WorkflowStep{
+		ID: "review", WorkflowID: "workflow-1", AgentProfileID: "profile-fallback",
+		AllowedTags: []string{"review"},
+	}
+	_, err := (&Service{}).previewStepAgentProfile(context.Background(), step, task, false)
+	if !errors.Is(err, entryroute.ErrNoFrozenProfile) {
+		t.Fatalf("err = %v, want ErrNoFrozenProfile", err)
+	}
 }

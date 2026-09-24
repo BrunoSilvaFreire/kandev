@@ -164,6 +164,11 @@ export type AgentProfile = {
    */
   enabled?: boolean;
   userModified?: boolean;
+  /**
+   * Canonical free-form labels used to match this profile to a workflow
+   * step's allowed tags. Empty for dynamic profiles.
+   */
+  tags?: string[];
 
   // --- Office orchestration (always populated by office API,
   //     absent on kanban-served rows; consumers should null-check) ---
@@ -244,6 +249,7 @@ export type AgentProfilePayload = {
   cli_passthrough: boolean;
   enabled?: boolean;
   user_modified?: boolean;
+  tags?: string[];
   created_at: string;
   updated_at: string;
   dynamic?: {

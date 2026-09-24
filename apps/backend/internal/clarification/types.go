@@ -5,7 +5,52 @@ package clarification
 import (
 	"sync"
 	"time"
+
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
+
+// Approval subjects supported by request_approval_kandev. A subject names
+// what the user is being asked to approve.
+const (
+	ApprovalSubjectTaskPlan = "task_plan"
+	ApprovalSubjectDocument = "document"
+)
+
+// Approval decisions. These are the stable option IDs of the fixed approval
+// question, so older clients that render the bundle as a normal single
+// question still produce a valid outcome.
+const (
+	ApprovalDecisionApprove = "approve"
+	ApprovalDecisionRevise  = "revise"
+	ApprovalDecisionReject  = "reject"
+)
+
+// ApprovalQuestionID is the fixed question id of an approval bundle.
+const ApprovalQuestionID = "approval"
+
+// ApprovalMeta is the request-side metadata that marks a clarification bundle
+// as an approval request. It is persisted alongside the bundle's questions so
+// the resolver can render the subject's pending comments before claiming.
+type ApprovalMeta struct {
+	Subject          string `json:"subject"` // ApprovalSubjectTaskPlan | ApprovalSubjectDocument
+	DocumentKey      string `json:"document_key,omitempty"`
+	Title            string `json:"title"`
+	VersionAtRequest string `json:"version_at_request,omitempty"`
+}
+
+// ApprovalOutcome is the response-side payload filled by the resolver when it
+// resolves an approval bundle. It carries the decision, the user's free-text
+// feedback, the rendered pending plan comments, the ids of the comments that
+// were consumed, whether the user edited the subject since the request, and
+// the subject's current version.
+type ApprovalOutcome struct {
+	Decision       string   `json:"decision"` // ApprovalDecisionApprove | Revise | Reject
+	Feedback       string   `json:"feedback,omitempty"`
+	PlanComments   string   `json:"plan_comments,omitempty"`
+	CommentIDs     []string `json:"comment_ids,omitempty"`
+	SubjectEdited  bool     `json:"subject_edited"`
+	CurrentVersion string   `json:"current_version,omitempty"`
+}
 
 // Option represents a single choice option for a question.
 type Option struct {
@@ -31,7 +76,11 @@ type Request struct {
 	TaskID    string     `json:"task_id"`
 	Questions []Question `json:"questions"`         // 1-N questions, all required
 	Context   string     `json:"context,omitempty"` // Optional shared context for all questions
-	CreatedAt time.Time  `json:"created_at"`
+	// Approval, when set, marks this bundle as a request_approval_kandev
+	// approval request. The bundle still carries exactly one fixed question
+	// so existing chat/inbox rendering treats it as a normal bundle.
+	Approval  *ApprovalMeta `json:"approval,omitempty"`
+	CreatedAt time.Time     `json:"created_at"`
 }
 
 // Answer represents the user's answer to a single question.
@@ -39,6 +88,10 @@ type Answer struct {
 	QuestionID      string   `json:"question_id"`
 	SelectedOptions []string `json:"selected_options,omitempty"` // Option IDs (single-choice ⇒ at most one)
 	CustomText      string   `json:"custom_text,omitempty"`      // Free-text input
+	// PlanCommentRefs carries the exact pending plan comments the user
+	// attached to an approval decision. Only valid on an approval bundle
+	// whose subject is a task plan.
+	PlanCommentRefs []taskmodels.TaskPlanCommentRef `json:"plan_comment_refs,omitempty"`
 }
 
 // Response represents the user's response to a clarification request.
@@ -50,6 +103,8 @@ type Response struct {
 	Rejected     bool      `json:"rejected,omitempty"`
 	RejectReason string    `json:"reject_reason,omitempty"` // If rejected
 	RespondedAt  time.Time `json:"responded_at"`
+	// Approval carries the resolver-filled outcome of an approval bundle.
+	Approval *ApprovalOutcome `json:"approval,omitempty"`
 }
 
 // PendingClarification represents a clarification request waiting for a response.

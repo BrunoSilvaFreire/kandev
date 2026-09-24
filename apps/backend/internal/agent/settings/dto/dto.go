@@ -49,6 +49,9 @@ type AgentProfileDTO struct {
 	// agent advertises OpenAI-compatible provider support. Not persisted.
 	ProviderSupported bool `json:"provider_supported"`
 	UserModified      bool `json:"user_modified"`
+	// Tags are the canonical free-form labels used to match this profile to a
+	// workflow step's allowed tags. Empty for dynamic profiles.
+	Tags []string `json:"tags"`
 	// WorkspaceID scopes the profile to an office workspace. Empty for
 	// shallow kanban-only profiles. Surfaced so consumers (e.g. test
 	// cleanup helpers) can distinguish office-owned profiles from

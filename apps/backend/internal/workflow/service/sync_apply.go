@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/google/uuid"
@@ -366,6 +367,7 @@ func stepMatchesDefinition(existing, desired *models.WorkflowStep) bool {
 		existing.IsStartStep == desired.IsStartStep &&
 		existing.ShowInCommandPanel == desired.ShowInCommandPanel &&
 		existing.AutoArchiveAfterHours == desired.AutoArchiveAfterHours &&
+		slices.Equal(existing.AllowedTags, desired.AllowedTags) &&
 		existing.AgentProfileID == desired.AgentProfileID &&
 		existing.ProfileSessionStartPolicy == desired.ProfileSessionStartPolicy &&
 		existing.ProfileSessionEndPolicy == desired.ProfileSessionEndPolicy &&

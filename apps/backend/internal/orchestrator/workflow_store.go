@@ -144,6 +144,14 @@ type workflowStore struct {
 	guardedLifecycle    guardedTransitionLifecycle
 	ledger              *operationLedger
 	stepCache           *stepSpecCache
+	// entryRouteAttacher resolves and attaches a tag-configured destination's
+	// pending profile route before a queue promotion writes the transition.
+	entryRouteAttacher entryRouteAttacher
+}
+
+// setEntryRouteAttacher wires pending-route selection into queue promotions.
+func (s *workflowStore) setEntryRouteAttacher(attach entryRouteAttacher) {
+	s.entryRouteAttacher = attach
 }
 
 func newWorkflowStore(
@@ -793,8 +801,19 @@ func (s *workflowStore) pullOneFeederTask(
 			continue
 		}
 		candidate.UpdatedAt = time.Now().UTC()
+		promotionCtx := ctx
+		if s.entryRouteAttacher != nil {
+			attached, attachErr := s.entryRouteAttacher(promotionCtx, candidate.ID, "", vacatedStep)
+			if attachErr != nil {
+				s.logger.Warn("skipping feeder task: failed to freeze tagged step entry profile",
+					zap.String("task_id", candidate.ID), zap.Error(attachErr))
+				skipped[candidate.ID] = struct{}{}
+				continue
+			}
+			promotionCtx = attached
+		}
 		if promoter, ok := s.repo.(workflowQueuedTaskPromoter); ok {
-			claimed, err := promoter.PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx, candidate, fromStepID, vacatedStep.ID, vacatedStep.WIPLimit)
+			claimed, err := promoter.PromoteQueuedTaskIfWorkflowStepHasCapacity(promotionCtx, candidate, fromStepID, vacatedStep.ID, vacatedStep.WIPLimit)
 			if err != nil {
 				s.logger.Warn("failed to promote feeder task", zap.String("task_id", candidate.ID), zap.Error(err))
 				return false
@@ -804,7 +823,7 @@ func (s *workflowStore) pullOneFeederTask(
 				continue
 			}
 		} else if admissionRepo, ok := s.repo.(workflowMoveAdmissionRepository); ok {
-			claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, fromStepID, vacatedStep.ID, vacatedStep.WIPLimit)
+			claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(promotionCtx, candidate, fromStepID, vacatedStep.ID, vacatedStep.WIPLimit)
 			if err != nil {
 				s.logger.Warn("failed to promote feeder task", zap.String("task_id", candidate.ID), zap.Error(err))
 				skipped[candidate.ID] = struct{}{}
@@ -814,7 +833,7 @@ func (s *workflowStore) pullOneFeederTask(
 				skipped[candidate.ID] = struct{}{}
 				continue
 			}
-		} else if err := limitedRepo.UpdateTaskIfWorkflowStepHasCapacity(ctx, candidate, vacatedStep.ID, candidate.ID, vacatedStep.WIPLimit); err != nil {
+		} else if err := limitedRepo.UpdateTaskIfWorkflowStepHasCapacity(promotionCtx, candidate, vacatedStep.ID, candidate.ID, vacatedStep.WIPLimit); err != nil {
 			skipped[candidate.ID] = struct{}{}
 			s.logger.Warn("skipping feeder task that could not be pulled",
 				zap.String("task_id", candidate.ID), zap.Error(err))
@@ -858,8 +877,19 @@ func (s *workflowStore) promoteSameStepTask(ctx context.Context, candidate *mode
 		skipped[candidate.ID] = struct{}{}
 		return s.pullOneFeederTask(ctx, pullRepo, limitedRepo, step, position, skipped)
 	}
+	promotionCtx := ctx
+	if s.entryRouteAttacher != nil {
+		attached, attachErr := s.entryRouteAttacher(promotionCtx, candidate.ID, "", step)
+		if attachErr != nil {
+			s.logger.Warn("skipping queued task: failed to freeze tagged step entry profile",
+				zap.String("task_id", candidate.ID), zap.Error(attachErr))
+			skipped[candidate.ID] = struct{}{}
+			return s.pullOneFeederTask(ctx, pullRepo, limitedRepo, step, position, skipped)
+		}
+		promotionCtx = attached
+	}
 	if promoter, ok := s.repo.(workflowQueuedTaskPromoter); ok {
-		claimed, err := promoter.PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx, candidate, fromStepID, step.ID, step.WIPLimit)
+		claimed, err := promoter.PromoteQueuedTaskIfWorkflowStepHasCapacity(promotionCtx, candidate, fromStepID, step.ID, step.WIPLimit)
 		if err != nil {
 			s.logger.Warn("failed to promote same-step queued task", zap.String("task_id", candidate.ID), zap.Error(err))
 			return false
@@ -869,7 +899,7 @@ func (s *workflowStore) promoteSameStepTask(ctx context.Context, candidate *mode
 			return s.pullOneFeederTask(ctx, pullRepo, limitedRepo, step, position, skipped)
 		}
 	} else if admissionRepo, ok := s.repo.(workflowMoveAdmissionRepository); ok {
-		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, fromStepID, step.ID, step.WIPLimit)
+		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(promotionCtx, candidate, fromStepID, step.ID, step.WIPLimit)
 		if err != nil {
 			s.logger.Warn("failed to promote same-step queued task", zap.String("task_id", candidate.ID), zap.Error(err))
 			skipped[candidate.ID] = struct{}{}
@@ -879,7 +909,7 @@ func (s *workflowStore) promoteSameStepTask(ctx context.Context, candidate *mode
 			skipped[candidate.ID] = struct{}{}
 			return s.pullOneFeederTask(ctx, pullRepo, limitedRepo, step, position, skipped)
 		}
-	} else if err := limitedRepo.UpdateTaskIfWorkflowStepHasCapacity(ctx, candidate, step.ID, candidate.ID, step.WIPLimit); err != nil {
+	} else if err := limitedRepo.UpdateTaskIfWorkflowStepHasCapacity(promotionCtx, candidate, step.ID, candidate.ID, step.WIPLimit); err != nil {
 		s.logger.Warn("failed to promote same-step queued task", zap.String("task_id", candidate.ID), zap.Error(err))
 		skipped[candidate.ID] = struct{}{}
 		return s.pullOneFeederTask(ctx, pullRepo, limitedRepo, step, position, skipped)

@@ -2,7 +2,7 @@ version: 2
 type: kandev_workflow
 workflows:
   - name: Role Pipeline
-    description: Cheap spike resumes context, architect plans, implementer builds, reviewer checks. Human gate before Done.
+    description: Cheap spike resumes context, architect plans and gets human approval in chat, implementer builds (and may escalate back to the architect), reviewer checks. Human gate before Done.
     steps:
       - name: Backlog
         position: 0
@@ -19,8 +19,11 @@ workflows:
           ROLE: Spike (cheap context agent). Do NOT modify repository files.
           {{task_prompt}}
 
-          When finished, save the full resume/handoff document as this task's plan with the
-          create_task_plan_kandev MCP tool (update it if one exists), then call step_complete_kandev.
+          When finished, save the full resume/handoff report with write_task_document_kandev:
+          document_key "spike", type "spike", title "Spike report". If a "spike" document already holds a
+          different investigation, use the next free key ("spike-2", "spike-3", ...) instead of overwriting it.
+          Do NOT create or update the task plan: the implementation plan is owned by the Architect step.
+          Then call step_complete_kandev.
         events:
           on_enter:
             - type: auto_start_agent
@@ -41,17 +44,45 @@ workflows:
         position: 2
         color: bg-purple-500
         prompt: |
-          ROLE: Architect. Read the task plan with get_task_plan_kandev: it is a resume handoff produced by a
-          cheap spike agent from an earlier Codex planning conversation. Verify its claims against the
-          repository (the working tree has intentional uncommitted work; never discard or reset it).
-          Produce the final, ordered implementation plan with explicit verification commands and stop/rollback
-          gates, and replace the task plan with it via edit/update of the task plan. Do NOT implement.
-          Call step_complete_kandev when the plan is saved.
+          ROLE: Architect (plan owner and adviser). Never discard, reset, stash or commit the working tree's uncommitted work.
+          You are the only writer of the task plan. Answer every question asked. Do NOT implement.
+
+          How you were entered decides what to do:
+          A) First entry (no escalation text below): read the Spike report with get_task_document_kandev(document_key "spike")
+             (list_task_documents_kandev shows "spike-2"...). If it is absent, work from the task prompt and state plainly which
+             evidence is missing; never invent evidence. Verify its claims against the repository, then write the final ordered
+             implementation plan (explicit verification commands and stop/rollback gates) with create_task_plan_kandev, or with
+             update_task_plan_kandev(new_revision=true) if a plan already exists (any later plan write in the same turn also uses
+             new_revision=true if the draft should stay readable). Then request human approval with
+             request_approval_kandev(subject "task_plan", title "Plan revision N", summary: 3-6 lines naming what changed since the
+             last request and where to resume). Handle the answer:
+             - approve: call step_complete_kandev. The task moves to Implement.
+             - revise: if subject_edited is true, re-read the plan first with get_task_plan_kandev and keep the user's edits. Address
+               the feedback and every item in plan_comments, then write a new revision with
+               update_task_plan_kandev(new_revision=true, expected_version=<current_version from the answer>), and request approval
+               again with request_approval_kandev.
+             - reject: end your turn without calling step_complete_kandev, with a short summary of why the plan stopped.
+             If the answer arrives as the next message instead (the user answered after the tool call timed out), act on it exactly
+             the same way.
+          B) Escalation from the Implementer (instructions below start with "ESCALATION"): read the current plan and the evidence
+             given, verify it against the repository, and decide. Either revise the plan with update_task_plan_kandev(new_revision=true),
+             keeping untouched sections and putting a note at the top: "Revision N (supersedes revision M): what changed, why, where
+             to resume" (earlier plans stay readable via list_task_plan_revisions_kandev / get_task_plan_revision_kandev), or leave
+             the plan unchanged and give advice only. When a human should sign off (scope or risk change, destructive step, ambiguous
+             requirement), call request_approval_kandev first and handle its answer as in case A. Then hand back with
+             move_task_kandev(task_id, transition="handoff", entry_options={"instructions": "<what changed, the plan revision
+             number, where to resume>"}). End your turn WITHOUT calling step_complete_kandev.
         events:
-          on_turn_complete:
-            - type: move_to_next
           on_enter:
             - type: auto_start_agent
+          on_turn_complete:
+            - type: move_to_next
+          transitions:
+            - name: handoff
+              direction: forward
+              to_step_position: 3
+              skip_step_prompt: true
+              instructions: "ARCHITECT HANDOFF: re-read the task plan with get_task_plan_kandev (the latest revision is current) and resume."
         is_start_step: false
         show_in_command_panel: true
         allow_manual_move: true
@@ -61,21 +92,41 @@ workflows:
           agent_name: Codex
           model: gpt-5.6-sol
           mode: agent
-        profile_session_start_policy: new
+        profile_session_start_policy: reuse
         profile_session_end_policy: park
         complete_task_on_enter: false
       - name: Implement
         position: 3
         color: bg-blue-500
         prompt: |
-          ROLE: Implementer. Read the task plan with get_task_plan_kandev and implement it step by step in the
-          current working tree, running the plan's verification commands. Preserve existing uncommitted work.
-          Do not commit. Report what changed and test results, then call step_complete_kandev.
+          ROLE: Implementer. Read the task plan with get_task_plan_kandev and implement it step by step in the current working
+          tree, running the plan's verification commands. Preserve existing uncommitted work. Do not commit. Keep working until the plan's
+          gates are finished or you hit a blocker; do not end your turn just to report progress. Background runs you start must be awaited
+          and their artifacts checked before you finish.
+
+          Escalate to the Architect instead of guessing when the plan is wrong, contradicted by evidence, missing a decision, or a gate
+          fails for a reason the plan does not cover. "The Architect" is the KanDev workflow step named "Architect" (its own agent session),
+          never a native/CLI subagent you spawn yourself. Call
+          move_task_kandev(task_id, transition="escalate", entry_options={"instructions": "ESCALATION: <what you tried, the evidence
+          (paths, test output, run ids), and the specific question or plan change needed>"}) and end your turn WITHOUT calling
+          step_complete_kandev. After an escalation your next prompt carries the ARCHITECT HANDOFF; re-read the task plan (the latest
+          revision is current).
+
+          If your turn starts with REVIEW CHANGES REQUESTED, read the task document "review" with get_task_document_kandev and fix
+          every BLOCKER it names before anything else.
+
+          When the plan's gates are done, report what changed and the test/run results, then call step_complete_kandev.
         events:
           on_enter:
             - type: auto_start_agent
           on_turn_complete:
             - type: move_to_next
+          transitions:
+            - name: escalate
+              direction: backward
+              to_step_position: 2
+              skip_step_prompt: true
+              instructions: "ESCALATION from the Implementer. Follow your Architect role instructions for case B."
         is_start_step: false
         show_in_command_panel: true
         allow_manual_move: true
@@ -85,7 +136,7 @@ workflows:
           agent_name: Codex
           model: gpt-5.6-terra
           mode: agent
-        profile_session_start_policy: new
+        profile_session_start_policy: reuse
         profile_session_end_policy: park
         complete_task_on_enter: false
       - name: Review
@@ -93,11 +144,26 @@ workflows:
         color: bg-yellow-500
         prompt: |
           ROLE: Reviewer. Read the task plan (get_task_plan_kandev) and the implementer's conversation
-          (get_task_conversation_kandev), then review the uncommitted diff against the plan. Report findings as
-          BLOCKER / SUGGESTION with file:line. Do not edit files.
+          (get_task_conversation_kandev), then review the uncommitted diff against the plan. Do not edit files.
+          Read any earlier "review" document first with list_task_documents_kandev / get_task_document_kandev and verify
+          that each earlier BLOCKER is actually resolved.
+
+          Write the new review with write_task_document_kandev(document_key "review", type "review", title "Review").
+          It starts with exactly "VERDICT: PASS" or "VERDICT: CHANGES REQUESTED", then the BLOCKER / SUGGESTION items with
+          file:line.
+
+          - PASS: post a short chat summary. A human moves the task to Done.
+          - CHANGES REQUESTED: call move_task_kandev(task_id, transition="request_changes") without pasting the review into the
+            move, then end your turn.
         events:
           on_enter:
             - type: auto_start_agent
+          transitions:
+            - name: request_changes
+              direction: backward
+              to_step_position: 3
+              skip_step_prompt: true
+              instructions: "REVIEW CHANGES REQUESTED: read the task document \"review\" with get_task_document_kandev and fix every BLOCKER, then call step_complete_kandev."
         is_start_step: false
         show_in_command_panel: true
         allow_manual_move: true

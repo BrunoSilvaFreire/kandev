@@ -157,7 +157,7 @@ export function useSessionPromptController(
 ) {
   const { t } = useTranslation();
   const { toast } = useToast();
-  const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({ sessionId: null });
+  const { enhancePrompt, isEnhancingPrompt, enhancePromptPhase } = useUtilityAgentGenerator({ sessionId: null });
   const latestPromptValueRef = useRef("");
   const promptResultDelivery = usePromptResultDelivery({
     scopeKey: `new-session:${taskId}`,
@@ -189,6 +189,7 @@ export function useSessionPromptController(
   return {
     handleEnhancePrompt,
     isEnhancingPrompt,
+    enhancePromptPhase,
     pendingResult: promptResultDelivery.pendingResult,
     applyPending: promptResultDelivery.applyPending,
     copyPending: promptResultDelivery.copyPending,
@@ -373,7 +374,7 @@ function NewSessionForm({
     currentProfileId,
     handoff,
   });
-  const { handleEnhancePrompt, isEnhancingPrompt, pendingResult, applyPending, copyPending } =
+  const { handleEnhancePrompt, isEnhancingPrompt, enhancePromptPhase, pendingResult, applyPending, copyPending } =
     useSessionPromptController(promptRef, taskId);
   const handleContextChange = useSessionContextChange({
     promptRef,
@@ -450,6 +451,7 @@ function NewSessionForm({
         disabled={isBusyState}
         onEnhancePrompt={handleEnhancePrompt}
         isEnhancingPrompt={isEnhancingPrompt}
+        enhancePromptPhase={enhancePromptPhase}
         isUtilityConfigured={isUtilityConfigured}
         onComposerSubmit={() => {
           if (isBusyState || hasPendingAttachmentUploads || !profileSelection.hasProfiles) {

@@ -19,6 +19,7 @@ const EDITABLE_FIELDS = [
   "providerBaseUrl",
   "providerApiKeySecretId",
   "enabled",
+  "tags",
   "dynamic",
 ] as const satisfies readonly (keyof AgentProfile)[];
 

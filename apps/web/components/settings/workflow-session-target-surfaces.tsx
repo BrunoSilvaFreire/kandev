@@ -80,6 +80,8 @@ export type WorkflowSessionSelectorSurfaceProps = {
   profiles: ReturnType<typeof useHealthyAgentProfiles>;
   readOnly: boolean;
   profileSelectionDisabled: boolean;
+  /** Disables only the session-target entries, keeping profile selection usable. */
+  targetsDisabled?: boolean;
   view: SelectorView;
   setView: (view: SelectorView) => void;
   onUpdate: (updates: Partial<WorkflowStep>) => void;
@@ -121,7 +123,8 @@ function WorkflowSessionTargetGroup({
       candidate.id !== step.id &&
       candidate.position < step.position &&
       !!candidate.agent_profile_id &&
-      !candidate.session_target,
+      !candidate.session_target &&
+      (candidate.allowed_tags?.length ?? 0) === 0,
   );
   const selectedTarget = step.session_target;
 
@@ -225,6 +228,7 @@ function ProfileOptionList({
   profiles,
   readOnly,
   profileSelectionDisabled,
+  targetsDisabled,
   onSelectTarget,
   onSelectProfile,
 }: Pick<
@@ -234,6 +238,7 @@ function ProfileOptionList({
   | "profiles"
   | "readOnly"
   | "profileSelectionDisabled"
+  | "targetsDisabled"
   | "onSelectTarget"
   | "onSelectProfile"
 >) {
@@ -254,7 +259,7 @@ function ProfileOptionList({
           step={step}
           steps={steps}
           profiles={profiles}
-          targetsDisabled={profileSelectionDisabled}
+          targetsDisabled={targetsDisabled ?? profileSelectionDisabled}
           onSelectTarget={onSelectTarget}
         />
         <AgentProfileGroup
@@ -365,6 +370,7 @@ export function SelectorSurface({
   profiles,
   readOnly,
   profileSelectionDisabled,
+  targetsDisabled,
   view,
   setView,
   onUpdate,
@@ -417,6 +423,7 @@ export function SelectorSurface({
           profiles={profiles}
           readOnly={readOnly}
           profileSelectionDisabled={profileSelectionDisabled}
+          targetsDisabled={targetsDisabled}
           onSelectTarget={onSelectTarget}
           onSelectProfile={onSelectProfile}
         />
@@ -431,6 +438,7 @@ export function MobileSelectorSurface({
   profiles,
   readOnly,
   profileSelectionDisabled,
+  targetsDisabled,
   view,
   setView,
   onUpdate,
@@ -492,6 +500,7 @@ export function MobileSelectorSurface({
         profiles={profiles}
         readOnly={readOnly}
         profileSelectionDisabled={profileSelectionDisabled}
+        targetsDisabled={targetsDisabled}
         onSelectTarget={onSelectTarget}
         onSelectProfile={onSelectProfile}
       />

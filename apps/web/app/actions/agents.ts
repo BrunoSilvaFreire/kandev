@@ -119,6 +119,7 @@ export async function createAgentProfileAction(
     provider_base_url?: string;
     provider_api_key_secret_id?: string;
     env_vars?: ProfileEnvVar[];
+    tags?: string[];
     dynamic?: DynamicProfilePayload;
   } & ProfilePermissions,
 ): Promise<AgentProfile> {
@@ -153,6 +154,7 @@ export async function updateAgentProfileAction(
     provider_base_url?: string;
     provider_api_key_secret_id?: string;
     env_vars?: ProfileEnvVar[];
+    tags?: string[];
     dynamic?: DynamicProfilePayload;
   },
   force = false,

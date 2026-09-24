@@ -243,18 +243,38 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 		return
 	}
 
+	w := newPromptResponder(c, acceptsNDJSON(c))
 	if sessionless {
-		h.executeSessionless(c, ctx, prepared, callID)
+		h.executeSessionless(w, ctx, prepared, callID)
 		return
 	}
+	h.executeSessionPrompt(w, ctx, req, prepared, callID)
+}
 
-	// Execute via agentctl using an existing task session's agentctl
+// executeSessionPrompt runs a prompt against an existing task session's
+// agentctl (profile-aware when the prepared request names a profile) and
+// finishes the response.
+func (h *Handlers) executeSessionPrompt(
+	w *promptResponder,
+	ctx context.Context,
+	req dto.ExecutePromptRequest,
+	prepared *service.PromptRequest,
+	callID string,
+) {
+	if w.stream {
+		ctx = agentctlutil.WithProgressReporter(ctx, func(p agentctlutil.PromptProgress) {
+			w.progressFrame(p)
+		})
+		w.beginStream()
+	}
+
 	var resp *agentctlutil.PromptResponse
+	var err error
 	if prepared.AgentProfileID != "" {
 		profileExecutor, ok := h.executor.(profileInferenceExecutor)
 		if !ok {
 			_ = h.controller.FailCall(ctx, callID, "profile-aware inference executor is unavailable", 0)
-			c.JSON(http.StatusServiceUnavailable, dto.ExecutePromptResponse{CallID: callID, Error: "profile-aware inference executor is unavailable"})
+			w.finish(http.StatusServiceUnavailable, dto.ExecutePromptResponse{CallID: callID, Error: "profile-aware inference executor is unavailable"})
 			return
 		}
 		resp, err = h.executeSessionProfilePrompt(ctx, profileExecutor, req.SessionID, prepared, callID)
@@ -264,7 +284,7 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 	if err != nil {
 		h.logger.Error("failed to execute prompt", zap.Error(err), zap.String("call_id", callID))
 		_ = h.controller.FailCall(ctx, callID, err.Error(), 0)
-		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{
+		w.finish(http.StatusInternalServerError, dto.ExecutePromptResponse{
 			CallID: callID,
 			Error:  "failed to execute prompt: " + err.Error(),
 		})
@@ -273,26 +293,22 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 	if resp == nil {
 		const message = "utility executor returned no response"
 		_ = h.controller.FailCall(ctx, callID, message, 0)
-		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{CallID: callID, Error: message})
+		w.finish(http.StatusInternalServerError, dto.ExecutePromptResponse{CallID: callID, Error: message})
 		return
 	}
-
 	if !resp.Success {
 		_ = h.controller.FailCall(ctx, callID, resp.Error, resp.DurationMs)
-		c.JSON(http.StatusOK, dto.ExecutePromptResponse{
+		w.finish(http.StatusOK, dto.ExecutePromptResponse{
 			CallID:     callID,
 			Error:      resp.Error,
 			DurationMs: resp.DurationMs,
 		})
 		return
 	}
-
-	// Mark call as completed
 	if err := h.controller.CompleteCall(ctx, callID, resp.Response, resp.PromptTokens, resp.ResponseTokens, resp.DurationMs); err != nil {
 		h.logger.Warn("failed to update call record", zap.Error(err), zap.String("call_id", callID))
 	}
-
-	c.JSON(http.StatusOK, dto.ExecutePromptResponse{
+	w.finish(http.StatusOK, dto.ExecutePromptResponse{
 		Success:        true,
 		CallID:         callID,
 		Response:       resp.Response,
@@ -305,14 +321,25 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 
 // executeSessionless runs the prepared prompt through the host utility manager
 // (no task session). Used for flows like "enhance prompt" in the new-task modal.
-func (h *Handlers) executeSessionless(c *gin.Context, ctx context.Context, prepared *service.PromptRequest, callID string) {
+func (h *Handlers) executeSessionless(
+	w *promptResponder,
+	ctx context.Context,
+	prepared *service.PromptRequest,
+	callID string,
+) {
 	if h.hostExecutor == nil {
 		_ = h.controller.FailCall(ctx, callID, "host utility not configured", 0)
-		c.JSON(http.StatusServiceUnavailable, dto.ExecutePromptResponse{
+		w.finish(http.StatusServiceUnavailable, dto.ExecutePromptResponse{
 			CallID: callID,
 			Error:  "host utility not configured; session_id is required",
 		})
 		return
+	}
+	if w.stream {
+		ctx = agentctlutil.WithProgressReporter(ctx, func(p agentctlutil.PromptProgress) {
+			w.progressFrame(p)
+		})
+		w.beginStream()
 	}
 	var result *hostutility.PromptResult
 	var err error
@@ -320,7 +347,7 @@ func (h *Handlers) executeSessionless(c *gin.Context, ctx context.Context, prepa
 		profileExecutor, ok := h.hostExecutor.(profileHostUtilityExecutor)
 		if !ok {
 			_ = h.controller.FailCall(ctx, callID, "profile-aware host utility executor is unavailable", 0)
-			c.JSON(http.StatusServiceUnavailable, dto.ExecutePromptResponse{CallID: callID, Error: "profile-aware host utility executor is unavailable"})
+			w.finish(http.StatusServiceUnavailable, dto.ExecutePromptResponse{CallID: callID, Error: "profile-aware host utility executor is unavailable"})
 			return
 		}
 		result, err = h.executeSessionlessProfilePrompt(ctx, profileExecutor, prepared, callID)
@@ -330,7 +357,7 @@ func (h *Handlers) executeSessionless(c *gin.Context, ctx context.Context, prepa
 	if err != nil {
 		h.logger.Error("failed to execute sessionless prompt", zap.Error(err), zap.String("call_id", callID))
 		_ = h.controller.FailCall(ctx, callID, err.Error(), 0)
-		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{
+		w.finish(http.StatusInternalServerError, dto.ExecutePromptResponse{
 			CallID: callID,
 			Error:  "failed to execute prompt: " + err.Error(),
 		})
@@ -339,13 +366,13 @@ func (h *Handlers) executeSessionless(c *gin.Context, ctx context.Context, prepa
 	if result == nil {
 		const message = "host utility returned no response"
 		_ = h.controller.FailCall(ctx, callID, message, 0)
-		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{CallID: callID, Error: message})
+		w.finish(http.StatusInternalServerError, dto.ExecutePromptResponse{CallID: callID, Error: message})
 		return
 	}
 	if err := h.controller.CompleteCall(ctx, callID, result.Response, result.PromptTokens, result.ResponseTokens, result.DurationMs); err != nil {
 		h.logger.Warn("failed to update call record", zap.Error(err), zap.String("call_id", callID))
 	}
-	c.JSON(http.StatusOK, dto.ExecutePromptResponse{
+	w.finish(http.StatusOK, dto.ExecutePromptResponse{
 		Success:        true,
 		CallID:         callID,
 		Response:       result.Response,

@@ -104,7 +104,7 @@ copy_one() {
   local source
   for source in "$@"; do
     if [ -f "$source" ]; then
-      cp "$source" "$OUTPUT_DIR/bin/$(basename "$source")"
+      cp -f "$source" "$OUTPUT_DIR/bin/$(basename "$source")"
       chmod +x "$OUTPUT_DIR/bin/$(basename "$source")" 2>/dev/null || true
       return 0
     fi

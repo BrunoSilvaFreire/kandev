@@ -158,6 +158,11 @@ type StepEvents struct {
 	OnHeartbeat         []GenericAction `json:"on_heartbeat,omitempty" yaml:"on_heartbeat,omitempty"`
 	OnBudgetAlert       []GenericAction `json:"on_budget_alert,omitempty" yaml:"on_budget_alert,omitempty"`
 	OnAgentError        []GenericAction `json:"on_agent_error,omitempty" yaml:"on_agent_error,omitempty"`
+
+	// Transitions are named, agent-invoked alternatives to the ordinary
+	// on_turn_complete transition. They are invoked through
+	// move_task_kandev(transition=...) and are never evaluated by the engine.
+	Transitions []StepTransition `json:"transitions,omitempty" yaml:"transitions,omitempty"`
 }
 
 // ReviewStatus represents the review state of a session
@@ -200,8 +205,10 @@ type StepDefinition struct {
 	ProfileSessionStartPolicy taskmodels.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy,omitempty" yaml:"profile_session_start_policy,omitempty"`
 	ProfileSessionEndPolicy   taskmodels.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy,omitempty" yaml:"profile_session_end_policy,omitempty"`
 	SessionTarget             *WorkflowSessionTarget                       `json:"session_target,omitempty" yaml:"session_target,omitempty"`
-	WIPLimit                  int                                          `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
-	PullFromStepID            string                                       `json:"pull_from_step_id,omitempty" yaml:"pull_from_step_id,omitempty"`
+	// AllowedTags selects an eligible concrete profile by tag at step entry.
+	AllowedTags    []string `json:"allowed_tags,omitempty" yaml:"allowed_tags,omitempty"`
+	WIPLimit       int      `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
+	PullFromStepID string   `json:"pull_from_step_id,omitempty" yaml:"pull_from_step_id,omitempty"`
 	// StageType mirrors WorkflowStep.StageType for templates so the office
 	// default + coordination workflows can declare their UX role
 	// ("work", "review", "approval", "custom") in YAML.
@@ -233,8 +240,11 @@ type WorkflowStep struct {
 	ProfileSessionStartPolicy taskmodels.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy,omitempty"`
 	ProfileSessionEndPolicy   taskmodels.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy,omitempty"`
 	SessionTarget             *WorkflowSessionTarget                       `json:"session_target,omitempty"`
-	WIPLimit                  int                                          `json:"wip_limit,omitempty"`
-	PullFromStepID            string                                       `json:"pull_from_step_id,omitempty"`
+	// AllowedTags selects an eligible concrete agent profile by tag at step
+	// entry when non-empty. Empty preserves fixed-profile resolution.
+	AllowedTags    []string `json:"allowed_tags,omitempty"`
+	WIPLimit       int      `json:"wip_limit,omitempty"`
+	PullFromStepID string   `json:"pull_from_step_id,omitempty"`
 	// StageType is a Phase 2 (ADR-0004) semantic hint for the frontend
 	// ("work", "review", "approval", "custom"). The engine does not branch
 	// on it. Stored as TEXT in workflow_steps.stage_type, defaulting to
@@ -427,6 +437,11 @@ func CollectStepEventReferences(events StepEvents) StepEventReferences {
 			}
 		}
 	}
+	for _, tr := range events.Transitions {
+		if id := strings.TrimSpace(tr.ToStepID); id != "" {
+			refs.StepIDs = append(refs.StepIDs, id)
+		}
+	}
 	return refs
 }
 
@@ -481,6 +496,21 @@ func RemapStepEvents(events StepEvents, idMap map[string]string) StepEvents {
 	result.OnHeartbeat = remapGenericStepEvents(events.OnHeartbeat, idMap)
 	result.OnBudgetAlert = remapGenericStepEvents(events.OnBudgetAlert, idMap)
 	result.OnAgentError = remapGenericStepEvents(events.OnAgentError, idMap)
+	result.Transitions = remapTransitions(events.Transitions, idMap)
+	return result
+}
+
+func remapTransitions(transitions []StepTransition, idMap map[string]string) []StepTransition {
+	if len(transitions) == 0 {
+		return nil
+	}
+	result := make([]StepTransition, 0, len(transitions))
+	for _, tr := range transitions {
+		if newID, found := idMap[tr.ToStepID]; found {
+			tr.ToStepID = newID
+		}
+		result = append(result, tr)
+	}
 	return result
 }
 

@@ -1,14 +1,19 @@
 "use client";
 
-import { memo, useCallback, useEffect, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useState } from "react";
+import { Skeleton } from "@kandev/ui/skeleton";
 import { useEditorProvider } from "@/hooks/use-editor-resolver";
 import { useHtmlPreviewPublisher } from "@/hooks/use-html-preview-publisher";
-import { MonacoCodeEditor } from "@/components/editors/monaco/monaco-code-editor";
 import { CodeMirrorCodeEditor } from "@/components/editors/codemirror/codemirror-code-editor";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { FilePreviewKind } from "@/lib/utils/file-types";
 import { HtmlPreviewContent } from "./html-preview-content";
 import { MarkdownPreviewContent } from "./markdown-preview-content";
+
+const LazyMonacoCodeEditor = lazy(async () => {
+  const module = await import("@/components/editors/monaco/monaco-code-editor");
+  return { default: module.MonacoCodeEditor };
+});
 
 export type FileEditorContentProps = {
   path: string;
@@ -106,11 +111,13 @@ export const FileEditorContent = memo(function FileEditorContent(props: FileEdit
   }
 
   return provider === "monaco" ? (
-    <MonacoCodeEditor
-      {...props}
-      onPreviewHtml={props.previewKind === "html" ? publishCurrentHtmlPreview : undefined}
-      isPublishingHtmlPreview={htmlPreview.isPublishing}
-    />
+    <Suspense fallback={<Skeleton className="h-full w-full" />}>
+      <LazyMonacoCodeEditor
+        {...props}
+        onPreviewHtml={props.previewKind === "html" ? publishCurrentHtmlPreview : undefined}
+        isPublishingHtmlPreview={htmlPreview.isPublishing}
+      />
+    </Suspense>
   ) : (
     <CodeMirrorCodeEditor
       {...props}

@@ -245,6 +245,19 @@ A task may contain several repositories, but a workflow step is not bound to one
 
 </details>
 
+## Choose a step's agent by tag
+
+A step can name **Allowed tags** instead of a single profile. Tag concrete
+profiles in **Settings > Agents** (for example `review` and `security`), then
+add those tags to the step. When the task enters the step, Kandev picks one
+matching profile by remaining subscription quota and keeps that choice for the
+entry. The step's profile field becomes the fallback used when no tagged profile
+matches.
+
+Tag matching is OR: a profile with any allowed tag is a candidate. The
+candidate list in the step editor shows each match's quota state. Clear the
+allowed tags to return the step to the fixed profile.
+
 ## Troubleshooting
 
 - **Task starts in the wrong column:** confirm exactly one Start step, save the workflow, and check whether the creator supplied an explicit `workflow_step_id`. Remember that a create which starts an agent targets the first Auto-start agent step, not the Start step.

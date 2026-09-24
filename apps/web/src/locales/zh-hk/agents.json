@@ -317,5 +317,11 @@
   "providerApiKeyLabel": "API 密鑰",
   "providerApiKeyHelp": "儲存傳送給提供方的持有者權杖的 Kandev 密鑰。若路由器無需鑑權，可不設定。",
   "providerModelSlash": "請去掉模型名稱中的斜槓：OpenAI 兼容提供方需要的是不含前綴的模型 ID。",
-  "providerPassthroughUnsupported": "請停用 CLI 直通模式，才能使用 OpenAI 兼容提供方。"
+  "providerPassthroughUnsupported": "請停用 CLI 直通模式，才能使用 OpenAI 兼容提供方。",
+  "profileTagsTitle": "標籤",
+  "profileTagsDescription": "自由標籤，可讓工作流程步驟自動選擇此設定檔。",
+  "profileTagsLabel": "代理程式標籤",
+  "profileTagsPlaceholder": "輸入標籤並按回車",
+  "profileTagsRemove": "移除標籤 {{tag}}",
+  "profileTagsHelp": "小寫標籤，最多 32 個。當允許的標籤有重疊時，工作流程步驟可以選擇此設定檔。"
 }

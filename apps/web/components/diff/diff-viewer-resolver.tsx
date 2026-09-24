@@ -1,15 +1,20 @@
 "use client";
 
-import { memo } from "react";
+import { lazy, memo, Suspense } from "react";
+import { Skeleton } from "@kandev/ui/skeleton";
 import { useEditorProvider } from "@/hooks/use-editor-resolver";
 import {
   DiffViewer as PierreDiffViewer,
   DiffViewInline as PierreDiffViewInline,
 } from "./diff-viewer";
-import { MonacoDiffViewer } from "@/components/editors/monaco/monaco-diff-viewer";
 import type { FileDiffData, DiffComment, DiffCommentUpdate } from "@/lib/diff/types";
 import type { RevertBlockInfo } from "./diff-viewer";
 export type { RevertBlockInfo };
+
+const LazyMonacoDiffViewer = lazy(async () => {
+  const module = await import("@/components/editors/monaco/monaco-diff-viewer");
+  return { default: module.MonacoDiffViewer };
+});
 
 interface DiffViewerResolverProps {
   data: FileDiffData;
@@ -67,7 +72,11 @@ export const DiffViewerResolved = memo(function DiffViewerResolved(props: DiffVi
       ...rest
     } = props;
     /* eslint-enable @typescript-eslint/no-unused-vars */
-    return <MonacoDiffViewer {...rest} />;
+    return (
+      <Suspense fallback={<Skeleton className="h-full w-full" />}>
+        <LazyMonacoDiffViewer {...rest} />
+      </Suspense>
+    );
   }
   return <PierreDiffViewer {...props} />;
 });
@@ -81,7 +90,11 @@ export function DiffViewInlineResolved({
 }) {
   const provider = useEditorProvider("chat-diff");
   if (provider === "monaco") {
-    return <MonacoDiffViewer data={data} compact hideHeader className={className} />;
+    return (
+      <Suspense fallback={<Skeleton className="h-full w-full" />}>
+        <LazyMonacoDiffViewer data={data} compact hideHeader className={className} />
+      </Suspense>
+    );
   }
   return <PierreDiffViewInline data={data} className={className} />;
 }

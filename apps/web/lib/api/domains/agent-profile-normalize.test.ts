@@ -40,6 +40,7 @@ const expectedCamelCaseProfile = {
   autoApprove: false,
   cliFlags: [{ flag: "--verbose", description: "v", enabled: true }],
   envVars: [sampleEnvVar],
+  tags: [],
   cliPassthrough: false,
   enabled: false,
   providerSupported: false,
@@ -92,6 +93,16 @@ describe("normalizeAgentProfile", () => {
       command_prefix: SAMPLE_PREFIX,
     });
     expect(result.commandPrefix).toBe(SAMPLE_PREFIX);
+  });
+
+  it("round-trips tags through both directions", () => {
+    const result = normalizeAgentProfile({
+      id: SAMPLE_ID,
+      name: "default",
+      tags: ["review", "security"],
+    });
+    expect(result.tags).toEqual(["review", "security"]);
+    expect(toAgentProfilePayload(result).tags).toEqual(["review", "security"]);
   });
 
   it("maps the OpenAI-compatible provider fields both ways", () => {

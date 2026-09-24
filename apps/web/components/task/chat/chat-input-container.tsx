@@ -10,6 +10,7 @@ import type { EntityReference } from "@/lib/types/entity-reference";
 import type { TaskPlanCommentRef, TaskPreviewFeedbackRef } from "@/lib/types/http";
 import { useChatInputContainer } from "./use-chat-input-container";
 import { SessionStoppedBanner } from "./session-stopped-banner";
+import { ResumeHandoffOffer } from "./resume-handoff-offer";
 import { useSessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
 import {
   ChatInputBody,
@@ -126,6 +127,10 @@ type ChatInputContainerProps = {
   hideAgentControls?: boolean;
   /** Hide the plan mode toggle button (for ephemeral/quick chat sessions) */
   hidePlanMode?: boolean;
+  /** Render the cache-expired resume-with-handoff offer above the composer. */
+  showResumeHandoff?: boolean;
+  /** Enable the usage/cost inspector on the token indicator (task chat only). */
+  showUsageInspector?: boolean;
 };
 
 type ContainerState = ReturnType<typeof useChatInputContainer>;
@@ -139,6 +144,8 @@ type NormalizedChatInputProps = ChatInputContainerProps & {
   contextItems: ContextItem[];
   showRequestChangesTooltip: boolean;
   entityReferencesEnabled: boolean;
+  showResumeHandoff: boolean;
+  showUsageInspector: boolean;
 };
 
 function normalizeChatInputProps(p: ChatInputContainerProps): NormalizedChatInputProps {
@@ -153,6 +160,8 @@ function normalizeChatInputProps(p: ChatInputContainerProps): NormalizedChatInpu
     contextItems: p.contextItems ?? [],
     showRequestChangesTooltip: p.showRequestChangesTooltip ?? false,
     entityReferencesEnabled: p.entityReferencesEnabled ?? false,
+    showResumeHandoff: p.showResumeHandoff ?? false,
+    showUsageInspector: p.showUsageInspector ?? false,
   };
 }
 
@@ -225,6 +234,7 @@ function buildEditorAreaProps(
     minimalToolbar: p.minimalToolbar,
     hideAgentControls: p.hideAgentControls,
     hidePlanMode: p.hidePlanMode,
+    showUsageInspector: p.showUsageInspector,
   };
 }
 
@@ -382,35 +392,44 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     }
 
     return (
-      <ChatInputBody
-        containerRef={s.containerRef}
-        height={s.height}
-        resizeHandleProps={s.resizeHandleProps}
-        isStarting={isBusyVisual}
-        isAgentBusy={isAgentBusy}
-        hasClarification={s.hasClarification}
-        showRequestChangesTooltip={p.showRequestChangesTooltip}
-        hasPendingComments={s.hasPendingComments}
-        planModeEnabled={props.planModeEnabled}
-        showFocusHint={s.showFocusHint}
-        needsRecovery={(props.needsRecovery ?? false) || executorUnavailable}
-        addFiles={s.addFiles}
-        contextAreaProps={buildContextAreaProps(s, p)}
-        promptResultRecovery={
-          promptEnhancement.promptDelivery.pendingResult ? (
-            <PromptResultRecovery
-              pendingResult={promptEnhancement.promptDelivery.pendingResult}
-              onApply={promptEnhancement.promptDelivery.applyPending}
-              onCopy={promptEnhancement.promptDelivery.copyPending}
-            />
-          ) : null
-        }
-        editorAreaProps={buildEditorAreaProps(s, p, {
-          onEnhancePrompt: promptEnhancement.handleEnhancePrompt,
-          isEnhancingPrompt: promptEnhancement.isEnhancingPrompt,
-          isUtilityConfigured: promptEnhancement.isUtilityConfigured,
-        })}
-      />
+      <>
+        {p.showResumeHandoff ? (
+          <ResumeHandoffOffer
+            taskId={taskId}
+            sessionId={sessionId}
+            onHandoffNotSent={(handoff) => applyEnhancedPromptToEditor(s.inputRef, handoff)}
+          />
+        ) : null}
+        <ChatInputBody
+          containerRef={s.containerRef}
+          height={s.height}
+          resizeHandleProps={s.resizeHandleProps}
+          isStarting={isBusyVisual}
+          isAgentBusy={isAgentBusy}
+          hasClarification={s.hasClarification}
+          showRequestChangesTooltip={p.showRequestChangesTooltip}
+          hasPendingComments={s.hasPendingComments}
+          planModeEnabled={props.planModeEnabled}
+          showFocusHint={s.showFocusHint}
+          needsRecovery={(props.needsRecovery ?? false) || executorUnavailable}
+          addFiles={s.addFiles}
+          contextAreaProps={buildContextAreaProps(s, p)}
+          promptResultRecovery={
+            promptEnhancement.promptDelivery.pendingResult ? (
+              <PromptResultRecovery
+                pendingResult={promptEnhancement.promptDelivery.pendingResult}
+                onApply={promptEnhancement.promptDelivery.applyPending}
+                onCopy={promptEnhancement.promptDelivery.copyPending}
+              />
+            ) : null
+          }
+          editorAreaProps={buildEditorAreaProps(s, p, {
+            onEnhancePrompt: promptEnhancement.handleEnhancePrompt,
+            isEnhancingPrompt: promptEnhancement.isEnhancingPrompt,
+            isUtilityConfigured: promptEnhancement.isUtilityConfigured,
+          })}
+        />
+      </>
     );
   },
 );

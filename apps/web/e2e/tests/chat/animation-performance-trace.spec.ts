@@ -1,7 +1,17 @@
-import type { CDPSession, Page, TestInfo } from "@playwright/test";
+import type { Page, TestInfo } from "@playwright/test";
 
 import { test, expect } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
+import {
+  captureTraceEvents,
+  parsePositiveInteger,
+  summarizeNumbers,
+  summarizeTraceMetric,
+  traceMetricNamed,
+  type NumericSummary,
+  type TraceEvent,
+  type TraceMetric,
+} from "../../helpers/cdp-trace";
 import { SessionPage } from "../../pages/session-page";
 import { openQuickChatWithAgent, sendQuickChatMessage } from "./quick-chat-helpers";
 
@@ -13,17 +23,6 @@ const TARGET_SELECTORS = {
 } as const;
 const TRACE_REPEATS = parsePositiveInteger(process.env.KANDEV_E2E_ANIMATION_TRACE_REPEATS ?? "1");
 
-type TraceEvent = {
-  name?: string;
-  args?: unknown;
-  dur?: number;
-};
-
-type TraceMetric = {
-  count: number;
-  durationMs: number;
-};
-
 type TraceMetrics = {
   updateLayoutTree: TraceMetric;
   layerize: TraceMetric;
@@ -33,12 +32,6 @@ type TraceMetrics = {
   functionCall: TraceMetric;
   targetInvalidations: number;
   targetInvalidationsByGroup: Record<keyof typeof TARGET_SELECTORS, number>;
-};
-
-type NumericSummary = {
-  min: number;
-  median: number;
-  max: number;
 };
 
 type TraceMetricsSummary = {
@@ -486,50 +479,9 @@ async function captureTrace(
   label: string,
   options: TraceCaptureOptions = {},
 ): Promise<TraceMetrics> {
-  const client = await page.context().newCDPSession(page);
-  let trace = "";
-  let tracingStarted = false;
-  try {
-    await client.send("Emulation.setScriptExecutionDisabled", {
-      value: options.disableScriptExecution ?? true,
-    });
-    await dwell(
-      1_000,
-      "clock-separation",
-      "the browser does not publish an event when pending application tasks are drained",
-    );
-    const stream = traceStream(client);
-    await client.send("Tracing.start", {
-      categories: [
-        "devtools.timeline",
-        "disabled-by-default-devtools.timeline",
-        "disabled-by-default-devtools.timeline.invalidationTracking",
-        "blink.user_timing",
-      ].join(","),
-      transferMode: "ReturnAsStream",
-    });
-    tracingStarted = true;
-    await dwell(
-      TRACE_WINDOW_MS,
-      "clock-separation",
-      "the fixed acceptance trace window has no completion event",
-    );
-    await client.send("Tracing.end");
-    tracingStarted = false;
-    trace = await readTraceStream(client, await stream);
-  } finally {
-    if (tracingStarted) await client.send("Tracing.end").catch(() => undefined);
-    await client
-      .send("Emulation.setScriptExecutionDisabled", { value: false })
-      .catch(() => undefined);
-    await client.detach().catch(() => undefined);
-  }
-  await testInfo.attach(`${label}.json`, {
-    body: Buffer.from(trace),
-    contentType: "application/json",
+  const events = await captureTraceEvents(page, testInfo, label, TRACE_WINDOW_MS, {
+    disableScriptExecution: options.disableScriptExecution ?? true,
   });
-
-  const events = (JSON.parse(trace) as { traceEvents: TraceEvent[] }).traceEvents;
   const metrics = traceMetrics(events);
   await testInfo.attach(`${label}-metrics.json`, {
     body: Buffer.from(JSON.stringify(metrics, null, 2)),
@@ -538,32 +490,14 @@ async function captureTrace(
   return metrics;
 }
 
-function traceStream(client: CDPSession): Promise<string> {
-  return new Promise((resolve) => {
-    client.once("Tracing.tracingComplete", (event) => resolve(event.stream));
-  });
-}
-
-async function readTraceStream(client: CDPSession, stream: string): Promise<string> {
-  let trace = "";
-  let eof = false;
-  while (!eof) {
-    const chunk = await client.send("IO.read", { handle: stream });
-    trace += chunk.base64Encoded ? Buffer.from(chunk.data, "base64").toString("utf8") : chunk.data;
-    eof = chunk.eof;
-  }
-  await client.send("IO.close", { handle: stream });
-  return trace;
-}
-
 function traceMetrics(events: TraceEvent[]): TraceMetrics {
   return {
-    updateLayoutTree: metricNamed(events, "UpdateLayoutTree"),
-    layerize: metricNamed(events, "Layerize"),
-    layout: metricNamed(events, "Layout"),
-    paint: metricNamed(events, "Paint"),
-    runTask: metricNamed(events, "RunTask"),
-    functionCall: metricNamed(events, "FunctionCall"),
+    updateLayoutTree: traceMetricNamed(events, "UpdateLayoutTree"),
+    layerize: traceMetricNamed(events, "Layerize"),
+    layout: traceMetricNamed(events, "Layout"),
+    paint: traceMetricNamed(events, "Paint"),
+    runTask: traceMetricNamed(events, "RunTask"),
+    functionCall: traceMetricNamed(events, "FunctionCall"),
     targetInvalidations: events.filter(
       (event) =>
         event.name?.includes("InvalidationTracking") &&
@@ -576,32 +510,18 @@ function traceMetrics(events: TraceEvent[]): TraceMetrics {
   };
 }
 
-function metricNamed(events: TraceEvent[], name: string): TraceMetric {
-  const matchingEvents = events.filter((event) => event.name === name);
-  return {
-    count: matchingEvents.length,
-    durationMs: matchingEvents.reduce((total, event) => total + (event.dur ?? 0), 0) / 1_000,
-  };
-}
-
 function summarizeMetrics(metrics: TraceMetrics[]): TraceMetricsSummary {
   if (metrics.length === 0) throw new Error("Cannot summarize an empty trace set");
   const summarize = (read: (metric: TraceMetrics) => number): NumericSummary =>
     summarizeNumbers(metrics.map(read));
-  const summarizeTraceMetric = (
-    read: (metric: TraceMetrics) => TraceMetric,
-  ): { count: NumericSummary; durationMs: NumericSummary } => ({
-    count: summarizeNumbers(metrics.map((metric) => read(metric).count)),
-    durationMs: summarizeNumbers(metrics.map((metric) => read(metric).durationMs)),
-  });
 
   return {
-    updateLayoutTree: summarizeTraceMetric((metric) => metric.updateLayoutTree),
-    layerize: summarizeTraceMetric((metric) => metric.layerize),
-    layout: summarizeTraceMetric((metric) => metric.layout),
-    paint: summarizeTraceMetric((metric) => metric.paint),
-    runTask: summarizeTraceMetric((metric) => metric.runTask),
-    functionCall: summarizeTraceMetric((metric) => metric.functionCall),
+    updateLayoutTree: summarizeTraceMetric(metrics.map((metric) => metric.updateLayoutTree)),
+    layerize: summarizeTraceMetric(metrics.map((metric) => metric.layerize)),
+    layout: summarizeTraceMetric(metrics.map((metric) => metric.layout)),
+    paint: summarizeTraceMetric(metrics.map((metric) => metric.paint)),
+    runTask: summarizeTraceMetric(metrics.map((metric) => metric.runTask)),
+    functionCall: summarizeTraceMetric(metrics.map((metric) => metric.functionCall)),
     targetInvalidations: summarize((metric) => metric.targetInvalidations),
     targetInvalidationsByGroup: {
       grid: summarize((metric) => metric.targetInvalidationsByGroup.grid),
@@ -610,23 +530,9 @@ function summarizeMetrics(metrics: TraceMetrics[]): TraceMetricsSummary {
   };
 }
 
-function summarizeNumbers(values: number[]): NumericSummary {
-  if (values.length === 0) throw new Error("Cannot summarize an empty value set");
-  const sorted = [...values].sort((left, right) => left - right);
-  const middle = Math.floor(sorted.length / 2);
-  const median =
-    sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
-  return { min: sorted[0], median, max: sorted[sorted.length - 1] };
-}
-
 function countInvalidations(events: TraceEvent[], pattern: RegExp): number {
   return events.filter(
     (event) =>
       event.name?.includes("InvalidationTracking") && pattern.test(JSON.stringify(event.args)),
   ).length;
-}
-
-function parsePositiveInteger(value: string): number {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 }

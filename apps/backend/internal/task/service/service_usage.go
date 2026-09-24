@@ -22,6 +22,33 @@ func (s *Service) GetTaskUsageTotals(ctx context.Context, taskID string) (*model
 	return s.usage.GetTaskUsageTotals(ctx, taskID)
 }
 
+// GetTaskUsageBreakdown returns the task total plus the finest-grain
+// (session, agent profile, agent type, model, provider) groups for taskID
+// (docs/specs/task-cost-ledger/spec.md). It authorizes and 404s exactly like
+// GetTaskUsageTotals. The total comes from the existing single-scope query,
+// not a sum of the groups: an append landing between the two reads can put the
+// total at most one prompt ahead, which the next refetch reconciles.
+func (s *Service) GetTaskUsageBreakdown(
+	ctx context.Context,
+	taskID string,
+) (*models.TaskUsageTotals, []*models.TaskUsageTotalsGroup, error) {
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return nil, nil, err
+	}
+	if _, err := s.tasks.GetTask(ctx, taskID); err != nil {
+		return nil, nil, err
+	}
+	taskTotals, err := s.usage.GetTaskUsageTotals(ctx, taskID)
+	if err != nil {
+		return nil, nil, err
+	}
+	groups, err := s.usage.ListTaskUsageTotalGroups(ctx, taskID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return taskTotals, groups, nil
+}
+
 // GetTaskSessionUsageTotals returns the task-cost-ledger aggregate scoped to
 // sessionID (AC-18, AC-19). AuthorizeTaskSessionAccess always fetches the
 // session and checks that it belongs to taskID regardless of caller scope,

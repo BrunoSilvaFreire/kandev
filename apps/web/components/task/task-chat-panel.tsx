@@ -1441,6 +1441,8 @@ function ChatFooter({
       isSending={isSending}
       hideSessionsDropdown={hideSessionsDropdown}
       hidePlanMode={hidePlanMode}
+      showResumeHandoff
+      showUsageInspector
       showScrollToLastPrompt={showScrollToLastPrompt}
       onScrollToLastPrompt={onScrollToLastPrompt}
       lastPromptScrollDirection={lastPromptScrollDirection}

@@ -88,6 +88,9 @@ func ValidateWorkflowStep(step *WorkflowStep) error {
 	if err := ValidateWorkflowSessionTarget(step.SessionTarget); err != nil {
 		return err
 	}
+	if err := ValidateAllowedTags(step); err != nil {
+		return err
+	}
 	return ValidateStepEventsWithRouting(step.Events, step.AgentProfileID != "", step.SessionTarget != nil)
 }
 

@@ -303,12 +303,32 @@ export type ClarificationRequestMetadata = {
   status?: "pending" | "answered" | "rejected" | "expired" | "cancelled";
   response?: ClarificationAnswer;
   agent_disconnected?: boolean;
+  approval?: ClarificationApprovalMeta;
+};
+
+// ClarificationApprovalMeta marks a bundle created by request_approval_kandev.
+export type ClarificationApprovalMeta = {
+  subject: "task_plan" | "document";
+  document_key?: string;
+  title: string;
+  version_at_request?: string;
+};
+
+// ClarificationApprovalOutcome is the resolver-filled approval result.
+export type ClarificationApprovalOutcome = {
+  decision: "approve" | "revise" | "reject";
+  feedback?: string;
+  plan_comments?: string;
+  comment_ids?: string[];
+  subject_edited: boolean;
+  current_version?: string;
 };
 
 export type ClarificationAnswer = {
   question_id: string;
   selected_options?: string[];
   custom_text?: string;
+  plan_comment_refs?: { id: string; version: number }[];
 };
 
 export type ClarificationResponse = {
@@ -316,6 +336,7 @@ export type ClarificationResponse = {
   answers: ClarificationAnswer[];
   rejected?: boolean;
   reject_reason?: string;
+  approval?: ClarificationApprovalOutcome;
 };
 
 // Task Plan types (for session artifacts)

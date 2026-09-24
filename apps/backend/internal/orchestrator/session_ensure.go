@@ -110,7 +110,10 @@ func (s *Service) EnsureSession(ctx context.Context, taskID string, opts ...Ensu
 		return nil, fmt.Errorf("task not found: %w", err)
 	}
 
-	agentProfileID, step := s.resolveTaskAgentProfile(ctx, task)
+	agentProfileID, step, err := s.resolveTaskAgentProfileError(ctx, task)
+	if err != nil {
+		return nil, err
+	}
 	autoStart := stepAllowsAutoStart(step)
 	if o.AutoStart != nil {
 		autoStart = *o.AutoStart
@@ -430,23 +433,38 @@ func (s *Service) tryEnsureExecutionWithBinding(
 // Returning the step lets callers reuse it (e.g. to gate auto-start) without a
 // second DB lookup.
 func (s *Service) resolveTaskAgentProfile(ctx context.Context, task *models.Task) (string, *wfmodels.WorkflowStep) {
+	profileID, step, err := s.resolveTaskAgentProfileError(ctx, task)
+	if err != nil {
+		return "", step
+	}
+	return profileID, step
+}
+
+// resolveTaskAgentProfileError applies the resolution chain, failing closed for
+// a tag-configured step whose frozen entry route is missing instead of falling
+// through to legacy metadata/defaults.
+func (s *Service) resolveTaskAgentProfileError(ctx context.Context, task *models.Task) (string, *wfmodels.WorkflowStep, error) {
 	step := s.lookupWorkflowStep(ctx, task.WorkflowStepID)
 	if step != nil {
-		if id := s.resolveStepAgentProfileForTask(ctx, task, step); id != "" {
-			return id, step
+		id, err := s.resolveStepAgentProfileForTaskError(ctx, task, step)
+		if err != nil {
+			return "", step, err
+		}
+		if id != "" {
+			return id, step, nil
 		}
 	}
 	if v, ok := task.Metadata["agent_profile_id"].(string); ok && v != "" {
-		return v, step
+		return v, step, nil
 	}
 	if task.AssigneeAgentProfileID != "" {
-		return task.AssigneeAgentProfileID, step
+		return task.AssigneeAgentProfileID, step, nil
 	}
 	ws, err := s.repo.GetWorkspace(ctx, task.WorkspaceID)
 	if err == nil && ws != nil && ws.DefaultAgentProfileID != nil && *ws.DefaultAgentProfileID != "" {
-		return *ws.DefaultAgentProfileID, step
+		return *ws.DefaultAgentProfileID, step, nil
 	}
-	return "", step
+	return "", step, nil
 }
 
 // lookupWorkflowStep loads a workflow step by id, returning nil when the id

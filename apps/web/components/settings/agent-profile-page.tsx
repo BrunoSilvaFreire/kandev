@@ -28,6 +28,7 @@ import {
   ProfileEnvVarsSection,
   areEnvVarsEqual,
 } from "@/components/settings/profile-edit/profile-env-vars-section";
+import { ProfileTagsSection } from "@/components/settings/profile-edit/profile-tags-section";
 import {
   errorMessage,
   useProfileDelete,
@@ -369,6 +370,15 @@ function ProfileEditorBody({
         permissionSettings={permissionSettings}
         discoveryTargetId={agentProfileDiscoveryTarget(draft.id, "cli-flags")}
       />
+
+      {draft.kind !== "dynamic" && (
+        <ProfileTagsSection
+          tags={draft.tags}
+          baselineTags={savedProfile.tags}
+          onChange={updateDraft}
+          discoveryTargetId={agentProfileDiscoveryTarget(draft.id, "profile-tags")}
+        />
+      )}
 
       <ProviderSection
         draft={draft}

@@ -29,6 +29,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	workflowadapters "github.com/kandev/kandev/internal/workflow/adapters"
 	"github.com/kandev/kandev/internal/workflow/engine"
+	"github.com/kandev/kandev/internal/workflow/entryroute"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	"github.com/kandev/kandev/internal/workflow/stepentry"
@@ -2021,7 +2022,17 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 		return
 	}
 
-	workflowAgentProfileID := s.resolveStepAgentProfileForTask(ctx, task, step)
+	workflowAgentProfileID, resolveErr := s.resolveStepAgentProfileForTaskError(ctx, task, step)
+	if resolveErr != nil {
+		s.logger.Error(eventName+": no frozen profile for tagged step; leaving task idle",
+			zap.String("task_id", task.ID),
+			zap.String("to_step_id", step.ID),
+			zap.Error(resolveErr))
+		if restoreAutoStartOnCreate {
+			s.discardAutoStartOnCreate(ctx, task.ID, eventName)
+		}
+		return
+	}
 	agentProfileID := workflowAgentProfileID
 	if agentProfileID == "" {
 		agentProfileID, _ = task.Metadata[models.MetaKeyAgentProfileID].(string)
@@ -2955,21 +2966,91 @@ func (s *Service) resolveStepAgentProfile(ctx context.Context, step *wfmodels.Wo
 	return ""
 }
 
-// resolveStepAgentProfileForTask applies a task's fixed-step substitution
-// before the ordinary workflow profile resolution. Explicit session targets
-// remain authoritative and therefore never consult this map.
-func (s *Service) resolveStepAgentProfileForTask(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep) string {
+// resolveStepAgentProfileForTaskError is the entry-aware, error-propagating
+// form. A task fixed-step override wins first. A tag-configured step then uses
+// the route frozen for this exact entry; without one it falls back to the
+// step's own profile without re-scoring or persisting a route, and fails
+// closed only when the step has no profile.
+func (s *Service) resolveStepAgentProfileForTaskError(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep) (string, error) {
 	if task != nil && step != nil && step.SessionTarget == nil && task.WorkflowID == step.WorkflowID {
-		if replacement, ok := task.WorkflowAgentOverrides.ReplacementFor(task.WorkflowID, step.ID); ok {
-			return replacement
+		if replacement, ok := task.WorkflowAgentOverrides.ReplacementFor(task.WorkflowID, step.ID); ok && replacement != "" {
+			return replacement, nil
 		}
 	}
-	return s.resolveStepAgentProfile(ctx, step)
+	if step != nil && len(step.AllowedTags) > 0 && step.SessionTarget == nil {
+		if profileID, ok := s.resolveTaggedEntryProfile(ctx, task, step); ok {
+			return profileID, nil
+		}
+		fallback := strings.TrimSpace(step.AgentProfileID)
+		if fallback == "" {
+			return "", entryroute.ErrNoFrozenProfile
+		}
+		taskID := ""
+		if task != nil {
+			taskID = task.ID
+		}
+		s.logger.Warn("no frozen route for tagged workflow entry, using step profile",
+			zap.String("task_id", taskID),
+			zap.String("step_id", step.ID),
+			zap.String("agent_profile_id", fallback))
+		return fallback, nil
+	}
+	return s.resolveStepAgentProfile(ctx, step), nil
+}
+
+// resolveTaggedEntryProfile returns the frozen profile for a tag-configured
+// step. An in-flight pending route for the same destination wins (the move that
+// is still committing); otherwise the persisted bounded route must match this
+// entry exactly: destination step, kind, non-empty entry identity, current
+// identity, and normalized start policy via the operation ID.
+func (s *Service) resolveTaggedEntryProfile(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep) (string, bool) {
+	if task == nil || step == nil || len(step.AllowedTags) == 0 || step.SessionTarget != nil {
+		return "", false
+	}
+	if profileID, ok := pendingTaggedEntryProfile(ctx, step); ok {
+		return profileID, true
+	}
+	return s.persistedTaggedEntryProfile(ctx, task, step)
+}
+
+// pendingTaggedEntryProfile resolves the in-flight pending route for the same
+// destination step (the move that is still committing).
+func pendingTaggedEntryProfile(ctx context.Context, step *wfmodels.WorkflowStep) (string, bool) {
+	if pending, ok := entryroute.FromContext(ctx); ok &&
+		pending.DestinationStepID == step.ID && pending.AgentProfileID != "" {
+		return pending.AgentProfileID, true
+	}
+	return "", false
+}
+
+// persistedTaggedEntryProfile validates the persisted bounded route against
+// this entry: destination step, kind, non-empty entry identity, current
+// identity, and normalized start policy via the operation ID.
+func (s *Service) persistedTaggedEntryProfile(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep) (string, bool) {
+	route, ok := models.LoadWorkflowSessionRoute(task.Metadata)
+	if !ok || route.DestinationStepID != step.ID ||
+		route.TargetKind != workflowSessionRouteTargetProfile ||
+		route.AgentProfileID == "" || route.EntryIdentity == "" {
+		return "", false
+	}
+	if s.repo == nil {
+		return "", false
+	}
+	current := s.workflowEntryIdentity(ctx, task.ID)
+	if current == legacyWorkflowEntryIdentity || route.EntryIdentity != current {
+		return "", false
+	}
+	startPolicy := string(models.NormalizeWorkflowProfileSessionStartPolicy(string(step.ProfileSessionStartPolicy)))
+	expectedOperation := entryroute.OperationID(task.ID, step.ID, route.EntryIdentity, route.TargetKind, "", startPolicy)
+	if route.OperationID != expectedOperation {
+		return "", false
+	}
+	return route.AgentProfileID, true
 }
 
 func (s *Service) resolveStepAgentProfileForTaskID(ctx context.Context, taskID string, step *wfmodels.WorkflowStep) (string, error) {
 	if taskID == "" {
-		return s.resolveStepAgentProfile(ctx, step), nil
+		return s.resolveStepAgentProfileForTaskError(ctx, nil, step)
 	}
 	if s.repo == nil {
 		return "", fmt.Errorf("task repository unavailable while resolving workflow profile for task %q", taskID)
@@ -2981,7 +3062,7 @@ func (s *Service) resolveStepAgentProfileForTaskID(ctx context.Context, taskID s
 	if task == nil {
 		return "", fmt.Errorf("task %q not found while resolving workflow profile", taskID)
 	}
-	return s.resolveStepAgentProfileForTask(ctx, task, step), nil
+	return s.resolveStepAgentProfileForTaskError(ctx, task, step)
 }
 
 // resolveStepProfileSessionStartPolicy returns the destination step's session
@@ -7633,6 +7714,24 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 			s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
 		}
 		return false
+	}
+	// Freeze a tag-configured target's concrete profile before credential
+	// preflight and before either commit path (normal ApplyTransition or the
+	// guarded CAS), so the transition writes the route atomically.
+	if s.workflowEntryProfileSelector != nil || len(targetStep.AllowedTags) > 0 {
+		attached, attachErr := s.attachEngineEntryRoute(ctx, taskID, session.ID, targetStep)
+		if attachErr != nil {
+			recordWorkflowTransitionError(ctx, attachErr)
+			s.logger.Warn("failed to freeze tagged step entry profile, skipping transition",
+				zap.String("task_id", taskID),
+				zap.String("step_id", result.ToStepID),
+				zap.Error(attachErr))
+			if sessionLifecycle {
+				s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+			}
+			return false
+		}
+		ctx = attached
 	}
 	if sessionLifecycle {
 		if err := s.preflightWorkflowStepCredentials(ctx, taskID, session, targetStep); err != nil {

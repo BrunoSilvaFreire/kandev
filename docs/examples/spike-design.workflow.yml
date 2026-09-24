@@ -1,0 +1,110 @@
+version: 2
+type: kandev_workflow
+workflows:
+  - name: Spike & Design
+    description: A cheap context agent produces an evidence-only spike, an architect turns it into a decision-complete design, and a human approves before any implementation. Investigation only.
+    steps:
+      - name: Backlog
+        position: 0
+        color: bg-neutral-400
+        events: {}
+        is_start_step: false
+        show_in_command_panel: false
+        allow_manual_move: true
+        complete_task_on_enter: false
+      - name: Spike
+        position: 1
+        color: bg-cyan-500
+        prompt: |
+          ROLE: Spike (cheap context agent). Investigate only. Do NOT modify repository files.
+
+          Follow the `kandev-spike-handoff` skill.
+
+          {{task_prompt}}
+
+          Produce an evidence-only, context-dense report: verified facts with file:line
+          citations, current behavior, unknowns, and open questions. State no
+          recommendations and propose no solutions — that is the architect's job.
+
+          When finished, save the full report as this task's document with the
+          write_task_document_kandev MCP tool: document_key "spike", type "spike",
+          title "Spike report". Do NOT write the task plan — the design and
+          implementation plan are owned by the Architect step. Then call
+          step_complete_kandev.
+        events:
+          on_enter:
+            - type: auto_start_agent
+          on_turn_complete:
+            - type: move_to_next
+        is_start_step: true
+        show_in_command_panel: true
+        allow_manual_move: true
+        auto_advance_requires_signal: true
+        cancel_triggers_turn_complete: false
+        agent_profile:
+          agent_name: OpenCode
+          model: opencode-go/deepseek-v4.1-flash
+        profile_session_start_policy: new
+        profile_session_end_policy: complete
+        complete_task_on_enter: false
+      - name: Architect
+        position: 2
+        color: bg-purple-500
+        prompt: |
+          ROLE: Architect. Read the Spike step's report with
+          get_task_document_kandev(document_key: "spike") — it is an evidence-only spike
+          produced by a cheap context agent. Verify its claims against the repository
+          before trusting them. If the document is absent, proceed from the task prompt
+          and state plainly which evidence is missing; never invent evidence.
+
+          Produce the final design and ordered implementation plan:
+          1. Requirement restatement and scope boundary
+          2. Approach, with the files to create or modify and what each is responsible for
+          3. Interfaces, data flow, and integration points
+          4. Ordered implementation steps, each with its verification command
+          5. Risks, trade-offs, and explicit stop/rollback gates
+          6. Open questions that still require a human decision
+
+          Use mermaid for diagrams. Do NOT implement anything. You own the task plan
+          exclusively; replace it with your design via update_task_plan_kandev, then call
+          step_complete_kandev.
+        events:
+          on_enter:
+            - type: auto_start_agent
+          on_turn_complete:
+            - type: move_to_next
+        is_start_step: false
+        show_in_command_panel: true
+        allow_manual_move: true
+        auto_advance_requires_signal: true
+        cancel_triggers_turn_complete: false
+        agent_profile:
+          agent_name: Codex
+          model: gpt-5.6-sol
+          mode: agent-full-access
+        profile_session_start_policy: new
+        profile_session_end_policy: park
+        complete_task_on_enter: false
+      - name: Review
+        position: 3
+        color: bg-yellow-500
+        prompt: |
+          HUMAN GATE. Read the design in the task plan and approve, edit, or reject it.
+
+          This step does not auto-start an agent. Move the task forward when the design is
+          accepted, or send a message to reopen the Architect step for revisions.
+        events: {}
+        is_start_step: false
+        show_in_command_panel: true
+        allow_manual_move: true
+        auto_advance_requires_signal: false
+        cancel_triggers_turn_complete: false
+        complete_task_on_enter: false
+      - name: Approved
+        position: 4
+        color: bg-green-500
+        events: {}
+        is_start_step: false
+        show_in_command_panel: false
+        allow_manual_move: true
+        complete_task_on_enter: true

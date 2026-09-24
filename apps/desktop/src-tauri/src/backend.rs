@@ -720,6 +720,8 @@ fn common_path_entries(home_dir: Option<&Path>) -> Vec<PathBuf> {
             entries.push(home.join("AppData/Roaming/npm"));
             entries.push(home.join("scoop/shims"));
         } else {
+            entries.push(home.join(".local/share/mise/shims"));
+            entries.push(home.join(".cargo/bin"));
             entries.push(home.join(".bun/bin"));
             entries.push(home.join(".opencode/bin"));
         }

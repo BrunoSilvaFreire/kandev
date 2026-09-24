@@ -57,7 +57,7 @@ type stubMessageCreator struct {
 }
 
 func (s *stubMessageCreator) CreateClarificationRequestMessages(
-	context.Context, string, string, string, []Question, string,
+	context.Context, string, string, string, []Question, string, *ApprovalMeta,
 ) ([]string, error) {
 	return nil, s.createErr
 }

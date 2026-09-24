@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -24,28 +25,31 @@ var askQuestionKeepAliveInterval = 20 * time.Second
 // Argument-name constants used across the ask_user_question_kandev handler.
 // Pulled out so goconst stays happy and renames stay safe.
 const (
-	promptArg            = "prompt"
-	questionsArg         = "questions"
-	optionsArg           = "options"
-	instructionsArg      = "instructions"
-	idArg                = "id"
-	titleArg             = "title"
-	labelArg             = "label"
-	descriptionArg       = "description"
-	optionIDFieldName    = "option_id"
-	questionIDFieldKey   = "question_id"
-	answeredFieldKey     = "answered"
-	rejectedFieldKey     = "rejected"
-	documentArg          = "document"
-	messageArg           = "message"
-	autopilotArg         = "autopilot"
-	contextParagraphsArg = "context_paragraphs"
-	objType              = "object"
-	propsKey             = "properties"
-	reqKey               = "required"
-	typeKey              = "type"
-	stringType           = "string"
-	agentProfileIDArg    = "agent_profile_id"
+	promptArg              = "prompt"
+	questionsArg           = "questions"
+	optionsArg             = "options"
+	instructionsArg        = "instructions"
+	idArg                  = "id"
+	titleArg               = "title"
+	labelArg               = "label"
+	descriptionArg         = "description"
+	optionIDFieldName      = "option_id"
+	questionIDFieldKey     = "question_id"
+	answeredFieldKey       = "answered"
+	rejectedFieldKey       = "rejected"
+	documentArg            = "document"
+	messageArg             = "message"
+	autopilotArg           = "autopilot"
+	contextParagraphsArg   = "context_paragraphs"
+	approvalSubjectArg     = "subject"
+	approvalDocumentKeyArg = "document_key"
+	approvalSummaryArg     = "summary"
+	objType                = "object"
+	propsKey               = "properties"
+	reqKey                 = "required"
+	typeKey                = "type"
+	stringType             = "string"
+	agentProfileIDArg      = "agent_profile_id"
 )
 
 func moveTaskEntryOptionsToolOption() mcp.ToolOption {
@@ -855,30 +859,127 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 			"context":    questionCtx,
 		}
 
-		// Waiting on a human answer routinely outlasts the agent MCP client's
-		// idle timeout on the in-flight tool call. Stream periodic progress
-		// notifications until the backend responds; mcp-go flushes them onto the
-		// POST/SSE response, resetting the client's idle timer so the call is not
-		// aborted mid-question.
-		stop := make(chan struct{})
-		defer close(stop)
-		go emitKeepAlivePings(ctx, stop, askQuestionKeepAliveInterval, s.clarificationKeepAlive(ctx, req))
-
-		// Use the MCP request context from the agent. This ensures that if the agent's
-		// MCP client times out, we'll detect it and not update the session state.
-		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPAskUserQuestion, payload, &result); err != nil {
-			if ctx.Err() != nil {
-				// Agent's MCP client disconnected/timed out. Notify backend to cancel
-				// pending clarifications so the user's answer goes through the event
-				// fallback path immediately instead of waiting for the watchdog.
-				go s.notifyClarificationTimeout()
-			}
-			return mcp.NewToolResultError(err.Error()), nil
+		result, errResult := s.requestClarification(ctx, req, payload)
+		if errResult != nil {
+			return errResult, nil
 		}
 
 		return extractQuestionAnswers(result, questions), nil
 	}
+}
+
+// requestClarification sends a clarification/approval payload to the backend
+// and blocks until the user responds. Waiting on a human routinely outlasts the
+// agent MCP client's idle timeout on the in-flight tool call, so it streams
+// periodic progress notifications until the backend responds; mcp-go flushes
+// them onto the POST/SSE response, resetting the client's idle timer.
+func (s *Server) requestClarification(
+	ctx context.Context,
+	req mcp.CallToolRequest,
+	payload map[string]interface{},
+) (map[string]interface{}, *mcp.CallToolResult) {
+	stop := make(chan struct{})
+	defer close(stop)
+	go emitKeepAlivePings(ctx, stop, askQuestionKeepAliveInterval, s.clarificationKeepAlive(ctx, req))
+
+	// Use the MCP request context from the agent. This ensures that if the
+	// agent's MCP client times out, we'll detect it and not update the session
+	// state.
+	var result map[string]interface{}
+	if err := s.backend.RequestPayload(ctx, ws.ActionMCPAskUserQuestion, payload, &result); err != nil {
+		if ctx.Err() != nil {
+			// Agent's MCP client disconnected/timed out. Notify backend to cancel
+			// pending clarifications so the user's answer goes through the event
+			// fallback path immediately instead of waiting for the watchdog.
+			go s.notifyClarificationTimeout()
+		}
+		return nil, mcp.NewToolResultError(err.Error())
+	}
+	return result, nil
+}
+
+// requestApprovalHandler implements request_approval_kandev: a single fixed
+// approval question that reuses the clarification pipeline and returns the
+// resolver-filled approval outcome.
+func (s *Server) requestApprovalHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		subject := req.GetString(approvalSubjectArg, "")
+		documentKey := req.GetString(approvalDocumentKeyArg, "")
+		title := req.GetString(titleArg, "")
+		summary := req.GetString(approvalSummaryArg, "")
+		if errResult := validateApprovalRequestArgs(subject, documentKey, title, summary); errResult != nil {
+			return errResult, nil
+		}
+
+		question := clarification.ApprovalQuestion(title)
+		payload := map[string]interface{}{
+			"session_id": s.sessionID,
+			questionsArg: []clarification.Question{question},
+			"context":    summary,
+			"approval": &clarification.ApprovalMeta{
+				Subject:     subject,
+				DocumentKey: documentKey,
+				Title:       title,
+			},
+		}
+
+		result, errResult := s.requestClarification(ctx, req, payload)
+		if errResult != nil {
+			return errResult, nil
+		}
+		return extractApprovalOutcome(result), nil
+	}
+}
+
+const approvalTitleRuneCap = 60
+
+func validateApprovalRequestArgs(subject, documentKey, title, summary string) *mcp.CallToolResult {
+	switch subject {
+	case clarification.ApprovalSubjectTaskPlan:
+	case clarification.ApprovalSubjectDocument:
+		if strings.TrimSpace(documentKey) == "" {
+			return mcp.NewToolResultError("document_key is required when subject is \"document\"")
+		}
+	default:
+		return mcp.NewToolResultError("subject must be \"task_plan\" or \"document\"")
+	}
+	if strings.TrimSpace(title) == "" {
+		return mcp.NewToolResultError("title is required")
+	}
+	if len([]rune(title)) > approvalTitleRuneCap {
+		return mcp.NewToolResultError("title must be at most 60 characters")
+	}
+	if strings.TrimSpace(summary) == "" {
+		return mcp.NewToolResultError("summary is required")
+	}
+	return nil
+}
+
+// extractApprovalOutcome shapes the resolver-filled approval outcome into the
+// tool result the agent reads. It never echoes client-supplied version data.
+func extractApprovalOutcome(result map[string]interface{}) *mcp.CallToolResult {
+	approval, ok := result["approval"].(map[string]interface{})
+	if !ok {
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultStructured(result, string(data))
+	}
+	out := map[string]interface{}{
+		"decision":        stringField(approval, "decision"),
+		"feedback":        stringField(approval, "feedback"),
+		"plan_comments":   stringField(approval, "plan_comments"),
+		"subject_edited":  boolField(approval, "subject_edited"),
+		"current_version": stringField(approval, "current_version"),
+	}
+	if ids, ok := approval["comment_ids"].([]interface{}); ok {
+		out["comment_ids"] = ids
+	}
+	data, _ := json.MarshalIndent(out, "", "  ")
+	return mcp.NewToolResultStructured(out, string(data))
+}
+
+func boolField(result map[string]interface{}, key string) bool {
+	v, _ := result[key].(bool)
+	return v
 }
 
 func (s *Server) askParentQuestionHandler() server.ToolHandlerFunc {
@@ -1404,6 +1505,9 @@ func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
 		}
 		if req.GetBool("allow_truncation", false) {
 			payload["allow_truncation"] = true
+		}
+		if req.GetBool("new_revision", false) {
+			payload["new_revision"] = true
 		}
 
 		var result map[string]interface{}

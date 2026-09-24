@@ -21,7 +21,7 @@ import { DiffViewerResolved } from "./diff-viewer-resolver";
 afterEach(cleanup);
 
 describe("DiffViewerResolved Monaco context", () => {
-  it("preserves external-link context while stripping Pierre-only props", () => {
+  it("preserves external-link context while stripping Pierre-only props", async () => {
     render(
       <DiffViewerResolved
         data={{
@@ -45,7 +45,9 @@ describe("DiffViewerResolved Monaco context", () => {
       />,
     );
 
-    const props = JSON.parse(screen.getByTestId("monaco-diff-props").dataset.props ?? "{}");
+    const props = JSON.parse(
+      (await screen.findByTestId("monaco-diff-props")).dataset.props ?? "{}",
+    );
     expect(props).toMatchObject({
       repo: "frontend",
       taskId: "task-1",

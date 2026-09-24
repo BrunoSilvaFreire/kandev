@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 // Outcome is the caller-supplied resolution ResolveBundle is asked to
@@ -212,5 +214,6 @@ func normalizeAnswer(q Question, a Answer) Answer {
 		QuestionID:      q.ID,
 		SelectedOptions: deduped,
 		CustomText:      strings.TrimSpace(a.CustomText),
+		PlanCommentRefs: append([]taskmodels.TaskPlanCommentRef{}, a.PlanCommentRefs...),
 	}
 }

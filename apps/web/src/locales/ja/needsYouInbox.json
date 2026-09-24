@@ -31,6 +31,7 @@
   "openTask": "task を開く",
   "questionCount_one": "この bundle に {{count}}件の質問",
   "questionCount_other": "この bundle に {{count}}件の質問",
+  "approvalBadge": "承認",
   "emptyTitleUnnamedWorkspace": "この workspace で待機中のものはない。",
   "tabLabel": "必要事項",
   "failedClauseSome_one": "この一覧は失敗した task を数えない。{{count}}件の task も失敗済み。Failed タブを見ろ。",

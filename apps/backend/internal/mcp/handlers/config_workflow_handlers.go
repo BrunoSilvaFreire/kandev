@@ -167,6 +167,7 @@ func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message
 		CompleteTaskOnEnter        json.RawMessage                 `json:"complete_task_on_enter"`
 		WIPLimit                   *int                            `json:"wip_limit"`
 		PullFromStepID             *string                         `json:"pull_from_step_id"`
+		AllowedTags                *[]string                       `json:"allowed_tags"`
 		SessionTarget              workflowctrl.SessionTargetPatch `json:"session_target"`
 		Events                     *wfmodels.StepEvents            `json:"events"`
 	}
@@ -200,6 +201,7 @@ func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message
 		CompleteTaskOnEnter:        completeTaskOnEnter,
 		WIPLimit:                   req.WIPLimit,
 		PullFromStepID:             req.PullFromStepID,
+		AllowedTags:                req.AllowedTags,
 		SessionTarget:              req.SessionTarget,
 		Events:                     req.Events,
 	}
@@ -249,6 +251,7 @@ func (h *Handlers) handleUpdateWorkflowStep(ctx context.Context, msg *ws.Message
 		CompleteTaskOnEnter        json.RawMessage                 `json:"complete_task_on_enter"`
 		WIPLimit                   *int                            `json:"wip_limit"`
 		PullFromStepID             *string                         `json:"pull_from_step_id"`
+		AllowedTags                *[]string                       `json:"allowed_tags"`
 		SessionTarget              workflowctrl.SessionTargetPatch `json:"session_target"`
 		Events                     *wfmodels.StepEvents            `json:"events"`
 	}
@@ -280,6 +283,7 @@ func (h *Handlers) handleUpdateWorkflowStep(ctx context.Context, msg *ws.Message
 		CompleteTaskOnEnter:        completeTaskOnEnter,
 		WIPLimit:                   req.WIPLimit,
 		PullFromStepID:             req.PullFromStepID,
+		AllowedTags:                req.AllowedTags,
 		SessionTarget:              req.SessionTarget,
 		Events:                     req.Events,
 	}

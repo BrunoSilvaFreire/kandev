@@ -1,0 +1,113 @@
+version: 2
+type: kandev_workflow
+workflows:
+  - name: Session Mining
+    description: Mine prior Codex/Claude/OpenCode/Antigravity sessions for durable knowledge, draft a wiki page, then audit it against the live codebase.
+    steps:
+      - name: Backlog
+        position: 0
+        color: bg-neutral-400
+        events: {}
+        is_start_step: false
+        show_in_command_panel: false
+        allow_manual_move: true
+        complete_task_on_enter: false
+      - name: Mine
+        position: 1
+        color: bg-cyan-500
+        prompt: |
+          ROLE: Miner (cheap context agent). Mine prior sessions only. Do NOT modify
+          repository files.
+
+          Follow the `kandev-session-mining` skill.
+
+          {{task_prompt}}
+
+          Use the `agents` CLI to index and search all sources (codex, claude, opencode,
+          antigravity) for the topic. Collect candidate durable knowledge with provenance:
+          canonical session ID, timestamp, workspace, and the exact turn/result IDs.
+
+          Separate durable knowledge from one-off noise. Save your findings as this task's
+          plan with create_task_plan_kandev (update it if one exists), then call
+          step_complete_kandev.
+        events:
+          on_enter:
+            - type: auto_start_agent
+          on_turn_complete:
+            - type: move_to_next
+        is_start_step: true
+        show_in_command_panel: true
+        allow_manual_move: true
+        auto_advance_requires_signal: true
+        cancel_triggers_turn_complete: false
+        agent_profile:
+          agent_name: OpenCode
+          model: opencode-go/deepseek-v4.1-flash
+        profile_session_start_policy: new
+        profile_session_end_policy: complete
+        complete_task_on_enter: false
+      - name: Draft
+        position: 2
+        color: bg-purple-500
+        prompt: |
+          ROLE: Wiki author. Read the task plan with get_task_plan_kandev — mined evidence
+          with provenance. Verify anything load-bearing against the live repository or
+          runtime before you write it.
+
+          Draft or update the durable Notion Technical Wiki page under
+          Engineering Corner -> Technical Wiki. Follow the CityScape notion-writing
+          conventions: real Notion blocks, required sections, no ASCII art or fake tables.
+
+          Record provenance (session IDs, timestamps) in the page. Then update the task
+          plan with the page URL and a one-line summary of what changed, and call
+          step_complete_kandev. Do NOT write temporary noise into the durable wiki.
+        events:
+          on_enter:
+            - type: auto_start_agent
+          on_turn_complete:
+            - type: move_to_next
+        is_start_step: false
+        show_in_command_panel: true
+        allow_manual_move: true
+        auto_advance_requires_signal: true
+        cancel_triggers_turn_complete: false
+        agent_profile:
+          agent_name: Codex
+          model: gpt-5.6-sol
+          mode: agent-full-access
+        profile_session_start_policy: new
+        profile_session_end_policy: park
+        complete_task_on_enter: false
+      - name: Audit
+        position: 3
+        color: bg-yellow-500
+        prompt: |
+          ROLE: Librarian. Read the task plan and the wiki page it links. Validate every
+          factual claim against the live codebase and runtime.
+
+          Report findings as STALE / INCORRECT / MISSING with the evidence that proves it.
+          Fix only unambiguous staleness; flag anything uncertain for a human. Do not
+          broaden the page beyond its stated scope. Call step_complete_kandev when done.
+        events:
+          on_enter:
+            - type: auto_start_agent
+        is_start_step: false
+        show_in_command_panel: true
+        allow_manual_move: true
+        auto_advance_requires_signal: false
+        cancel_triggers_turn_complete: false
+        agent_profile:
+          agent_name: Claude
+          model: opus[1m]
+          mode: default
+        profile_session_start_policy: new
+        profile_session_end_policy: park
+        complete_task_on_enter: false
+      - name: Done
+        position: 4
+        color: bg-green-500
+        events: {}
+        is_start_step: false
+        show_in_command_panel: false
+        allow_manual_move: true
+        complete_task_on_enter: true

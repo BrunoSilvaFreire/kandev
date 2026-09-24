@@ -22,6 +22,7 @@ import { TaskChangesPanel } from "./task-changes-panel";
 import { ChangesPanel } from "./changes-panel";
 import { FilesPanel } from "./files-panel";
 import { TaskPlanPanel } from "./task-plan-panel";
+import { TaskDocuments } from "./simple/task-documents";
 import { FileEditorPanel } from "./file-editor-panel";
 import { PassthroughToolbar } from "./passthrough-toolbar";
 import { PanelRoot, PanelBody } from "./panel-primitives";
@@ -42,6 +43,7 @@ import { PluginTaskPanel } from "./plugin-task-panel";
 import { PluginPanelTab } from "./plugin-panel-tab";
 import { PromptHistoryContent } from "./prompt-history-panel-host";
 import { TodosContent } from "./todos-panel-content";
+import { UsagePanelHost } from "./usage-panel/usage-panel-host";
 
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -122,6 +124,7 @@ export const dockviewComponents: Record<string, React.FunctionComponent<IDockvie
   plan: PortalSlot,
   todos: PortalSlot,
   "prompt-history": PortalSlot,
+  usage: PortalSlot,
   "pr-detail": PortalSlot,
   "mr-detail": PortalSlot,
   "review-detail": PortalSlot,
@@ -381,10 +384,24 @@ function FilesContent() {
   return <FilesPanel onOpenFile={handleOpenFile} />;
 }
 
-/** Render the plan panel for the active task. */
+/** Render the plan panel for the active task, with the task's documents below it. */
 function PlanContent() {
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
-  return <TaskPlanPanel taskId={taskId} visible />;
+  return (
+    <div className="flex h-full min-h-0 flex-col" data-testid="plan-panel-with-documents">
+      <div className="min-h-0 flex-1">
+        <TaskPlanPanel taskId={taskId} visible />
+      </div>
+      {taskId ? (
+        <div
+          className="shrink-0 max-h-[40%] overflow-y-auto border-t border-border/60 px-3"
+          data-testid="plan-panel-documents"
+        >
+          <TaskDocuments taskId={taskId} />
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -424,6 +441,7 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   plan: () => <PlanContent />,
   todos: () => <TodosContent />,
   "prompt-history": () => <PromptHistoryContent />,
+  usage: () => <UsagePanelHost />,
   "pr-detail": (panelId, params) => (
     <ReviewDetailPanelComponent panelId={panelId} params={params} />
   ),

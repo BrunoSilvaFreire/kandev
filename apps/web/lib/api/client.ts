@@ -119,6 +119,30 @@ export async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOption
 }
 
 /**
+ * Performs an authenticated request and returns the raw Response so a caller
+ * can consume a streaming body. Non-2xx responses reject with the same ApiError
+ * classification fetchJson uses.
+ */
+export async function fetchResponse(
+  pathOrUrl: string,
+  options?: ApiRequestOptions,
+): Promise<Response> {
+  const baseUrl = options?.baseUrl ?? getBackendConfig().apiBaseUrl;
+  const url = resolveUrl(pathOrUrl, baseUrl);
+  const response = await fetch(url, {
+    ...options?.init,
+    cache: options?.cache,
+    credentials: "include",
+    headers: buildRequestHeaders(options),
+  });
+  if (!response.ok) {
+    if (response.status === 401 && isKandevAuthChallenge(response)) onUnauthorized?.();
+    await throwFromResponse(response);
+  }
+  return response;
+}
+
+/**
  * Fetches a binary response body (e.g. a zip download) as a Blob. Unlike
  * fetchJson, no Content-Type is forced on the request and the body is never
  * parsed as JSON — the caller consumes raw bytes. Non-2xx responses reject

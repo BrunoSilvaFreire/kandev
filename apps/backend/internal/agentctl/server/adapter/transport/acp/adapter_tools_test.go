@@ -104,3 +104,72 @@ func TestPathFromLocationSlice(t *testing.T) {
 		})
 	}
 }
+
+func TestHandleToolCallPreCompletedNotTrackedActive(t *testing.T) {
+	adapter := newTestAdapter()
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	tc := &acp.SessionUpdateToolCall{
+		ToolCallId: "reconcile-1",
+		Kind:       "edit",
+		Status:     acp.ToolCallStatus(toolStatusCompleted),
+		RawInput: map[string]any{
+			"TargetFile": "/workspace/main.go",
+		},
+	}
+
+	ev := adapter.convertToolCallUpdate("session-1", tc)
+	if ev == nil {
+		t.Fatal("expected event from convertToolCallUpdate")
+	}
+	if ev.ToolStatus != toolStatusCompleted {
+		t.Fatalf("expected ToolStatus %q, got %q", toolStatusCompleted, ev.ToolStatus)
+	}
+
+	adapter.mu.Lock()
+	_, active := adapter.activeToolCalls["reconcile-1"]
+	adapter.mu.Unlock()
+
+	if active {
+		t.Fatal("expected pre-completed tool call not to be tracked in activeToolCalls")
+	}
+}
+
+func TestConvertToolCallUpdateEnrichModifyFileFromContents(t *testing.T) {
+	adapter := newTestAdapter()
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	oldText := "old\n"
+	tc := &acp.SessionUpdateToolCall{
+		ToolCallId: "edit-1",
+		Kind:       "edit",
+		Status:     acp.ToolCallStatus(toolStatusCompleted),
+		RawInput: map[string]any{
+			"TargetFile": "/workspace/file.go",
+		},
+		Content: []acp.ToolCallContent{
+			{
+				Diff: &acp.ToolCallContentDiff{
+					Path:    "/workspace/file.go",
+					OldText: &oldText,
+					NewText: "new\n",
+				},
+			},
+		},
+	}
+
+	ev := adapter.convertToolCallUpdate("session-1", tc)
+	if ev == nil {
+		t.Fatal("expected event from convertToolCallUpdate")
+	}
+	mf := ev.NormalizedPayload.ModifyFile()
+	if mf == nil {
+		t.Fatal("expected ModifyFile payload")
+	}
+	if mf.FilePath != "/workspace/file.go" {
+		t.Fatalf("expected FilePath /workspace/file.go, got %q", mf.FilePath)
+	}
+	if len(mf.Mutations) == 0 || mf.Mutations[0].Diff == "" {
+		t.Fatalf("expected diff in Mutations[0], got %+v", mf.Mutations)
+	}
+}

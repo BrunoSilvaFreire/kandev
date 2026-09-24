@@ -19,6 +19,7 @@ pub const MENU_QUIT: &str = "desktop.v1.quit";
 pub const MENU_HELP_DOCS: &str = "desktop.v1.help-docs";
 pub const MENU_HELP_REPOSITORY: &str = "desktop.v1.help-repository";
 pub const MENU_HELP_RELEASES: &str = "desktop.v1.help-releases";
+pub const MENU_TOGGLE_DEVTOOLS: &str = "desktop.v1.toggle-devtools";
 
 const DEFAULT_ZOOM: f64 = 1.0;
 const ZOOM_STEP: f64 = 0.1;
@@ -36,6 +37,7 @@ pub enum MenuAction {
     HelpDocs,
     HelpRepository,
     HelpReleases,
+    ToggleDevTools,
 }
 
 pub fn menu_action(id: &str) -> Option<MenuAction> {
@@ -52,6 +54,7 @@ pub fn menu_action(id: &str) -> Option<MenuAction> {
         MENU_HELP_DOCS => Some(MenuAction::HelpDocs),
         MENU_HELP_REPOSITORY => Some(MenuAction::HelpRepository),
         MENU_HELP_RELEASES => Some(MenuAction::HelpReleases),
+        MENU_TOGGLE_DEVTOOLS => Some(MenuAction::ToggleDevTools),
         _ => None,
     }
 }
@@ -126,6 +129,10 @@ mod tests {
         assert_eq!(
             menu_action(MENU_CHECK_FOR_UPDATES),
             Some(MenuAction::Emit(CHECK_FOR_UPDATES_EVENT))
+        );
+        assert_eq!(
+            menu_action(MENU_TOGGLE_DEVTOOLS),
+            Some(MenuAction::ToggleDevTools)
         );
     }
 

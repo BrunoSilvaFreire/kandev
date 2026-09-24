@@ -10,7 +10,7 @@ import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-p
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
 import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { getWebSocketClient } from "@/lib/ws/connection";
+import { requestContextReset } from "@/lib/api/domains/session-reset-api";
 import { useTranslation } from "react-i18next";
 
 type ResetContextButtonProps = {
@@ -164,9 +164,7 @@ function useContextResetRequest(sessionId: string) {
   const handleReset = useCallback(async () => {
     setIsResetting(true);
     try {
-      const client = getWebSocketClient();
-      if (!client) return;
-      await client.request("session.reset_context", { session_id: sessionId }, 30000);
+      await requestContextReset(sessionId);
       clearContextWindow(sessionId);
     } catch (error) {
       console.error("Failed to reset agent context:", error);

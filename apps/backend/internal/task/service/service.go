@@ -516,6 +516,7 @@ type Service struct {
 	workspaceBootstrapper           WorkspaceBootstrapper
 	workflowStepGetter              WorkflowStepGetter
 	workflowMovePreflight           WorkflowMovePreflight
+	workflowEntryProfileSelector    WorkflowEntryProfileSelector
 	startStepResolver               StartStepResolver
 	stepHistoryRecorder             StepHistoryRecorder
 	contributionDestinationPreparer ContributionDestinationPreparer

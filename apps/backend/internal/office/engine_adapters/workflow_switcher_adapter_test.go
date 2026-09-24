@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/steptelemetry"
+	"github.com/kandev/kandev/internal/workflow/entryroute"
 )
 
 type fakeFirstStepResolver struct {
@@ -18,11 +19,37 @@ func (f *fakeFirstStepResolver) ResolveStartStep(_ context.Context, _ string) (s
 	return f.stepID, f.err
 }
 
+// fakeEntryRouteAttacher records the tagged-entry preflight and can attach a
+// pending route or fail it.
+type fakeEntryRouteAttacher struct {
+	calls   []struct{ TaskID, StepID string }
+	err     error
+	profile string
+}
+
+func (f *fakeEntryRouteAttacher) AttachPendingEntryRouteForStep(
+	ctx context.Context, taskID, stepID string,
+) (context.Context, error) {
+	f.calls = append(f.calls, struct{ TaskID, StepID string }{TaskID: taskID, StepID: stepID})
+	if f.err != nil {
+		return ctx, f.err
+	}
+	if f.profile == "" {
+		return ctx, nil
+	}
+	return entryroute.WithPendingRoute(ctx, entryroute.PendingRoute{
+		DestinationStepID: stepID,
+		AgentProfileID:    f.profile,
+		StartPolicy:       "reuse",
+	}), nil
+}
+
 type fakeMover struct {
 	calls []struct {
 		TaskID, WorkflowID, StepID string
 		Position                   int
 		Attribution                steptelemetry.Attribution
+		Ctx                        context.Context
 	}
 	err error
 }
@@ -32,7 +59,8 @@ func (f *fakeMover) AddTaskToWorkflow(ctx context.Context, taskID, workflowID, s
 		TaskID, WorkflowID, StepID string
 		Position                   int
 		Attribution                steptelemetry.Attribution
-	}{TaskID: taskID, WorkflowID: workflowID, StepID: stepID, Position: position, Attribution: steptelemetry.FromContext(ctx)})
+		Ctx                        context.Context
+	}{TaskID: taskID, WorkflowID: workflowID, StepID: stepID, Position: position, Attribution: steptelemetry.FromContext(ctx), Ctx: ctx})
 	return f.err
 }
 
@@ -107,6 +135,51 @@ func TestWorkflowSwitcherAdapter_BubblesMoverError(t *testing.T) {
 	_, err := a.SwitchTaskWorkflow(context.Background(), "task-1", "wf-2", "")
 	if err == nil || !errors.Is(err, moveErr) {
 		t.Fatalf("expected mover error to bubble, got: %v", err)
+	}
+}
+
+// TestWorkflowSwitcherAdapter_FreezesTaggedEntryBeforeMove proves a tagged
+// destination switches through the entry preflight and reaches the mover with
+// the frozen pending route, so AddTaskToWorkflow persists it atomically.
+func TestWorkflowSwitcherAdapter_FreezesTaggedEntryBeforeMove(t *testing.T) {
+	mover := &fakeMover{}
+	attacher := &fakeEntryRouteAttacher{profile: "profile-frozen"}
+	a := NewWorkflowSwitcherAdapter(&fakeFirstStepResolver{stepID: "first-step"}, mover)
+	a.SetEntryRouteAttacher(attacher)
+
+	got, err := a.SwitchTaskWorkflow(context.Background(), "task-1", "wf-2", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "first-step" {
+		t.Fatalf("resolved step = %q, want first-step", got)
+	}
+	if len(attacher.calls) != 1 || attacher.calls[0].StepID != "first-step" {
+		t.Fatalf("attacher calls = %+v, want the resolved step", attacher.calls)
+	}
+	if len(mover.calls) != 1 {
+		t.Fatalf("mover calls = %d, want 1", len(mover.calls))
+	}
+	pending, ok := entryroute.FromContext(mover.calls[0].Ctx)
+	if !ok || pending.AgentProfileID != "profile-frozen" || pending.DestinationStepID != "first-step" {
+		t.Fatalf("mover did not receive the frozen route: %#v (ok=%v)", pending, ok)
+	}
+}
+
+// TestWorkflowSwitcherAdapter_AttacherErrorBlocksMove proves a tagged
+// destination with no eligible profile fails before the workflow swap commits.
+func TestWorkflowSwitcherAdapter_AttacherErrorBlocksMove(t *testing.T) {
+	mover := &fakeMover{}
+	attachErr := errors.New("no eligible agent profile for workflow step")
+	a := NewWorkflowSwitcherAdapter(&fakeFirstStepResolver{stepID: "first-step"}, mover)
+	a.SetEntryRouteAttacher(&fakeEntryRouteAttacher{err: attachErr})
+
+	_, err := a.SwitchTaskWorkflow(context.Background(), "task-1", "wf-2", "")
+	if !errors.Is(err, attachErr) {
+		t.Fatalf("err = %v, want the attacher error", err)
+	}
+	if len(mover.calls) != 0 {
+		t.Fatalf("mover called %d times, want 0 (fail before commit)", len(mover.calls))
 	}
 }
 

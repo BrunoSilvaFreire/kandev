@@ -3,7 +3,51 @@
 // designed for quick tasks like generating commit messages or PR descriptions.
 package utility
 
-import "github.com/kandev/kandev/internal/common/acpprovider"
+import (
+	"context"
+
+	"github.com/kandev/kandev/internal/common/acpprovider"
+)
+
+// PromptProgressPhase is the coarse phase of a utility prompt, streamed to the
+// backend so "Enhance Prompt" can show live status.
+type PromptProgressPhase string
+
+const (
+	PromptPhaseStarting   PromptProgressPhase = "starting"
+	PromptPhaseAnalyzing  PromptProgressPhase = "analyzing"
+	PromptPhaseGenerating PromptProgressPhase = "generating"
+	PromptPhaseTool       PromptProgressPhase = "tool"
+	PromptPhaseCompleted  PromptProgressPhase = "completed"
+	PromptPhaseFailed     PromptProgressPhase = "failed"
+)
+
+// PromptProgress is one progress frame. Tool is set only for PromptPhaseTool
+// and is capped at 60 runes.
+type PromptProgress struct {
+	Phase PromptProgressPhase `json:"phase"`
+	Tool  string              `json:"tool,omitempty"`
+}
+
+// ProgressReporter receives progress frames. Implementations must be safe for
+// concurrent use; the executor may emit from the ACP update handler goroutine.
+type ProgressReporter func(PromptProgress)
+
+type progressReporterKey struct{}
+
+// WithProgressReporter attaches a reporter to ctx. A nil reporter is a no-op.
+func WithProgressReporter(ctx context.Context, fn ProgressReporter) context.Context {
+	if fn == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, progressReporterKey{}, fn)
+}
+
+// ProgressReporterFrom returns the reporter attached to ctx, or nil.
+func ProgressReporterFrom(ctx context.Context) ProgressReporter {
+	fn, _ := ctx.Value(progressReporterKey{}).(ProgressReporter)
+	return fn
+}
 
 // PromptRequest is the request for executing an inference prompt.
 type PromptRequest struct {
@@ -19,6 +63,11 @@ type PromptRequest struct {
 	// Mode is the optional session mode to set before sending the prompt.
 	// If empty, no session/set_mode call is made and the agent default is used.
 	Mode string `json:"mode,omitempty"`
+
+	// StreamProgress asks agentctl to answer with NDJSON progress frames and a
+	// final result frame instead of one JSON body. Older agentctl binaries
+	// ignore it and return plain JSON, which the client still accepts.
+	StreamProgress bool `json:"stream_progress,omitempty"`
 
 	// Profile-owned launch policy. These values are resolved by the backend
 	// at call start and are never accepted from an external client.

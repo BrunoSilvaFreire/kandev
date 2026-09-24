@@ -91,6 +91,15 @@ func TestValidateWorkflowSessionTargetSource(t *testing.T) {
 			},
 			wantErr: "must use a direct agent profile",
 		},
+		{
+			name: "tagged source",
+			dest: &wfmodels.WorkflowStep{ID: "review", WorkflowID: "workflow", Position: 2},
+			source: &wfmodels.WorkflowStep{
+				ID: "implement", WorkflowID: "workflow", Position: 1, AgentProfileID: "profile-a",
+				AllowedTags: []string{"review"},
+			},
+			wantErr: "must use a direct agent profile",
+		},
 	}
 
 	for _, tt := range tests {

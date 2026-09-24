@@ -24,6 +24,7 @@ import {
   usePendingAgentMessageComments,
 } from "@/hooks/domains/comments/use-pending-comments";
 import { useChatContextItems } from "./use-chat-context-items";
+import { shouldSuppressPlanCommentAutoAttach } from "@/lib/approval";
 import {
   useAutoDisablePlanMode,
   useAutoDisableUnsupportedPlanMode,
@@ -44,6 +45,7 @@ import { usePlanCommentMigration } from "@/hooks/domains/comments/use-plan-comme
 import { usePreviewFeedback } from "@/hooks/domains/comments/use-preview-feedback";
 
 const EMPTY_CONTEXT_FILES: ContextFile[] = [];
+const EMPTY_PLAN_COMMENTS: PlanComment[] = [];
 const PLAN_CONTEXT_PATH = "plan:context";
 
 // Tracks sessions for which the plan layout has already been auto-applied.
@@ -513,6 +515,11 @@ export function useChatPanelState({
     sessionState.taskDescription,
   );
   const comments = useCommentsState(resolvedSessionId, taskId);
+  // While an approval bundle is pending, its Revise answer owns the task's
+  // pending plan comments. Auto-attaching them to an unrelated chat message
+  // would consume them behind the approval's back.
+  const approvalPending = shouldSuppressPlanCommentAutoAttach(sessionData.pendingClarification?.metadata);
+  const effectivePlanComments = approvalPending ? EMPTY_PLAN_COMMENTS : comments.planComments;
   const previewFeedbackState = usePreviewFeedback(taskId);
   const planCommentMigration = usePlanCommentMigration(taskId);
   const [previewFeedbackOpen, setPreviewFeedbackOpen] = useState(false);
@@ -529,7 +536,9 @@ export function useChatPanelState({
     resolvedSessionId,
     removeContextFile,
     unpinFile,
-    comments,
+    // The approval card owns the pending plan comments while it is open, so
+    // their context chips are hidden for the same window as the auto-attach.
+    comments: approvalPending ? { ...comments, planComments: effectivePlanComments } : comments,
     previewFeedback: previewFeedbackState.items,
     taskId,
     onOpenFile,
@@ -546,6 +555,7 @@ export function useChatPanelState({
     ...contextFilesState,
     ...sessionData,
     ...comments,
+    planComments: effectivePlanComments,
     previewFeedback: previewFeedbackState.items,
     previewFeedbackState,
     previewFeedbackOpen,

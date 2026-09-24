@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/workflow/entryroute"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -141,7 +142,7 @@ func validateWorkflowSessionTargetSource(destination, source *wfmodels.WorkflowS
 	if source.Position >= destination.Position {
 		return fmt.Errorf("session target source step %q is not earlier than destination step %q", source.ID, destination.ID)
 	}
-	if source.AgentProfileID == "" || source.SessionTarget != nil {
+	if source.AgentProfileID == "" || source.SessionTarget != nil || len(source.AllowedTags) > 0 {
 		return fmt.Errorf("session target source step %q must use a direct agent profile", source.ID)
 	}
 	return nil
@@ -423,7 +424,7 @@ func workflowSessionRouteID(taskID, stepID, entryIdentity string, target *wfmode
 		targetKind = string(target.Kind)
 		targetID = target.StepID
 	}
-	return fmt.Sprintf("workflow-session:%s:%s:%s:%s:%s:%s", taskID, stepID, entryIdentity, targetKind, targetID, startPolicy)
+	return entryroute.OperationID(taskID, stepID, entryIdentity, targetKind, targetID, string(startPolicy))
 }
 
 func workflowProfileSessionRoute(
@@ -474,17 +475,17 @@ func (s *Service) workflowReplacementRoute(
 // session because a retry can legitimately reload a different primary.
 func (s *Service) workflowEntryIdentity(ctx context.Context, taskID string, entryIDs ...int64) string {
 	if len(entryIDs) > 0 && entryIDs[0] > 0 {
-		return fmt.Sprintf("entry:%020d", entryIDs[0])
+		return entryroute.EntryIdentity(entryIDs[0])
 	}
 	if reader, ok := s.repo.(workflowStepTransitionReader); ok {
 		if transitionID, err := reader.GetLatestTaskStepTransitionID(ctx, taskID); err == nil && transitionID > 0 {
-			return fmt.Sprintf("entry:%020d", transitionID)
+			return entryroute.EntryIdentity(transitionID)
 		}
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err == nil && task != nil {
 		if task.WorkflowStepTransitionID > 0 {
-			return fmt.Sprintf("entry:%020d", task.WorkflowStepTransitionID)
+			return entryroute.EntryIdentity(task.WorkflowStepTransitionID)
 		}
 		if !task.CreatedAt.IsZero() {
 			return "created:" + task.CreatedAt.UTC().Format(time.RFC3339Nano)
@@ -622,7 +623,10 @@ func (s *Service) recordWorkflowSourceBinding(
 	if task == nil || (task.WorkflowStepID != "" && task.WorkflowStepID != step.ID) {
 		return nil
 	}
-	effectiveProfileID := s.resolveStepAgentProfileForTask(ctx, task, step)
+	effectiveProfileID, err := s.resolveStepAgentProfileForTaskError(ctx, task, step)
+	if err != nil {
+		return err
+	}
 	if effectiveProfileID == "" {
 		effectiveProfileID = step.AgentProfileID
 	}

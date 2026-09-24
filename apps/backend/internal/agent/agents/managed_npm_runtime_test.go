@@ -26,6 +26,7 @@ func TestManagedNPMRuntimeContracts(t *testing.T) {
 		{"gemini", NewGemini(), "@google/gemini-cli", []string{"--acp"}},
 		{"pi", NewPiACP(), "pi-acp", nil},
 		{"muse", NewMuseACP(), "@bex-co/muse-code-acp", nil},
+		{"agy", NewAgyACP(), "agy-acp", []string{"--no-sandbox", "--dangerously-skip-permissions"}},
 	}
 
 	for _, tt := range tests {
@@ -157,6 +158,7 @@ func TestManagedAgentsHonorExactVersionCommandOption(t *testing.T) {
 		{"gemini", NewGemini()},
 		{"pi", NewPiACP()},
 		{"muse", NewMuseACP()},
+		{"agy", NewAgyACP()},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

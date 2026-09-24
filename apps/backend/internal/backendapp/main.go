@@ -299,6 +299,9 @@ func Run(args []string, build BuildInfo) int {
 	}()
 	logger.SetDefault(log)
 
+	// Profiling server (enabled via KANDEV_PROFILE=1)
+	startProfilingIfEnabled(log, &cleanups)
+
 	log.Info("Starting Kandev (unified mode)...",
 		zap.String("db_path", cfg.Database.Path),
 	)
@@ -958,6 +961,17 @@ func startAgentInfrastructure(
 		return false
 	}
 
+	// Wire the tag-selection dependency before any transition producer starts
+	// (event watcher, scheduler, HTTP): a tagged entry must never be committed
+	// while the selector is still unwired. One subscription-usage adapter is
+	// shared by the Office utilization endpoint, the workflow profile selector,
+	// and the settings batch endpoint so credential-path cache sharing is
+	// preserved across all three.
+	usageAdapter := newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
+	entryProfileSelector := newWorkflowEntryProfileSelector(repos.AgentSettings, agentRegistry, usageAdapter, log)
+	services.Task.SetWorkflowEntryProfileSelector(entryProfileSelector)
+	orchestratorSvc.SetWorkflowEntryProfileSelector(entryProfileSelector)
+
 	// The phase transition must happen here, immediately before
 	// lifecycleMgr.Start below (which is what actually runs
 	// sessions.recovery's BeginStep/Advance/EndStep sequence) rather than
@@ -975,7 +989,7 @@ func startAgentInfrastructure(
 	}
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,
-		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath,
+		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, usageAdapter, repoCloner, agentctlBinaryPath,
 		sessionCapacityEnvironment, storageStore, func(fn func() error) { addRuntimeCleanup(fn) }, runCleanups, cancelWorkers,
 		restoreCleanups, databaseQuiesce, sshReachabilityPoller)
 }
@@ -1038,6 +1052,7 @@ func startGatewayAndServe(
 	agentRegistry *registry.Registry,
 	orchestratorSvc *orchestrator.Service,
 	msgCreator *messageCreatorAdapter,
+	usageAdapter *usageProviderAdapter,
 	repoCloner *repoclone.Cloner,
 	agentctlBinaryPath string,
 	sessionCapacityEnvironment sessioncapacity.Environment,
@@ -1226,11 +1241,9 @@ func startGatewayAndServe(
 		return restoreQuiesceErr
 	}
 
-	// Wire subscription usage provider into the office agents service so the
-	// /agents/:id/utilization endpoint can fetch live utilization data.
-	// Skipped when the Office feature flag is off (services.OfficeSvcs is nil).
+	// The shared usage adapter (created before the transition producers start)
+	// is injected into Office now that the Office services exist.
 	if services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil {
-		usageAdapter := newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
 		services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
 	}
 
@@ -1384,7 +1397,7 @@ func startGatewayAndServe(
 	// already-bound handler and listeners — no second bind, no window where
 	// the socket is closed and reopened.
 	builtServer, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
-		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
+		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, usageAdapter, hostUtilityMgr,
 		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer,
 		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, sshReachabilityPoller, startup.FromContext(ctx), persistenceHealth)
 	if err != nil {
@@ -2003,6 +2016,9 @@ func wireWorkflowEngineForOffice(
 	taskCreator.SetCarrierResolver(officeSvc)
 	workflowSwitcher := officeengineadapters.NewWorkflowSwitcherAdapter(
 		&startStepResolverAdapter{svc: workflowSvc}, repos.Task)
+	// A tagged switch_workflow destination must freeze its concrete profile in
+	// the same transition as the workflow swap.
+	workflowSwitcher.SetEntryRouteAttacher(taskSvc)
 	// Wire each dependency via its dedicated setter so the orchestrator
 	// captures it both for engine.With* options and for the Phase 2 / 8
 	// callback registry.
@@ -2712,6 +2728,7 @@ func buildHTTPServer(
 	notificationCtrl *notificationcontroller.Controller,
 	msgCreator *messageCreatorAdapter,
 	agentRegistry *registry.Registry,
+	usageAdapter *usageProviderAdapter,
 	hostUtilityMgr *hostutility.Manager,
 	addCleanup func(func() error),
 	repoCloner *repoclone.Cloner,
@@ -2827,6 +2844,7 @@ func buildHTTPServer(
 		persistenceHealth:             requiredHealth,
 		agentSettingsController:       agentSettingsController,
 		agentSettingsRepo:             repos.AgentSettings,
+		profileUsageProvider:          usageAdapter,
 		agentList:                     agentRegistry,
 		agentRegistry:                 agentRegistry,
 		userCtrl:                      usercontroller.NewController(services.User),

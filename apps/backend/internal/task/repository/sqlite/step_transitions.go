@@ -10,6 +10,8 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/steptelemetry"
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/workflow/entryroute"
 )
 
 // stepTransitionTx is satisfied by both *sql.Tx and *sqlx.Tx, the two
@@ -138,7 +140,36 @@ func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransition
 	// ("is the writer alive"), not a commit-confirmed row-for-row audit
 	// trail; the ledger table itself is that audit trail.
 	steptelemetry.RecordLedgerRow(r.log, attribution.Trigger)
+	if err := r.persistPendingEntryRoute(ctx, tx, in.taskID, in.toWorkflowStepID, id, occurredAt); err != nil {
+		return 0, err
+	}
 	return id, nil
+}
+
+// persistPendingEntryRoute writes a caller-resolved workflow-entry profile
+// choice as the bounded workflow-session route in the same transaction as the
+// transition ledger row. The entry identity is derived from that row's
+// immutable id, so a raced or diverted transition (mismatched destination)
+// never persists the pending choice.
+func (r *Repository) persistPendingEntryRoute(ctx context.Context, tx stepTransitionTx, taskID, toStepID string, ledgerID int64, occurredAt time.Time) error {
+	if ledgerID <= 0 {
+		return nil
+	}
+	pending, ok := entryroute.FromContext(ctx)
+	if !ok || pending.DestinationStepID != toStepID {
+		return nil
+	}
+	entryIdentity := entryroute.EntryIdentity(ledgerID)
+	route := models.WorkflowSessionRoute{
+		OperationID:       entryroute.OperationID(taskID, toStepID, entryIdentity, entryroute.TargetKindProfile, "", pending.StartPolicy),
+		DestinationStepID: toStepID,
+		EntryIdentity:     entryIdentity,
+		TargetKind:        entryroute.TargetKindProfile,
+		AgentProfileID:    pending.AgentProfileID,
+		SourceSessionID:   pending.SourceSessionID,
+		Phase:             "prepared",
+	}
+	return r.setTaskMetadataKeyWithExecutor(ctx, tx, taskID, models.MetaKeyWorkflowSessionRoute, route, occurredAt)
 }
 
 // GetLatestTaskStepTransitionID returns the immutable ledger identity of the
