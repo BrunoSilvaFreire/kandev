@@ -3994,13 +3994,26 @@ func (s *Service) prepareWorkflowStepSession(
 				return nil, false, fmt.Errorf("workflow profile switch source step is unavailable")
 			}
 			endPolicy := s.resolveStepProfileSessionEndPolicy(sourceStep)
-			return s.replaceExactModelWorkflowStepSession(ctx, taskID, session, step, effectiveProfile, endPolicy, profileRoute, entryIDs...)
+			newSession, switched, err := s.replaceExactModelWorkflowStepSession(ctx, taskID, session, step, effectiveProfile, endPolicy, profileRoute, entryIDs...)
+			if err == nil {
+				s.recordWorkflowRouteDecision(ctx, taskID, session, newSession, step,
+					models.RoutingOutcomeCreated, models.RoutingReasonExactModelIncompatibility,
+					string(startPolicy), string(endPolicy), entryIDs...)
+			}
+			return newSession, switched, err
 		}
-		return s.keepCurrentWorkflowStepSession(ctx, taskID, session, step, profileRoute, entryIDs...)
+		newSession, switched, err := s.keepCurrentWorkflowStepSession(ctx, taskID, session, step, profileRoute, entryIDs...)
+		if err == nil {
+			s.recordWorkflowRouteDecision(ctx, taskID, session, newSession, step,
+				models.RoutingOutcomeReused, models.RoutingReasonReusedCurrentSession,
+				string(startPolicy), "", entryIDs...)
+		}
+		return newSession, switched, err
 	}
 	if sourceStep == nil {
 		return nil, false, fmt.Errorf("workflow profile switch source step is unavailable")
 	}
+	configuredStartPolicy := startPolicy
 	startPolicy, validatedExisting, err := s.exactModelWorkflowStartPolicy(ctx, taskID, session.ID, step, sourceStep, effectiveProfile, startPolicy)
 	if err != nil {
 		return nil, false, err
@@ -4010,6 +4023,9 @@ func (s *Service) prepareWorkflowStepSession(
 	if err != nil {
 		return nil, false, err
 	}
+	outcome, reason := classifySwitchRoutingOutcome(models.RoutingReasonNoReusableCandidate, configuredStartPolicy, startPolicy, session, validatedExisting, newSession)
+	s.recordWorkflowRouteDecision(ctx, taskID, session, newSession, step, outcome, reason,
+		string(startPolicy), string(endPolicy), entryIDs...)
 	if err := s.recordWorkflowSourceBinding(ctx, taskID, step, newSession, entryIDs...); err != nil {
 		return nil, false, err
 	}

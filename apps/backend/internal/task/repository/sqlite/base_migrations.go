@@ -475,6 +475,17 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 			updated_at           TIMESTAMP NOT NULL
 		)`)
 
+	// Workflow routing/step provenance (task-page history plan, work package 1).
+	// All additive and nullable/defaulted so existing databases upgrade without
+	// a destructive rewrite and legacy rows read as Unknown/legacy. The session
+	// FK is SET NULL so deleting a session leaves document-routing history
+	// readable. See initTaskSessionRoutesSchema for the per-route ledger table.
+	r.migrate.Apply("task_sessions.workflow_step_id_at_creation", `ALTER TABLE task_sessions ADD COLUMN workflow_step_id_at_creation TEXT DEFAULT ''`)
+	r.migrate.Apply("task_step_transitions.trigger_detail", `ALTER TABLE task_step_transitions ADD COLUMN trigger_detail TEXT`)
+	r.migrate.Apply("task_document_revisions.source_task_id", `ALTER TABLE task_document_revisions ADD COLUMN source_task_id TEXT`)
+	r.migrate.Apply("task_document_revisions.source_session_id", `ALTER TABLE task_document_revisions ADD COLUMN source_session_id TEXT REFERENCES task_sessions(id) ON DELETE SET NULL`)
+	r.migrate.Apply("task_document_revisions.source_workflow_step_id", `ALTER TABLE task_document_revisions ADD COLUMN source_workflow_step_id TEXT`)
+
 	// Checked last so a failure on any required migration above --
 	// including this file's own marker_positions column -- fails startup
 	// instead of leaving a schema that allocateStepEntryIfPending can't write to.
@@ -1327,8 +1338,13 @@ func (r *Repository) recreateTaskRepositoriesForMultiBranch(trigger string) erro
 
 // migrateSessionsRemoveWorkflowStepID removes the deprecated workflow_step_id column
 // from task_sessions. Workflow step is now tracked on the task, not the session.
+//
+// The trigger is "workflow_step_id TEXT" (the legacy column's declared type),
+// not the bare "workflow_step_id": the immutable provenance column
+// workflow_step_id_at_creation contains that substring, so a bare trigger
+// would fire on every current database and drop the provenance column.
 func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
-	return r.recreateTableNamed("task_sessions.recreate_drop_workflow_step_id", "task_sessions", "workflow_step_id", []string{
+	return r.recreateTableNamed("task_sessions.recreate_drop_workflow_step_id", "task_sessions", "workflow_step_id TEXT", []string{
 		`CREATE TABLE task_sessions_new (
 			id TEXT PRIMARY KEY,
 			task_id TEXT NOT NULL,

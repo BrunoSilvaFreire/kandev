@@ -33,6 +33,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initSessionSchema,
 		r.initDynamicRoutingSchema,
 		r.initStepTransitionsSchema,
+		r.initTaskSessionRoutesSchema,
 		r.initStepEntriesSchema,
 		r.initTaskUsageEventsSchema,
 		r.initAttachmentsSchema,
@@ -895,6 +896,9 @@ func (r *Repository) initDocumentsSchema() error {
 		author_kind TEXT NOT NULL DEFAULT 'agent',
 		author_name TEXT NOT NULL DEFAULT '',
 		revert_of_revision_id TEXT,
+		source_task_id TEXT,
+		source_session_id TEXT REFERENCES task_sessions(id) ON DELETE SET NULL,
+		source_workflow_step_id TEXT,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
@@ -1085,6 +1089,7 @@ func (r *Repository) initStepTransitionsSchema() error {
 		trigger TEXT NOT NULL,
 		actor_kind TEXT NOT NULL,
 		actor_id TEXT,
+		trigger_detail TEXT,
 		contract_version INTEGER NOT NULL,
 		occurred_at TIMESTAMP NOT NULL
 	);
@@ -1095,6 +1100,42 @@ func (r *Repository) initStepTransitionsSchema() error {
 	`)
 	if err != nil {
 		return fmt.Errorf("init step transitions schema: %w", err)
+	}
+	return nil
+}
+
+// initTaskSessionRoutesSchema creates task_session_routes: one durable row per
+// committed workflow session-routing decision. It is the task history
+// authority for "why was this session reused, created, or declined" — unlike
+// the bounded latest-route task metadata, it is not replaced on each route.
+//
+// No FK to workflow_steps or workflows: steps get deleted, and the fact that a
+// decision targeted a now-deleted step must survive. Session FKs are SET NULL
+// so deleting a session leaves the routing history readable.
+func (r *Repository) initTaskSessionRoutesSchema() error {
+	_, err := r.db.ExecContext(r.migrationContext(), `
+	CREATE TABLE IF NOT EXISTS task_session_routes (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+		destination_workflow_step_id TEXT NOT NULL,
+		source_session_id TEXT REFERENCES task_sessions(id) ON DELETE SET NULL,
+		destination_session_id TEXT REFERENCES task_sessions(id) ON DELETE SET NULL,
+		agent_profile_id TEXT NOT NULL DEFAULT '',
+		start_policy TEXT NOT NULL DEFAULT '',
+		end_policy TEXT NOT NULL DEFAULT '',
+		outcome TEXT NOT NULL,
+		reason TEXT NOT NULL,
+		workflow_step_transition_id INTEGER,
+		correlation_id TEXT NOT NULL DEFAULT '',
+		created_at TIMESTAMP NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_session_routes_task
+		ON task_session_routes(task_id, created_at, id);
+	CREATE UNIQUE INDEX IF NOT EXISTS uniq_task_session_routes_correlation
+		ON task_session_routes(task_id, correlation_id) WHERE correlation_id != '';
+	`)
+	if err != nil {
+		return fmt.Errorf("init task session routes schema: %w", err)
 	}
 	return nil
 }
@@ -1173,6 +1214,7 @@ const sessionWorktreeSchemaDDL = `
 		route_state TEXT NOT NULL DEFAULT '',
 		route_reason TEXT NOT NULL DEFAULT '',
 		downstream_acp_session_id TEXT NOT NULL DEFAULT '',
+		workflow_step_id_at_creation TEXT DEFAULT '',
 		executor_id TEXT DEFAULT '',
 		executor_profile_id TEXT DEFAULT '',
 		environment_id TEXT DEFAULT '',

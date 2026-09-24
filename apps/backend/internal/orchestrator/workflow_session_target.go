@@ -569,6 +569,11 @@ func (s *Service) prepareExplicitWorkflowSession(
 	if recordedSession != nil {
 		reused, switched, err := s.reuseRecordedWorkflowSession(ctx, taskID, currentSession, recordedRoute, recordedSession, endPolicy)
 		if err != nil || reused != nil {
+			if err == nil && reused != nil {
+				s.recordWorkflowRouteDecision(ctx, taskID, currentSession, reused, step,
+					models.RoutingOutcomeReused, models.RoutingReasonExplicitTarget,
+					string(startPolicy), string(endPolicy), entryIDs...)
+			}
 			return reused, switched, err
 		}
 	}
@@ -585,6 +590,11 @@ func (s *Service) prepareExplicitWorkflowSession(
 	if startPolicy == models.WorkflowProfileSessionStartPolicyReuse {
 		reused, switched, err := s.reuseResolvedWorkflowSession(ctx, taskID, currentSession, targetSession, &baseRoute, endPolicy)
 		if err != nil || reused != nil {
+			if err == nil && reused != nil {
+				s.recordWorkflowRouteDecision(ctx, taskID, currentSession, reused, step,
+					models.RoutingOutcomeReused, models.RoutingReasonExplicitTarget,
+					string(startPolicy), string(endPolicy), entryIDs...)
+			}
 			return reused, switched, err
 		}
 	}
@@ -599,6 +609,9 @@ func (s *Service) prepareExplicitWorkflowSession(
 	if err != nil {
 		return nil, false, err
 	}
+	s.recordWorkflowRouteDecision(ctx, taskID, currentSession, newSession, step,
+		models.RoutingOutcomeCreated, models.RoutingReasonExplicitTarget,
+		string(startPolicy), string(endPolicy), entryIDs...)
 	return newSession, true, nil
 }
 

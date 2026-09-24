@@ -72,12 +72,12 @@ func (o *messageOrchestratorWithCancellation) CancellationPending(sessionID stri
 
 func TestNewTaskHandlers_DerivesCancellationPendingProvider(t *testing.T) {
 	withCancellation := &orchestratorWithCancellation{pending: true}
-	h := NewTaskHandlers(nil, withCancellation, nil, nil, newTestLogger(t))
+	h := NewTaskHandlers(nil, withCancellation, nil, nil, nil, newTestLogger(t))
 	require.NotNil(t, h.cancellationPending)
 	require.True(t, h.cancellationPending.CancellationPending("session-1"))
 
 	plain := &captureOrchestrator{}
-	h2 := NewTaskHandlers(nil, plain, nil, nil, newTestLogger(t))
+	h2 := NewTaskHandlers(nil, plain, nil, nil, nil, newTestLogger(t))
 	require.Nil(t, h2.cancellationPending)
 }
 

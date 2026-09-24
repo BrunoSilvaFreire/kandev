@@ -66,6 +66,11 @@ type Attribution struct {
 	// the initiator. Left empty when there is none or several candidates
 	// exist with no single initiator — never guessed.
 	SessionID string
+	// TriggerDetail is an optional opaque, structured (JSON) description of
+	// an engine cause — turn completion, child completion, agent error,
+	// approval — for callers that can distinguish it within a single Trigger.
+	// It is stored verbatim and must not carry secrets or prompt text.
+	TriggerDetail string
 }
 
 type attributionContextKey struct{}
