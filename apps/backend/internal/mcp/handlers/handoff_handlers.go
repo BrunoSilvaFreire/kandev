@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -148,12 +149,37 @@ func (h *Handlers) handleWriteTaskDocument(ctx context.Context, msg *ws.Message)
 	if caller == "" {
 		caller = req.TaskID
 	}
-	doc, err := svc.WriteDocumentForCaller(ctx, caller, req.TaskID,
-		req.DocumentKey, req.Type, req.Title, req.Content, "agent", "Agent")
+	doc, err := svc.WriteDocumentForCallerWithProvenance(ctx, caller, req.TaskID,
+		req.DocumentKey, req.Type, req.Title, req.Content, "agent", "Agent", h.documentWriteProvenance(ctx, caller))
 	if err != nil {
 		return mapHandoffError(msg, err)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, doc)
+}
+
+// documentWriteProvenance derives the immutable producing source of an agent
+// document write from the trusted in-session principal. When the caller is not
+// an in-session agent (automation, internal callers) the source stays nil and
+// the revision renders as Unknown/legacy; it is never inferred.
+func (h *Handlers) documentWriteProvenance(ctx context.Context, callerTaskID string) service.DocumentWriteProvenance {
+	principal, ok := mcpscope.PrincipalFromContext(ctx)
+	if !ok {
+		return service.DocumentWriteProvenance{}
+	}
+	provenance := service.DocumentWriteProvenance{
+		SourceTaskID:    principal.CallerTaskID,
+		SourceSessionID: principal.CallerSessionID,
+	}
+	if h.taskSvc == nil {
+		return provenance
+	}
+	task, err := h.taskSvc.GetTask(ctx, callerTaskID)
+	if err != nil || task == nil {
+		return provenance
+	}
+	provenance.SourceTaskID = task.ID
+	provenance.SourceWorkflowStepID = task.WorkflowStepID
+	return provenance
 }
 
 func mapHandoffError(msg *ws.Message, err error) (*ws.Message, error) {

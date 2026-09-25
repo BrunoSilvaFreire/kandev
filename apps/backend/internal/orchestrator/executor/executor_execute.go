@@ -1225,6 +1225,15 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	if taskEnvironmentID != "" {
 		session.TaskEnvironmentID = taskEnvironmentID
 	}
+	// Immutable creation provenance: the caller passes the destination workflow
+	// step for this session explicitly. Setting it here rather than reading the
+	// task's current step inside the create transaction keeps provenance
+	// independent of whether the task row was updated before or after the
+	// session insert. The repository keeps the transaction read only as a
+	// fallback for non-workflow creation that supplies no step.
+	if workflowStepID != "" {
+		session.WorkflowStepIDAtCreation = workflowStepID
+	}
 	// workflow_step_id is a task-level field; no longer stored on sessions.
 
 	// Store executor profile ID on session

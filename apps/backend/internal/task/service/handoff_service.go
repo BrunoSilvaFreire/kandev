@@ -804,6 +804,19 @@ func (s *HandoffService) WriteDocumentForCaller(
 	ctx context.Context,
 	currentTaskID, targetTaskID, key, docType, title, content, authorKind, authorName string,
 ) (*models.TaskDocument, error) {
+	return s.WriteDocumentForCallerWithProvenance(
+		ctx, currentTaskID, targetTaskID, key, docType, title, content, authorKind, authorName,
+		DocumentWriteProvenance{},
+	)
+}
+
+// WriteDocumentForCallerWithProvenance is WriteDocumentForCaller with the
+// explicit producing source recorded on the appended revision.
+func (s *HandoffService) WriteDocumentForCallerWithProvenance(
+	ctx context.Context,
+	currentTaskID, targetTaskID, key, docType, title, content, authorKind, authorName string,
+	provenance DocumentWriteProvenance,
+) (*models.TaskDocument, error) {
 	if key == "" {
 		return nil, ErrDocumentKeyRequired
 	}
@@ -817,7 +830,9 @@ func (s *HandoffService) WriteDocumentForCaller(
 	if !ok {
 		return nil, ErrAccessDenied
 	}
-	return s.docs.CreateOrUpdateDocument(ctx, targetTaskID, key, docType, title, content, authorKind, authorName)
+	return s.docs.CreateOrUpdateDocumentWithProvenance(
+		ctx, targetTaskID, key, docType, title, content, authorKind, authorName, provenance,
+	)
 }
 
 // toRelated converts a Task into the RelatedTask projection, populating

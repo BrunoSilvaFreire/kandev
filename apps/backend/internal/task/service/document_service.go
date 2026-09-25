@@ -46,6 +46,25 @@ const (
 	docTypeAttachment        = "attachment"
 )
 
+// Revision-history paging bounds. A caller that omits a limit gets the default;
+// a larger request is clamped so one call cannot load unbounded history.
+const (
+	DefaultDocumentRevisionPageSize = 50
+	MaxDocumentRevisionPageSize     = 200
+)
+
+// NormalizeDocumentRevisionPageSize clamps a requested page size into the
+// server's supported range, applying the default when none was requested.
+func NormalizeDocumentRevisionPageSize(limit int) int {
+	if limit <= 0 {
+		return DefaultDocumentRevisionPageSize
+	}
+	if limit > MaxDocumentRevisionPageSize {
+		return MaxDocumentRevisionPageSize
+	}
+	return limit
+}
+
 // docRepo is the minimal repository surface DocumentService depends on.
 type docRepo interface {
 	repository.DocumentRepository
@@ -68,10 +87,41 @@ func NewDocumentService(repo docRepo, log *logger.Logger) *DocumentService {
 	}
 }
 
+// DocumentWriteProvenance is the explicit source of one document revision
+// write. Every field is optional; an empty field is persisted as NULL and
+// surfaced as Unknown/legacy. Provenance is supplied by the writer and is never
+// inferred from timestamps or the task's current state.
+type DocumentWriteProvenance struct {
+	SourceTaskID         string
+	SourceSessionID      string
+	SourceWorkflowStepID string
+}
+
+// provenancePtr renders an empty provenance field as a nil pointer so it stores
+// as SQL NULL rather than an empty string.
+func provenancePtr(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
 // CreateOrUpdateDocument upserts the HEAD document and appends or coalesces a revision.
 func (s *DocumentService) CreateOrUpdateDocument(
 	ctx context.Context,
 	taskID, key, docType, title, content, authorKind, authorName string,
+) (*models.TaskDocument, error) {
+	return s.CreateOrUpdateDocumentWithProvenance(
+		ctx, taskID, key, docType, title, content, authorKind, authorName, DocumentWriteProvenance{},
+	)
+}
+
+// CreateOrUpdateDocumentWithProvenance is CreateOrUpdateDocument with an
+// explicit producing source recorded on a newly appended revision.
+func (s *DocumentService) CreateOrUpdateDocumentWithProvenance(
+	ctx context.Context,
+	taskID, key, docType, title, content, authorKind, authorName string,
+	provenance DocumentWriteProvenance,
 ) (*models.TaskDocument, error) {
 	if taskID == "" {
 		return nil, ErrDocumentTaskRequired
@@ -93,7 +143,7 @@ func (s *DocumentService) CreateOrUpdateDocument(
 	}
 
 	now := time.Now().UTC()
-	rev, coalesceID := s.buildDocRevision(taskID, key, title, content, authorKind, authorName, latest, now)
+	rev, coalesceID := s.buildDocRevision(taskID, key, title, content, authorKind, authorName, provenance, latest, now)
 
 	if err := s.repo.WriteDocumentRevision(ctx, head, rev, coalesceID); err != nil {
 		s.logger.Error("write document revision", zap.String("task_id", taskID), zap.String("key", key), zap.Error(err))
@@ -158,21 +208,25 @@ func buildDocHead(taskID, key, docType, title, content, authorKind, authorName s
 }
 
 // buildDocRevision constructs the revision and returns a coalesceID when the latest revision
-// was authored by the same author within the coalesce window.
+// was authored by the same author from the same source within the coalesce window.
 func (s *DocumentService) buildDocRevision(
 	taskID, key, title, content, authorKind, authorName string,
+	provenance DocumentWriteProvenance,
 	latest *models.TaskDocumentRevision,
 	now time.Time,
 ) (*models.TaskDocumentRevision, *string) {
 	rev := &models.TaskDocumentRevision{
-		TaskID:      taskID,
-		DocumentKey: key,
-		Title:       title,
-		Content:     content,
-		AuthorKind:  authorKind,
-		AuthorName:  authorName,
+		TaskID:               taskID,
+		DocumentKey:          key,
+		Title:                title,
+		Content:              content,
+		AuthorKind:           authorKind,
+		AuthorName:           authorName,
+		SourceTaskID:         provenancePtr(provenance.SourceTaskID),
+		SourceSessionID:      provenancePtr(provenance.SourceSessionID),
+		SourceWorkflowStepID: provenancePtr(provenance.SourceWorkflowStepID),
 	}
-	if !s.canDocCoalesce(latest, authorKind, authorName, now) {
+	if !s.canDocCoalesce(latest, authorKind, authorName, provenance, now) {
 		return rev, nil
 	}
 	rev.RevisionNumber = latest.RevisionNumber
@@ -235,6 +289,19 @@ func (s *DocumentService) ListRevisions(ctx context.Context, taskID, key string,
 		return nil, ErrDocumentKeyRequired
 	}
 	return s.repo.ListDocumentRevisions(ctx, taskID, key, limit)
+}
+
+// ListRevisionsPage returns one bounded, cursor-paginated page of revision
+// history, newest-first. beforeRevisionNumber is exclusive: pass the smallest
+// revision_number already seen to fetch the next page, or 0 for the first page.
+func (s *DocumentService) ListRevisionsPage(ctx context.Context, taskID, key string, beforeRevisionNumber, limit int) ([]*models.TaskDocumentRevision, error) {
+	if taskID == "" {
+		return nil, ErrDocumentTaskRequired
+	}
+	if key == "" {
+		return nil, ErrDocumentKeyRequired
+	}
+	return s.repo.ListDocumentRevisionsBefore(ctx, taskID, key, beforeRevisionNumber, NormalizeDocumentRevisionPageSize(limit))
 }
 
 // RevertDocument creates a new revision whose content mirrors the target revision.
@@ -389,7 +456,12 @@ func (s *DocumentService) DownloadAttachment(ctx context.Context, taskID, key st
 	return doc.DiskPath, doc, nil
 }
 
-func (s *DocumentService) canDocCoalesce(latest *models.TaskDocumentRevision, authorKind, authorName string, now time.Time) bool {
+func (s *DocumentService) canDocCoalesce(
+	latest *models.TaskDocumentRevision,
+	authorKind, authorName string,
+	provenance DocumentWriteProvenance,
+	now time.Time,
+) bool {
 	if latest == nil {
 		return false
 	}
@@ -399,8 +471,29 @@ func (s *DocumentService) canDocCoalesce(latest *models.TaskDocumentRevision, au
 	if latest.AuthorKind != authorKind || latest.AuthorName != authorName {
 		return false
 	}
+	// A write from a different producing source must append its own revision
+	// rather than merge into a row whose provenance describes another session.
+	if !docRevisionSourceMatches(latest, provenance) {
+		return false
+	}
 	if s.coalesceWindow <= 0 {
 		return false
 	}
 	return now.Sub(latest.UpdatedAt) < s.coalesceWindow
+}
+
+// docRevisionSourceMatches reports whether the latest revision was produced by
+// the same explicit source an incoming write declares. Legacy nil provenance on
+// either side matches only another all-nil write.
+func docRevisionSourceMatches(latest *models.TaskDocumentRevision, provenance DocumentWriteProvenance) bool {
+	return ptrMatchesProvenance(latest.SourceTaskID, provenance.SourceTaskID) &&
+		ptrMatchesProvenance(latest.SourceSessionID, provenance.SourceSessionID) &&
+		ptrMatchesProvenance(latest.SourceWorkflowStepID, provenance.SourceWorkflowStepID)
+}
+
+func ptrMatchesProvenance(stored *string, incoming string) bool {
+	if stored == nil {
+		return incoming == ""
+	}
+	return *stored == incoming
 }

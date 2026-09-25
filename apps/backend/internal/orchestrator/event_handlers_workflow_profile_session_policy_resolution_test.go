@@ -90,7 +90,7 @@ func TestExactModelWorkflowStartPolicyForcesNewAfterEmptyValidatedLookup(t *test
 	}
 	source := &wfmodels.WorkflowStep{ID: "step-a", WorkflowID: "wf1", AgentProfileID: "profile-a"}
 
-	startPolicy, selected, err := fixture.svc.exactModelWorkflowStartPolicy(
+	startPolicy, selected, predetermined, err := fixture.svc.exactModelWorkflowStartPolicy(
 		ctx, "t1", fixture.current.ID, target, source, "profile-b",
 		models.WorkflowProfileSessionStartPolicyReuse,
 	)
@@ -98,6 +98,8 @@ func TestExactModelWorkflowStartPolicyForcesNewAfterEmptyValidatedLookup(t *test
 	require.NoError(t, err)
 	require.Equal(t, models.WorkflowProfileSessionStartPolicyNew, startPolicy)
 	require.Nil(t, selected, "an empty validated lookup must not return a reuse candidate")
+	require.NotNil(t, predetermined)
+	require.Equal(t, models.RoutingReasonNoReusableCandidate, predetermined.Reason)
 	require.Equal(t, 1, flaky.calls, "the exact-model decision must use one validated lookup")
 }
 

@@ -176,6 +176,32 @@ func (r *Repository) ListDocumentRevisions(ctx context.Context, taskID, key stri
 		query += sqlLimitClause
 		args = append(args, limit)
 	}
+	return r.queryDocumentRevisions(ctx, query, args...)
+}
+
+// ListDocumentRevisionsBefore returns revisions newest-first whose
+// revision_number is strictly less than beforeRevisionNumber. A non-positive
+// beforeRevisionNumber starts from the newest revision. A non-positive limit
+// is treated as "no additional bound" by the caller, which always supplies a
+// normalized page size.
+func (r *Repository) ListDocumentRevisionsBefore(ctx context.Context, taskID, key string, beforeRevisionNumber, limit int) ([]*models.TaskDocumentRevision, error) {
+	query := `SELECT ` + docRevSelectCols + ` FROM task_document_revisions WHERE task_id = ? AND document_key = ?`
+	args := []interface{}{taskID, key}
+	if beforeRevisionNumber > 0 {
+		query += ` AND revision_number < ?`
+		args = append(args, beforeRevisionNumber)
+	}
+	query += ` ORDER BY revision_number DESC`
+	if limit > 0 {
+		query += sqlLimitClause
+		args = append(args, limit)
+	}
+	return r.queryDocumentRevisions(ctx, query, args...)
+}
+
+// queryDocumentRevisions runs a revision query and scans the rows in the fixed
+// docRevSelectCols order.
+func (r *Repository) queryDocumentRevisions(ctx context.Context, query string, args ...interface{}) ([]*models.TaskDocumentRevision, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, fmt.Errorf("list document revisions: %w", err)
