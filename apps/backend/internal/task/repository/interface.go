@@ -810,6 +810,10 @@ type DocumentRepository interface {
 	InsertDocumentRevision(ctx context.Context, rev *models.TaskDocumentRevision) error
 	GetLatestDocumentRevision(ctx context.Context, taskID, key string) (*models.TaskDocumentRevision, error)
 	ListDocumentRevisions(ctx context.Context, taskID, key string, limit int) ([]*models.TaskDocumentRevision, error)
+	// ListDocumentRevisionsBefore returns revisions newest-first whose
+	// revision_number is strictly less than beforeRevisionNumber. A
+	// beforeRevisionNumber <= 0 starts from the newest revision.
+	ListDocumentRevisionsBefore(ctx context.Context, taskID, key string, beforeRevisionNumber, limit int) ([]*models.TaskDocumentRevision, error)
 	GetDocumentRevision(ctx context.Context, id string) (*models.TaskDocumentRevision, error)
 	NextDocumentRevisionNumber(ctx context.Context, taskID, key string) (int, error)
 	// WriteDocumentRevision atomically upserts the HEAD document and writes/merges a revision

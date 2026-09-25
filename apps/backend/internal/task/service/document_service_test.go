@@ -316,7 +316,7 @@ func TestDocumentServiceCanDocCoalesceRules(t *testing.T) {
 	}
 	for _, tc := range cases {
 		svc.coalesceWindow = tc.window
-		if got := svc.canDocCoalesce(tc.latest, "user", "Ada", now); got != tc.want {
+		if got := svc.canDocCoalesce(tc.latest, "user", "Ada", DocumentWriteProvenance{}, now); got != tc.want {
 			t.Fatalf("%s: canDocCoalesce = %v, want %v", tc.name, got, tc.want)
 		}
 	}

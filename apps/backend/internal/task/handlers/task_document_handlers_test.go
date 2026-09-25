@@ -125,3 +125,78 @@ func TestTaskDocumentRevisions_PlanKey(t *testing.T) {
 		t.Fatalf("revision list leaked content")
 	}
 }
+
+func TestTaskDocumentRevisions_CursorPagination(t *testing.T) {
+	h := newDocumentTestHandlers(t)
+	ctx := context.Background()
+
+	for _, author := range []string{"A", "B", "C"} {
+		if _, err := h.documentService.CreateOrUpdateDocument(ctx, planTaskID, "arch", "custom", "Arch", "v", "agent", author); err != nil {
+			t.Fatalf("create revision %s: %v", author, err)
+		}
+	}
+
+	first := listDocumentRevisionNumbers(t, h, ctx, `{"task_id":"`+planTaskID+`","key":"arch","limit":2}`)
+	if len(first) != 2 || first[0] != 3 || first[1] != 2 {
+		t.Fatalf("first page = %v, want [3 2]", first)
+	}
+
+	second := listDocumentRevisionNumbers(t, h, ctx, `{"task_id":"`+planTaskID+`","key":"arch","limit":2,"before_revision":2}`)
+	if len(second) != 1 || second[0] != 1 {
+		t.Fatalf("second page = %v, want [1]", second)
+	}
+}
+
+func TestTaskDocumentRevisions_DefaultLimitIsBounded(t *testing.T) {
+	h := newDocumentTestHandlers(t)
+	ctx := context.Background()
+
+	if service.NormalizeDocumentRevisionPageSize(0) != service.DefaultDocumentRevisionPageSize {
+		t.Fatalf("zero limit must normalize to the server default")
+	}
+	if service.NormalizeDocumentRevisionPageSize(1_000_000) != service.MaxDocumentRevisionPageSize {
+		t.Fatalf("oversized limit must clamp to the server maximum")
+	}
+
+	if _, err := h.planService.CreatePlan(ctx, service.CreatePlanRequest{
+		TaskID: planTaskID, Title: "Plan", Content: "# Plan", CreatedBy: "user",
+	}); err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	out, err := h.wsListTaskDocumentRevisions(ctx, planMsg(t, ws.ActionTaskDocumentRevisionsList,
+		`{"task_id":"`+planTaskID+`","key":"plan"}`))
+	if err != nil {
+		t.Fatalf("list revisions: %v", err)
+	}
+	var body struct {
+		Revisions []dto.TaskDocumentRevisionDTO `json:"revisions"`
+	}
+	if err := json.Unmarshal(out.Payload, &body); err != nil {
+		t.Fatalf("unmarshal revisions: %v", err)
+	}
+	if len(body.Revisions) != 1 {
+		t.Fatalf("plan revisions = %d, want 1", len(body.Revisions))
+	}
+}
+
+func listDocumentRevisionNumbers(t *testing.T, h *TaskHandlers, ctx context.Context, payload string) []int {
+	t.Helper()
+	out, err := h.wsListTaskDocumentRevisions(ctx, planMsg(t, ws.ActionTaskDocumentRevisionsList, payload))
+	if err != nil {
+		t.Fatalf("list revisions: %v", err)
+	}
+	if out.Type != ws.MessageTypeResponse {
+		t.Fatalf("type = %q, want response (payload %s)", out.Type, out.Payload)
+	}
+	var body struct {
+		Revisions []dto.TaskDocumentRevisionDTO `json:"revisions"`
+	}
+	if err := json.Unmarshal(out.Payload, &body); err != nil {
+		t.Fatalf("unmarshal revisions: %v", err)
+	}
+	numbers := make([]int, 0, len(body.Revisions))
+	for _, rev := range body.Revisions {
+		numbers = append(numbers, rev.RevisionNumber)
+	}
+	return numbers
+}

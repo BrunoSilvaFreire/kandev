@@ -92,29 +92,47 @@ func latestEntryTransitionID(ctx context.Context, s *Service, taskID string, ent
 	return &transitionID
 }
 
-// classifySwitchRoutingOutcome reports the committed outcome/reason for a
-// profile-switch routing path from the sessions it actually selected: the
-// current session (reuse in place), a validated reusable candidate, or a
-// freshly created destination.
-func classifySwitchRoutingOutcome(
-	reasonForNew models.RoutingReason,
-	configuredStartPolicy models.WorkflowProfileSessionStartPolicy,
-	startPolicy models.WorkflowProfileSessionStartPolicy,
-	currentSession *models.TaskSession,
-	validatedExisting *models.TaskSession,
-	destination *models.TaskSession,
-) (models.RoutingOutcome, models.RoutingReason) {
-	if destination == nil {
-		return models.RoutingOutcomeDeclined, reasonForNew
-	}
-	if currentSession != nil && destination.ID == currentSession.ID {
-		return models.RoutingOutcomeReused, models.RoutingReasonReusedCurrentSession
-	}
-	if validatedExisting != nil && destination.ID == validatedExisting.ID {
-		return models.RoutingOutcomeReused, models.RoutingReasonReusedExisting
-	}
-	if configuredStartPolicy == models.WorkflowProfileSessionStartPolicyNew || startPolicy == models.WorkflowProfileSessionStartPolicyNew {
-		return models.RoutingOutcomeCreated, models.RoutingReasonForcedNewPolicy
-	}
-	return models.RoutingOutcomeCreated, reasonForNew
+// workflowRouteDecision is the single typed result of one routing decision.
+// Both the execution path and the durable route ledger consume the same value,
+// so the reason recorded is exactly the decision the runtime made rather than a
+// reverse-classification reconstructed from session identities afterwards.
+type workflowRouteDecision struct {
+	Outcome models.RoutingOutcome
+	Reason  models.RoutingReason
+}
+
+// The constructors below name each committed routing decision once. Callers
+// return the decision from the same branch that selects the recipient, so the
+// ledger cannot drift from what actually happened.
+
+func decisionReusedCurrentSession() workflowRouteDecision {
+	return workflowRouteDecision{Outcome: models.RoutingOutcomeReused, Reason: models.RoutingReasonReusedCurrentSession}
+}
+
+func decisionReusedExisting() workflowRouteDecision {
+	return workflowRouteDecision{Outcome: models.RoutingOutcomeReused, Reason: models.RoutingReasonReusedExisting}
+}
+
+func decisionReusedExplicitTarget() workflowRouteDecision {
+	return workflowRouteDecision{Outcome: models.RoutingOutcomeReused, Reason: models.RoutingReasonExplicitTarget}
+}
+
+func decisionCreatedExplicitTarget() workflowRouteDecision {
+	return workflowRouteDecision{Outcome: models.RoutingOutcomeCreated, Reason: models.RoutingReasonExplicitTarget}
+}
+
+func decisionForcedNewPolicy() workflowRouteDecision {
+	return workflowRouteDecision{Outcome: models.RoutingOutcomeCreated, Reason: models.RoutingReasonForcedNewPolicy}
+}
+
+func decisionNoReusableCandidate() workflowRouteDecision {
+	return workflowRouteDecision{Outcome: models.RoutingOutcomeCreated, Reason: models.RoutingReasonNoReusableCandidate}
+}
+
+func decisionExactModelIncompatibility() workflowRouteDecision {
+	return workflowRouteDecision{Outcome: models.RoutingOutcomeCreated, Reason: models.RoutingReasonExactModelIncompatibility}
+}
+
+func decisionSelectedCandidateTerminal() workflowRouteDecision {
+	return workflowRouteDecision{Outcome: models.RoutingOutcomeCreated, Reason: models.RoutingReasonSelectedCandidateTerminal}
 }

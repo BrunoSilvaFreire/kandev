@@ -107,13 +107,16 @@ func (h *TaskHandlers) latestDocumentRevision(ctx context.Context, taskID, key s
 	return revisions[0], nil
 }
 
-// wsListTaskDocumentRevisions returns revision metadata (newest-first) without
-// bodies. The synthetic Plan key resolves through the plan service.
+// wsListTaskDocumentRevisions returns one bounded, cursor-paginated page of
+// revision metadata (newest-first) without bodies. The synthetic Plan key
+// resolves through the plan service. before_revision is exclusive and lets a
+// caller page backward; limit is clamped server-side.
 func (h *TaskHandlers) wsListTaskDocumentRevisions(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		TaskID string `json:"task_id"`
-		Key    string `json:"key"`
-		Limit  int    `json:"limit"`
+		TaskID         string `json:"task_id"`
+		Key            string `json:"key"`
+		Limit          int    `json:"limit"`
+		BeforeRevision int    `json:"before_revision"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -124,13 +127,14 @@ func (h *TaskHandlers) wsListTaskDocumentRevisions(ctx context.Context, msg *ws.
 	if req.Key == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "key is required", nil)
 	}
+	limit := service.NormalizeDocumentRevisionPageSize(req.Limit)
 	if req.Key == service.PlanDocumentKey {
-		return h.taskDocumentPlanRevisions(ctx, msg, req.TaskID, req.Limit)
+		return h.taskDocumentPlanRevisions(ctx, msg, req.TaskID, req.BeforeRevision, limit)
 	}
 	if h.documentService == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "document service is unavailable", nil)
 	}
-	revisions, err := h.documentService.ListRevisions(ctx, req.TaskID, req.Key, req.Limit)
+	revisions, err := h.documentService.ListRevisionsPage(ctx, req.TaskID, req.Key, req.BeforeRevision, limit)
 	if err != nil {
 		return documentError(msg, err, "Failed to list task document revisions")
 	}
@@ -141,7 +145,7 @@ func (h *TaskHandlers) wsListTaskDocumentRevisions(ctx context.Context, msg *ws.
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"revisions": out})
 }
 
-func (h *TaskHandlers) taskDocumentPlanRevisions(ctx context.Context, msg *ws.Message, taskID string, limit int) (*ws.Message, error) {
+func (h *TaskHandlers) taskDocumentPlanRevisions(ctx context.Context, msg *ws.Message, taskID string, beforeRevision, limit int) (*ws.Message, error) {
 	if h.planService == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "plan service is unavailable", nil)
 	}
@@ -149,11 +153,20 @@ func (h *TaskHandlers) taskDocumentPlanRevisions(ctx context.Context, msg *ws.Me
 	if err != nil {
 		return documentError(msg, err, "Failed to list task plan revisions")
 	}
-	if limit > 0 && len(revisions) > limit {
-		revisions = revisions[:limit]
-	}
-	out := make([]*dto.TaskDocumentRevisionDTO, 0, len(revisions))
+	// Plan revisions are loaded newest-first; apply the same exclusive cursor
+	// and server-side page bound the general document path uses.
+	page := make([]*models.TaskPlanRevision, 0, limit)
 	for _, rev := range revisions {
+		if beforeRevision > 0 && rev.RevisionNumber >= beforeRevision {
+			continue
+		}
+		page = append(page, rev)
+		if len(page) >= limit {
+			break
+		}
+	}
+	out := make([]*dto.TaskDocumentRevisionDTO, 0, len(page))
+	for _, rev := range page {
 		out = append(out, dto.TaskDocumentRevisionFromPlanRevision(rev, false))
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"revisions": out})

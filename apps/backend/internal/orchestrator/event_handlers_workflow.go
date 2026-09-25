@@ -3172,9 +3172,10 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidate(
 	endPolicy models.WorkflowProfileSessionEndPolicy,
 	validatedExisting *models.TaskSession,
 ) (*models.TaskSession, error) {
-	return s.switchSessionForStepWithPoliciesAndCandidateAndRoute(
+	session, _, err := s.switchSessionForStepWithPoliciesAndCandidateAndRoute(
 		ctx, taskID, currentSession, newAgentProfileID, startPolicy, endPolicy, validatedExisting, nil,
 	)
+	return session, err
 }
 
 func (s *Service) resolveWorkflowSessionSwitchExisting(
@@ -3210,7 +3211,7 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidateAndRoute(
 	endPolicy models.WorkflowProfileSessionEndPolicy,
 	validatedExisting *models.TaskSession,
 	workflowRoute *models.WorkflowSessionRoute,
-) (*models.TaskSession, error) {
+) (*models.TaskSession, workflowRouteDecision, error) {
 	startPolicy = models.NormalizeWorkflowProfileSessionStartPolicy(string(startPolicy))
 	endPolicy = models.NormalizeWorkflowProfileSessionEndPolicy(string(endPolicy))
 	s.logger.Info("switching session for workflow step agent profile change",
@@ -3235,15 +3236,15 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidateAndRoute(
 	// that was still working.
 	dbTask, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get task for session switch preflight: %w", err)
+		return nil, workflowRouteDecision{}, fmt.Errorf("failed to get task for session switch preflight: %w", err)
 	}
 	if dbTask == nil {
-		return nil, fmt.Errorf("task %s not found for session switch preflight", taskID)
+		return nil, workflowRouteDecision{}, fmt.Errorf("task %s not found for session switch preflight", taskID)
 	}
 	if err := s.executor.PreflightManagedGitCredentials(
 		ctx, dbTask.WorkspaceID, taskID, targetSession.ExecutorID, targetSession.ExecutorProfileID,
 	); err != nil {
-		return nil, err
+		return nil, workflowRouteDecision{}, err
 	}
 
 	// Signal to the frontend that the task is preparing a new agent.
@@ -3260,27 +3261,43 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidateAndRoute(
 			route.DestinationID = existing.ID
 			route.Phase = workflowSessionRoutePrepared
 			if err := s.persistWorkflowSessionRoute(ctx, taskID, route); err != nil {
-				return nil, err
+				return nil, workflowRouteDecision{}, err
 			}
 			reused, err = s.reuseSessionForStepWithEndPolicy(ctx, taskID, currentSession, existing, endPolicy, &route)
 		} else {
 			reused, err = s.reuseSessionForStepWithEndPolicy(ctx, taskID, currentSession, existing, endPolicy)
 		}
 		if err == nil {
-			return reused, nil
+			return reused, decisionReusedExisting(), nil
 		}
 		if !errors.Is(err, errReusableSessionNoLongerActive) {
-			return nil, err
+			return nil, workflowRouteDecision{}, err
 		}
 		s.logger.Info("reusable session became terminal before workflow promotion; creating fresh session",
 			zap.String("task_id", taskID),
 			zap.String("session_id", existing.ID),
 			zap.String("agent_profile_id", newAgentProfileID))
+		created, createErr := s.createNewSessionForStepWithEndPolicyAndRoute(
+			ctx, taskID, currentSession, newAgentProfileID, endPolicy, workflowRoute,
+		)
+		if createErr != nil {
+			return nil, workflowRouteDecision{}, createErr
+		}
+		// The validated candidate won selection but stopped being promotable
+		// between the decision and the promotion. That race is its own reason.
+		return created, decisionSelectedCandidateTerminal(), nil
 	}
 
-	return s.createNewSessionForStepWithEndPolicyAndRoute(
+	created, createErr := s.createNewSessionForStepWithEndPolicyAndRoute(
 		ctx, taskID, currentSession, newAgentProfileID, endPolicy, workflowRoute,
 	)
+	if createErr != nil {
+		return nil, workflowRouteDecision{}, createErr
+	}
+	if startPolicy == models.WorkflowProfileSessionStartPolicyNew {
+		return created, decisionForcedNewPolicy(), nil
+	}
+	return created, decisionNoReusableCandidate(), nil
 }
 
 // findReusableSessionForProfile returns the most-recently-updated
@@ -3996,16 +4013,21 @@ func (s *Service) prepareWorkflowStepSession(
 			endPolicy := s.resolveStepProfileSessionEndPolicy(sourceStep)
 			newSession, switched, err := s.replaceExactModelWorkflowStepSession(ctx, taskID, session, step, effectiveProfile, endPolicy, profileRoute, entryIDs...)
 			if err == nil {
+				decision := decisionExactModelIncompatibility()
 				s.recordWorkflowRouteDecision(ctx, taskID, session, newSession, step,
-					models.RoutingOutcomeCreated, models.RoutingReasonExactModelIncompatibility,
+					decision.Outcome, decision.Reason,
 					string(startPolicy), string(endPolicy), entryIDs...)
 			}
 			return newSession, switched, err
 		}
 		newSession, switched, err := s.keepCurrentWorkflowStepSession(ctx, taskID, session, step, profileRoute, entryIDs...)
 		if err == nil {
+			// In-place reuse ends no source session, so the source step's end
+			// policy has nothing to act on; the ledger records an empty value
+			// rather than a policy that was never applied.
+			decision := decisionReusedCurrentSession()
 			s.recordWorkflowRouteDecision(ctx, taskID, session, newSession, step,
-				models.RoutingOutcomeReused, models.RoutingReasonReusedCurrentSession,
+				decision.Outcome, decision.Reason,
 				string(startPolicy), "", entryIDs...)
 		}
 		return newSession, switched, err
@@ -4014,18 +4036,21 @@ func (s *Service) prepareWorkflowStepSession(
 		return nil, false, fmt.Errorf("workflow profile switch source step is unavailable")
 	}
 	configuredStartPolicy := startPolicy
-	startPolicy, validatedExisting, err := s.exactModelWorkflowStartPolicy(ctx, taskID, session.ID, step, sourceStep, effectiveProfile, startPolicy)
+	startPolicy, validatedExisting, predetermined, err := s.exactModelWorkflowStartPolicy(ctx, taskID, session.ID, step, sourceStep, effectiveProfile, startPolicy)
 	if err != nil {
 		return nil, false, err
 	}
 	endPolicy := s.resolveStepProfileSessionEndPolicy(sourceStep)
-	newSession, err := s.switchSessionForStepWithPoliciesAndCandidateAndRoute(ctx, taskID, session, effectiveProfile, startPolicy, endPolicy, validatedExisting, profileRoute)
+	newSession, runtimeDecision, err := s.switchSessionForStepWithPoliciesAndCandidateAndRoute(ctx, taskID, session, effectiveProfile, startPolicy, endPolicy, validatedExisting, profileRoute)
 	if err != nil {
 		return nil, false, err
 	}
-	outcome, reason := classifySwitchRoutingOutcome(models.RoutingReasonNoReusableCandidate, configuredStartPolicy, startPolicy, session, validatedExisting, newSession)
-	s.recordWorkflowRouteDecision(ctx, taskID, session, newSession, step, outcome, reason,
-		string(startPolicy), string(endPolicy), entryIDs...)
+	decision := runtimeDecision
+	if predetermined != nil {
+		decision = *predetermined
+	}
+	s.recordWorkflowRouteDecision(ctx, taskID, session, newSession, step, decision.Outcome, decision.Reason,
+		string(configuredStartPolicy), string(endPolicy), entryIDs...)
 	if err := s.recordWorkflowSourceBinding(ctx, taskID, step, newSession, entryIDs...); err != nil {
 		return nil, false, err
 	}
@@ -4056,15 +4081,21 @@ func (s *Service) replaceExactModelWorkflowStepSession(
 	return newSession, true, nil
 }
 
+// exactModelWorkflowStartPolicy resolves the effective start policy and, when a
+// rewrite makes the routing decision before the switch runs, the typed decision
+// itself. A non-nil decision means the reason is already known (forced new
+// policy, no reusable candidate, exact-model incompatibility) and the caller
+// must prefer it over the switch path's runtime decision.
 func (s *Service) exactModelWorkflowStartPolicy(
 	ctx context.Context,
 	taskID, currentSessionID string,
 	step, sourceStep *wfmodels.WorkflowStep,
 	profileID string,
 	startPolicy models.WorkflowProfileSessionStartPolicy,
-) (models.WorkflowProfileSessionStartPolicy, *models.TaskSession, error) {
+) (models.WorkflowProfileSessionStartPolicy, *models.TaskSession, *workflowRouteDecision, error) {
 	if startPolicy != models.WorkflowProfileSessionStartPolicyReuse {
-		return startPolicy, nil, nil
+		decision := decisionForcedNewPolicy()
+		return startPolicy, nil, &decision, nil
 	}
 	existing, err := s.findReusableSessionForProfile(ctx, taskID, profileID, currentSessionID)
 	if err != nil {
@@ -4072,22 +4103,24 @@ func (s *Service) exactModelWorkflowStartPolicy(
 			zap.String("task_id", taskID),
 			zap.String("agent_profile_id", profileID),
 			zap.Error(err))
-		return startPolicy, nil, fmt.Errorf("find reusable session for exact model identity: %w", err)
+		return startPolicy, nil, nil, fmt.Errorf("find reusable session for exact model identity: %w", err)
 	}
 	if existing == nil {
 		// The lookup above is the validated candidate decision. Do not return
 		// reuse with a nil candidate, because the switch path would perform a
 		// second lookup against a potentially changed session set.
-		return models.WorkflowProfileSessionStartPolicyNew, nil, nil
+		decision := decisionNoReusableCandidate()
+		return models.WorkflowProfileSessionStartPolicyNew, nil, &decision, nil
 	}
 	requiresFreshSession, err := s.workflowEntryRequiresFreshExactModelSession(ctx, existing, step, sourceStep, profileID)
 	if err != nil {
-		return startPolicy, nil, err
+		return startPolicy, nil, nil, err
 	}
 	if requiresFreshSession {
-		return models.WorkflowProfileSessionStartPolicyNew, nil, nil
+		decision := decisionExactModelIncompatibility()
+		return models.WorkflowProfileSessionStartPolicyNew, nil, &decision, nil
 	}
-	return startPolicy, existing, nil
+	return startPolicy, existing, nil, nil
 }
 
 // workflowEntryRequiresFreshExactModelSession prevents a workflow lane from

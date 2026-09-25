@@ -91,12 +91,12 @@ func TestRoutingProvenance_SessionCreationProvenance(t *testing.T) {
 
 	now := time.Now().UTC()
 	session := &models.TaskSession{
-		ID:                         uuid.New().String(),
-		TaskID:                     taskID,
-		State:                      models.TaskSessionStateCreated,
-		WorkflowStepIDAtCreation:   "step-genesis",
-		StartedAt:                  now,
-		UpdatedAt:                  now,
+		ID:                       uuid.New().String(),
+		TaskID:                   taskID,
+		State:                    models.TaskSessionStateCreated,
+		WorkflowStepIDAtCreation: "step-genesis",
+		StartedAt:                now,
+		UpdatedAt:                now,
 	}
 	if err := repo.CreateTaskSession(ctx, session); err != nil {
 		t.Fatalf("create task session: %v", err)
@@ -189,13 +189,13 @@ func TestRoutingProvenance_DocumentRevisionProvenance(t *testing.T) {
 	}
 
 	doc := &models.TaskDocument{
-		ID:          uuid.New().String(),
-		TaskID:      taskID,
-		Key:         "arch-notes",
-		Title:       "Architecture Notes",
-		Content:     "# Notes",
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:        uuid.New().String(),
+		TaskID:    taskID,
+		Key:       "arch-notes",
+		Title:     "Architecture Notes",
+		Content:   "# Notes",
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 	stepID := "step-impl"
 	rev := &models.TaskDocumentRevision{
@@ -243,6 +243,142 @@ func TestRoutingProvenance_DocumentRevisionProvenance(t *testing.T) {
 	}
 	if loadedAfterSessDelete.SourceSessionID != nil {
 		t.Fatalf("source_session_id after session delete = %v, want nil", loadedAfterSessDelete.SourceSessionID)
+	}
+}
+
+// legacyTaskSessionsDDL is the pre-migration task_sessions shape: it still
+// carries the deprecated bare workflow_step_id column and no
+// workflow_step_id_at_creation provenance column.
+const legacyTaskSessionsDDL = `
+CREATE TABLE task_sessions (
+	id TEXT PRIMARY KEY,
+	task_id TEXT NOT NULL,
+	agent_execution_id TEXT NOT NULL DEFAULT '',
+	container_id TEXT NOT NULL DEFAULT '',
+	agent_profile_id TEXT,
+	execution_profile_id TEXT NOT NULL DEFAULT '',
+	route_generation INTEGER NOT NULL DEFAULT 0,
+	route_state TEXT NOT NULL DEFAULT '',
+	route_reason TEXT NOT NULL DEFAULT '',
+	downstream_acp_session_id TEXT NOT NULL DEFAULT '',
+	executor_id TEXT DEFAULT '',
+	executor_profile_id TEXT DEFAULT '',
+	environment_id TEXT DEFAULT '',
+	repository_id TEXT DEFAULT '',
+	base_branch TEXT DEFAULT '',
+	agent_profile_snapshot TEXT DEFAULT '{}',
+	executor_snapshot TEXT DEFAULT '{}',
+	environment_snapshot TEXT DEFAULT '{}',
+	repository_snapshot TEXT DEFAULT '{}',
+	state TEXT NOT NULL DEFAULT 'CREATED',
+	error_message TEXT DEFAULT '',
+	metadata TEXT DEFAULT '{}',
+	started_at TIMESTAMP NOT NULL,
+	completed_at TIMESTAMP,
+	updated_at TIMESTAMP NOT NULL,
+	is_primary INTEGER DEFAULT 0,
+	is_passthrough INTEGER DEFAULT 0,
+	review_status TEXT DEFAULT '',
+	base_commit_sha TEXT DEFAULT '',
+	task_environment_id TEXT DEFAULT '',
+	workflow_step_id TEXT
+)`
+
+func taskSessionsColumnPresent(t *testing.T, repo *Repository, column string) bool {
+	t.Helper()
+	var count int
+	if err := repo.db.GetContext(context.Background(), &count,
+		`SELECT COUNT(*) FROM pragma_table_info('task_sessions') WHERE name = ?`, column); err != nil {
+		t.Fatalf("pragma_table_info(%s): %v", column, err)
+	}
+	return count > 0
+}
+
+func taskSessionsDDL(t *testing.T, repo *Repository) string {
+	t.Helper()
+	var sqlText string
+	if err := repo.db.GetContext(context.Background(), &sqlText,
+		`SELECT sql FROM sqlite_master WHERE type='table' AND name='task_sessions'`); err != nil {
+		t.Fatalf("load task_sessions DDL: %v", err)
+	}
+	return sqlText
+}
+
+// newLegacyTaskSessionsRepo builds a database whose task_sessions table is the
+// pre-migration shape (bare workflow_step_id, no provenance) and then runs the
+// real schema init + migrations over it, returning the upgraded repository and
+// the id of the session row that must survive.
+func newLegacyTaskSessionsRepo(t *testing.T) (*Repository, string) {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "legacy-task-sessions.db")
+	dbConn, err := dbutil.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	db := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
+		t.Fatalf("disable foreign keys: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, legacyTaskSessionsDDL); err != nil {
+		t.Fatalf("create legacy task_sessions: %v", err)
+	}
+	now := time.Now().UTC()
+	sessID := uuid.New().String()
+	if _, err := db.ExecContext(ctx, db.Rebind(`
+		INSERT INTO task_sessions (id, task_id, state, started_at, updated_at) VALUES (?, ?, 'CREATED', ?, ?)
+	`), sessID, "task-legacy-upgrade", now, now); err != nil {
+		t.Fatalf("insert legacy session: %v", err)
+	}
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("initialize schema over legacy table: %v", err)
+	}
+	return repo, sessID
+}
+
+// TestRoutingProvenance_LegacySessionUpgrade proves a database whose
+// task_sessions still carries the bare workflow_step_id column is recreated and
+// then gains workflow_step_id_at_creation, with rows preserved.
+func TestRoutingProvenance_LegacySessionUpgrade(t *testing.T) {
+	repo, sessID := newLegacyTaskSessionsRepo(t)
+	ctx := context.Background()
+
+	if taskSessionsColumnPresent(t, repo, "workflow_step_id") {
+		t.Fatal("upgrade left the deprecated workflow_step_id column in place")
+	}
+	if !taskSessionsColumnPresent(t, repo, "workflow_step_id_at_creation") {
+		t.Fatal("upgrade did not add workflow_step_id_at_creation")
+	}
+	loaded, err := repo.GetTaskSession(ctx, sessID)
+	if err != nil {
+		t.Fatalf("session row did not survive the upgrade: %v", err)
+	}
+	if loaded.WorkflowStepIDAtCreation != "" {
+		t.Fatalf("legacy session provenance = %q, want empty", loaded.WorkflowStepIDAtCreation)
+	}
+}
+
+// TestRoutingProvenance_CurrentSchemaIsNotRecreated pins the fix that the
+// recreate trigger is "workflow_step_id TEXT" rather than the bare column name:
+// a current database (provenance column present, bare column absent) must not
+// be recreated by a migration replay.
+func TestRoutingProvenance_CurrentSchemaIsNotRecreated(t *testing.T) {
+	repo := newRoutingProvenanceTestRepo(t)
+	before := taskSessionsDDL(t, repo)
+
+	if _, err := NewWithDB(repo.db, repo.db, nil); err != nil {
+		t.Fatalf("replay migrations on current schema: %v", err)
+	}
+
+	if after := taskSessionsDDL(t, repo); after != before {
+		t.Fatalf("current task_sessions was recreated by a replay\nbefore: %s\nafter: %s", before, after)
+	}
+	if !taskSessionsColumnPresent(t, repo, "workflow_step_id_at_creation") {
+		t.Fatal("replay dropped workflow_step_id_at_creation")
 	}
 }
 
