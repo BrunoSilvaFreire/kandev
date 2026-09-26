@@ -187,6 +187,14 @@ grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null || 
 		inferenceArgv:   []string{"npx", "--yes", "--prefer-offline", "agy-acp@0.5.2", "--no-sandbox", "--dangerously-skip-permissions"},
 		passthroughArgv: []string{"agy"}, installViaNpm: false, skipInstallBinaryCheck: true, sessionDirTemplate: "{home}",
 	}},
+	{func() Agent { return NewJunieACP() }, acpAgentSpec{
+		id: "junie-acp", displayName: "Junie", detectBinaries: []string{"junie"},
+		expectedArgv:       []string{"junie", "--acp=true"},
+		inferenceArgv:      []string{"junie", "--acp=true"},
+		passthroughArgv:    []string{"junie"},
+		installViaNpm:      false,
+		sessionDirTemplate: "{home}/.junie",
+	}},
 }
 
 func TestNewACPAgents_IDAndDisplay(t *testing.T) {

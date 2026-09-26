@@ -258,6 +258,9 @@ func TestRegistry_LoadDefaults(t *testing.T) {
 	if !reg.Exists("grok-acp") {
 		t.Error("expected default agent 'grok-acp' to be loaded")
 	}
+	if !reg.Exists("junie-acp") {
+		t.Error("expected default agent 'junie-acp' to be loaded")
+	}
 	if !reg.Exists(agents.DynamicAgentID) {
 		t.Errorf("expected virtual agent family %q to be loaded", agents.DynamicAgentID)
 	}

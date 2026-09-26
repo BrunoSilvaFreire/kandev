@@ -1240,6 +1240,7 @@ var allowedProbeCommands = map[string]string{
 	"goose":              "goose",
 	"grok":               "grok",
 	"hermes":             "hermes",
+	"junie":              "junie",
 	"kimi":               "kimi",
 	"kiro-cli-chat":      "kiro-cli-chat",
 	"mock-agent":         "mock-agent",
