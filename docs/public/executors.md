@@ -23,7 +23,7 @@ An executor determines where Kandev creates a task environment and runs `agentct
 | Local Docker  | Supported when the global Docker runtime is enabled and its daemon is reachable | `/workspace` in a new Docker container                                  | You need a repeatable container boundary                                 |
 | Kubernetes    | Dependency-bound on cluster access, namespaced RBAC, admission, storage, and streaming support | `/workspace` in one Pod per task | You need sessions scheduled inside an administrator-managed cluster boundary |
 | Sprites.dev   | Supported, provider-dependent                                                   | `/workspace` in a provider sandbox                                      | You need remote compute and accept provider lifecycle/billing            |
-| Plugin remote | Administrator-enabled provider plugins; disabled by default                   | Provider-owned environment with reported retention and expiry           | You need a remote provider that implements the Kandev executor contract  |
+| Plugin remote | Available through an installed, active, compatible provider                       | Provider-owned environment with reported retention and expiry           | You need a remote provider that implements the Kandev executor contract  |
 | SSH           | Supported for repository sources on a trusted host                              | A task folder on a trusted SSH host                                     | You need a remote host with SSH, SFTP, forwarding, and clone credentials |
 | Remote Docker | Supported over SSH; local Git sources are not yet rejected (see below) | `/workspace` in a container on a remote Docker daemon | You want a container boundary on one remote machine, including a host that accepts no filesystem writes, and do not run Kubernetes |
 
@@ -45,7 +45,7 @@ Choose Remote Docker over a single-node Kubernetes cluster when you want a conta
 
 ## Plugin-managed remote executors
 
-Plugin remote providers appear in **Settings > Executors** when an installed plugin declares `executor_providers`. The administrator must enable `features.remoteExecutorPlugins` and restart Kandev. This feature is disabled in shipped profiles.
+Plugin remote providers appear in **Settings > Executors** when an installed, active plugin declares a compatible `executor_providers` contract. No separate feature flag or restart is required. Disabled, incompatible, or unavailable providers remain ineligible for new launches, and built-in executors continue to work when no provider plugin is installed.
 
 The plugin provisions and removes provider compute. Kandev owns agentctl, agent lifecycle, workspace materialization, task authorization, and durable resource inventory. A provider must support recovery with the original operation identity. Kandev keeps unresolved cleanup inventory when a provider is unavailable or removal is not confirmed.
 
