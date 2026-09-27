@@ -459,10 +459,15 @@ export class ApiClient {
     });
   }
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    extraHeaders?: Record<string, string>,
+  ): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
-      headers: await this.requestHeaders(method, body),
+      headers: { ...(await this.requestHeaders(method, body)), ...extraHeaders },
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
@@ -1443,8 +1448,24 @@ export class ApiClient {
     return res.json() as Promise<{ created: string[]; skipped: string[] }>;
   }
 
-  async deleteTask(taskId: string): Promise<void> {
-    await this.request("DELETE", `/api/v1/tasks/${taskId}`);
+  async deleteTask(
+    taskId: string,
+    options?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+  ): Promise<void> {
+    const cascade = options?.cascade ?? false;
+    const discardWorktreeChanges = options?.discardWorktreeChanges ?? false;
+    const preview = await this.request<{ confirmation_id: string }>(
+      "POST",
+      "/api/v1/tasks/delete-preflight",
+      { task_ids: [taskId], cascade, discard_worktree_changes: discardWorktreeChanges },
+    );
+    const query = new URLSearchParams();
+    if (cascade) query.set("cascade", "true");
+    if (discardWorktreeChanges) query.set("discard_worktree_changes", "true");
+    const queryString = query.toString() ? `?${query.toString()}` : "";
+    await this.request("DELETE", `/api/v1/tasks/${taskId}${queryString}`, undefined, {
+      "X-Kandev-Task-Delete-Confirmation": preview.confirmation_id,
+    });
   }
 
   async archiveTask(taskId: string): Promise<void> {
@@ -3819,7 +3840,8 @@ export class ApiClient {
     name: string;
     workflowId?: string;
     workflowStepId?: string;
-    taskMode?: "automation_run" | "normal_task";
+    taskMode?: "automation_run" | "normal_task" | "managed_conversation";
+    managedDestination?: { plugin_id: string; instance_key: string; revision: number };
     repositoryMode?: "workspace_default" | "selected" | "none";
     repositoryIds?: string[];
     repositories?: Array<{ repository_id: string; base_branch: string }>;
@@ -3859,6 +3881,7 @@ export class ApiClient {
       workflow_id: opts.workflowId ?? "",
       workflow_step_id: opts.workflowStepId ?? "",
       task_mode: opts.taskMode,
+      managed_destination: opts.managedDestination,
       repository_mode: opts.repositoryMode,
       repository_ids: opts.repositoryIds,
       repositories: opts.repositories,
@@ -3949,9 +3972,13 @@ export class ApiClient {
    * Returns { skipped, reason } when the automation is at its concurrency cap.
    * Only works when KANDEV_MOCK_AGENT is active.
    */
-  async triggerAutomationManual(
-    automationId: string,
-  ): Promise<{ run_task_id?: string; skipped?: boolean; reason?: string }> {
+  async triggerAutomationManual(automationId: string): Promise<{
+    run_task_id?: string;
+    run_id?: string;
+    delivery_status?: string;
+    skipped?: boolean;
+    reason?: string;
+  }> {
     return this.request("POST", `/api/v1/e2e/automations/${automationId}/trigger`, {});
   }
 
