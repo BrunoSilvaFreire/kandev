@@ -148,7 +148,12 @@ deliberately not in the "loads session in changed cwd" group.
 - `authMethods`: `jetbrains-account` (type `agent`), `junie-cli` (type
   `terminal` with a `terminal-auth` command whose env sets `JUNIE_HOME`)
 
-`session/new` returned `configOptions` with ids `model` (16 options),
+`session/new` initially returned `configOptions` with ids `effort` and
+`brave_mode`; Junie advertised `model` (16 options) in a later
+`config_option_update`, measured about two seconds after session creation.
+The Junie-only capability probe therefore waits up to five seconds for that
+model advertisement; other agents retain the immediate probe path. The final
+option set contains ids `model`,
 `effort` (`low`/`medium`/`high`/`xhigh`/`max`), and `brave_mode` (boolean). No
 `modes` were advertised, which is the shared "agent exposes no mode surface"
 case rather than a defect. Model/mode state flows through the existing config
