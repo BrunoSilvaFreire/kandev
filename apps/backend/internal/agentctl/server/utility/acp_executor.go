@@ -770,6 +770,31 @@ func (s *acpProbeNotificationState) waitForConfigUpdate(
 	}
 }
 
+func (s *acpProbeNotificationState) waitForModelOption(
+	ctx context.Context,
+	budget time.Duration,
+) ([]acp.SessionConfigOption, bool, error) {
+	timer := time.NewTimer(budget)
+	defer timer.Stop()
+	for {
+		s.mu.Lock()
+		if findSelectConfigOption(s.configOptions, acp.SessionConfigOptionCategoryModel) != nil {
+			updated := append([]acp.SessionConfigOption(nil), s.configOptions...)
+			s.mu.Unlock()
+			return updated, true, nil
+		}
+		s.mu.Unlock()
+
+		select {
+		case <-s.gotConfigOptions:
+		case <-timer.C:
+			return nil, false, nil
+		case <-ctx.Done():
+			return nil, false, ctx.Err()
+		}
+	}
+}
+
 func (s *acpProbeNotificationState) commandsSnapshot() []ProbeCommand {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -982,6 +1007,9 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 	} else if updated != nil {
 		sessionResp.ConfigOptions = updated
 	}
+	if err := applyLateModelOption(ctx, agentID, model, mode, &sessionResp, updates); err != nil {
+		return nil, err
+	}
 
 	// Agents that don't advertise commands (or push them later) simply yield
 	// an empty Commands slice.
@@ -991,6 +1019,31 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 	applySessionProbeFields(out, sessionResp, agentID)
 	out.Commands = updates.commandsSnapshot()
 	return out, nil
+}
+
+func applyLateModelOption(
+	ctx context.Context,
+	agentID, model, mode string,
+	sessionResp *acp.NewSessionResponse,
+	updates *acpProbeNotificationState,
+) error {
+	if model != "" || mode != "" || findSelectConfigOption(
+		sessionResp.ConfigOptions, acp.SessionConfigOptionCategoryModel,
+	) != nil {
+		return nil
+	}
+	budget := acpcompat.LateModelOptionWait(agentID)
+	if budget == 0 {
+		return nil
+	}
+	updated, ok, err := updates.waitForModelOption(ctx, budget)
+	if err != nil {
+		return err
+	}
+	if ok {
+		sessionResp.ConfigOptions = updated
+	}
+	return nil
 }
 
 // buildInitProbeFields populates agent info, protocol version, capabilities and
