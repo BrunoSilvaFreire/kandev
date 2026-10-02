@@ -1,75 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { buildExtraPanelActions } from "./dockview-extra-panel-actions";
 import { makeApi, makeStore } from "./dockview-panel-actions.test-utils";
-import { CENTER_GROUP, PROMPT_HISTORY_PANEL_ID } from "./layout-manager";
-
-const PROMPT_HISTORY_TITLE = "Prompt history";
+import { CENTER_GROUP } from "./layout-manager";
 
 const SESSION_ID = "session-1";
 const MESSAGE_ID = "message-1";
-
-describe("addPromptHistoryPanel", () => {
-  it("adds the registered panel in the invoking group", () => {
-    const api = makeApi({ extraGroupIds: ["group-invoking"] });
-    const store = makeStore(api);
-    const actions = buildExtraPanelActions(store.set, store.get);
-
-    actions.addPromptHistoryPanel({ groupId: "group-invoking", inCenter: true });
-
-    const panel = api.getPanel(PROMPT_HISTORY_PANEL_ID);
-    expect(panel).toMatchObject({
-      id: PROMPT_HISTORY_PANEL_ID,
-      group: { id: "group-invoking" },
-      api: { component: PROMPT_HISTORY_PANEL_ID },
-    });
-  });
-
-  it("uses the localized registry title", () => {
-    const api = makeApi();
-    const store = makeStore(api);
-    const actions = buildExtraPanelActions(store.set, store.get);
-
-    actions.addPromptHistoryPanel();
-
-    expect(api.getPanel(PROMPT_HISTORY_PANEL_ID)?.title).toBe(PROMPT_HISTORY_TITLE);
-  });
-
-  it("falls back to the center group when no groupId is given", () => {
-    const api = makeApi();
-    const store = makeStore(api);
-    const actions = buildExtraPanelActions(store.set, store.get);
-
-    actions.addPromptHistoryPanel();
-
-    expect(api.getPanel(PROMPT_HISTORY_PANEL_ID)?.group.id).toBe(CENTER_GROUP);
-  });
-
-  it("places in the center group when inCenter is set without a groupId", () => {
-    const api = makeApi();
-    const store = makeStore(api);
-    const actions = buildExtraPanelActions(store.set, store.get);
-
-    actions.addPromptHistoryPanel({ inCenter: true });
-
-    expect(api.getPanel(PROMPT_HISTORY_PANEL_ID)?.group.id).toBe(CENTER_GROUP);
-  });
-
-  it("adds without activating the panel when opened quietly", () => {
-    const api = makeApi();
-    const store = makeStore(api);
-    const actions = buildExtraPanelActions(store.set, store.get);
-
-    actions.addPromptHistoryPanel({ quiet: true });
-
-    // The mock panel exposes isActive; IDockviewPanel's type omits it.
-    const panel = api.getPanel(PROMPT_HISTORY_PANEL_ID) as unknown as
-      | {
-          isActive: boolean;
-        }
-      | undefined;
-    expect(panel?.isActive).toBe(false);
-  });
-});
 
 describe("scrollTranscriptToMessage", () => {
   it("opens a session chat target and records its exact owner", () => {
