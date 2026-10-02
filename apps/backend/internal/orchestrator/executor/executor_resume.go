@@ -66,6 +66,7 @@ func isTerminalSessionState(state models.TaskSessionState) bool {
 // repoInfo holds resolved repository details for agent launch.
 type repoInfo struct {
 	TaskRepositoryID           string
+	TaskRepositoryUpdatedAt    time.Time
 	RepositoryID               string
 	RepositoryPath             string
 	BaseBranch                 string
@@ -176,14 +177,15 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		return nil, err
 	}
 	info := &repoInfo{
-		CheckoutOptions:  options,
-		TaskRepositoryID: tr.ID,
-		RepositoryID:     tr.RepositoryID,
-		BaseBranch:       tr.BaseBranch,
-		IntegrationRef:   tr.BranchPolicyPullRequestTarget,
-		CheckoutBranch:   tr.CheckoutBranch,
-		PRNumber:         prNumberFromMetadata(tr.Metadata),
-		Position:         tr.Position,
+		CheckoutOptions:         options,
+		TaskRepositoryID:        tr.ID,
+		TaskRepositoryUpdatedAt: tr.UpdatedAt,
+		RepositoryID:            tr.RepositoryID,
+		BaseBranch:              tr.BaseBranch,
+		IntegrationRef:          tr.BranchPolicyPullRequestTarget,
+		CheckoutBranch:          tr.CheckoutBranch,
+		PRNumber:                prNumberFromMetadata(tr.Metadata),
+		Position:                tr.Position,
 	}
 	if binding, found, err := models.LoadRemoteContribution(tr.Metadata); err != nil {
 		return nil, fmt.Errorf("load remote contribution for task repository %q: %w", tr.ID, err)
@@ -1027,8 +1029,10 @@ const (
 )
 
 type ResumeOptions struct {
-	SettingsPolicy         ResumeSettingsPolicy
-	AllowBranchReplacement bool
+	SettingsPolicy                   ResumeSettingsPolicy
+	AllowBranchReplacement           bool
+	RepairWorkspaceInventory         bool
+	WorkspaceInventoryIdempotencyKey string
 	// AllowCompletedSessionResume is granted only by an explicit user recovery
 	// or a pinned follow-up dispatch. It does not change the global terminal
 	// session predicate or permit implicit resume paths.
@@ -1431,15 +1435,16 @@ func (e *Executor) resumeSession(
 
 	now := time.Now().UTC()
 	execution := &TaskExecution{
-		TaskID:           task.ID,
-		AgentExecutionID: resp.AgentExecutionID,
-		AgentProfileID:   session.AgentProfileID,
-		StartedAt:        now,
-		SessionState:     v1.TaskSessionStateStarting,
-		LastUpdate:       now,
-		SessionID:        session.ID,
-		WorktreePath:     worktreePath,
-		WorktreeBranch:   worktreeBranch,
+		TaskID:                            task.ID,
+		AgentExecutionID:                  resp.AgentExecutionID,
+		AgentProfileID:                    session.AgentProfileID,
+		StartedAt:                         now,
+		SessionState:                      v1.TaskSessionStateStarting,
+		LastUpdate:                        now,
+		SessionID:                         session.ID,
+		WorktreePath:                      worktreePath,
+		WorktreeBranch:                    worktreeBranch,
+		WorkspaceInventoryRecoveryReceipt: req.WorkspaceInventoryRecoveryReceipt,
 	}
 
 	if startAgent {
@@ -1760,7 +1765,7 @@ func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
 		execConfig = e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
 	}
 	repositoryID, existingEnv, allRepos, err := e.prepareResumeRepositorySettings(
-		ctx, task, session, req,
+		ctx, task, session, req, options,
 	)
 	if err != nil {
 		return nil, "", execConfig, existingEnv, nil, err
@@ -1837,6 +1842,7 @@ func (e *Executor) prepareResumeRepositorySettings(
 	task *v1.Task,
 	session *models.TaskSession,
 	req *LaunchAgentRequest,
+	options ResumeOptions,
 ) (string, *models.TaskEnvironment, []*repoInfo, error) {
 	existingEnv, err := e.resolveResumeTaskEnvironmentForTask(ctx, task, session)
 	if err != nil {
@@ -1866,7 +1872,7 @@ func (e *Executor) prepareResumeRepositorySettings(
 	}
 	applyResumeRepositoryFlags(req, allRepos)
 	pinDirtyCloneRelocationToSelectedWorktrees(ctx, req, session, existingEnv)
-	if err := e.validateReuseEnvironmentInventory(ctx, req, existingEnv); err != nil {
+	if err := e.admitResumeWorkspaceInventory(ctx, task, session, req, existingEnv, allRepos, options); err != nil {
 		return "", existingEnv, nil, err
 	}
 
