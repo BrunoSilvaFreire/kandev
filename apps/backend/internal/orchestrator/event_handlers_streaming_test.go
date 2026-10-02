@@ -3415,7 +3415,17 @@ func TestTransitionBootstrapFailurePersistsSessionHistory(t *testing.T) {
 
 	reloaded, err := repo.GetTaskSession(ctx, "bootstrap-history-session")
 	require.NoError(t, err)
-	resolvedAt := svc.markRecoveryResolved(ctx, reloaded.ID, reloaded, interruptedMarkerSnapshot{}, false)
+	retainedBeforeRecovery, ok := models.LoadLastAgentError(reloaded.Metadata)
+	require.True(t, ok)
+	resolvedAt := svc.markRecoveryResolvedForAttempt(
+		ctx,
+		reloaded.ID,
+		reloaded,
+		"resume-1",
+		retainedBeforeRecovery.Stamp(),
+		interruptedMarkerSnapshot{},
+		false,
+	)
 	require.NotNil(t, resolvedAt)
 
 	afterRecovery, err := repo.GetTaskSession(ctx, "bootstrap-history-session")
