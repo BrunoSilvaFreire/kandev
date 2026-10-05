@@ -172,7 +172,12 @@ func (c *Controller) createDynamicProfile(
 	if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
 		return nil, err
 	}
-	dynamic := &models.DynamicAgentProfile{ProfileID: profile.ID, Version: 1}
+	dynamic := &models.DynamicAgentProfile{
+		ProfileID:     profile.ID,
+		Version:       1,
+		PreferredTags: req.Dynamic.PreferredTags,
+		AvoidedTags:   req.Dynamic.AvoidedTags,
+	}
 	if err := dynamicRepo.CreateDynamicAgentProfile(ctx, dynamic, routes); err != nil {
 		if cleanupErr := c.repo.DeleteAgentProfile(ctx, profile.ID); cleanupErr != nil {
 			return nil, fmt.Errorf("%w; cleanup dynamic profile parent: %v", err, cleanupErr)
@@ -282,6 +287,14 @@ func firstNonEmpty(a, b string) string {
 	return b
 }
 
+// emptyIfNil keeps a nil preference list on the wire as an empty JSON array.
+func emptyIfNil(tags []string) []string {
+	if tags == nil {
+		return []string{}
+	}
+	return tags
+}
+
 const (
 	dynamicRouteActionRetrySame = "retry_same"
 	dynamicRouteActionTryNext   = "try_next"
@@ -292,6 +305,12 @@ func validateDynamicAgentProfile(profile *dto.DynamicAgentProfileDTO) error {
 	if profile == nil || len(profile.Candidates) == 0 {
 		return ErrDynamicProfileCandidatesRequired
 	}
+	preferred, avoided, err := models.CanonicalDynamicPreferences(profile.PreferredTags, profile.AvoidedTags)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidDynamicPreferences, err)
+	}
+	profile.PreferredTags = preferred
+	profile.AvoidedTags = avoided
 	for position, candidate := range profile.Candidates {
 		if candidate.Position != position {
 			return fmt.Errorf("%w: candidate %d has position %d", ErrDynamicProfilePositions, position, candidate.Position)
@@ -335,8 +354,10 @@ func dynamicProfileDTO(profile *models.DynamicAgentProfile, routes []models.Dyna
 		return nil, nil
 	}
 	result := &dto.DynamicAgentProfileDTO{
-		Version:    profile.Version,
-		Candidates: make([]dto.DynamicAgentCandidateDTO, 0, len(routes)),
+		Version:       profile.Version,
+		PreferredTags: emptyIfNil(profile.PreferredTags),
+		AvoidedTags:   emptyIfNil(profile.AvoidedTags),
+		Candidates:    make([]dto.DynamicAgentCandidateDTO, 0, len(routes)),
 	}
 	for _, route := range routes {
 		policy, err := decodeDynamicPolicyDocument(route.RulesJSON, route.Position)
@@ -424,7 +445,11 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		if err != nil {
 			return nil, err
 		}
-		dynamic = &models.DynamicAgentProfile{ProfileID: profile.ID}
+		dynamic = &models.DynamicAgentProfile{
+			ProfileID:     profile.ID,
+			PreferredTags: req.Dynamic.PreferredTags,
+			AvoidedTags:   req.Dynamic.AvoidedTags,
+		}
 	}
 	if req.Name != nil {
 		profile.Name = *req.Name

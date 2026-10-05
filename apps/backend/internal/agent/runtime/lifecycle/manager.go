@@ -90,6 +90,11 @@ type Manager struct {
 	// permissions, so they get different checks.
 	sessionExecCheck func(ctx context.Context, sessionID string) error
 
+	// quotaRecorder records a classified quota/rate-limit failure so provider
+	// usage history can show it. Nil = recording disabled. See
+	// SetQuotaSignalRecorder.
+	quotaRecorder QuotaSignalRecorder
+
 	// recoveryGuard is the in-memory per-session acquire-or-observe map of
 	// AC-EXECUTORS-SURVIVAL-002.8, taken over the live standalone
 	// recovery-inventory records at startup step 3 before any control server

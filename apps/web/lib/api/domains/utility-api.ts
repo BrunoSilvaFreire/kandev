@@ -105,6 +105,13 @@ export type ExecutePromptRequest = {
   task_description?: string;
   user_prompt?: string;
   conversation_history?: string;
+  selected_context?: SelectedContextItem[];
+};
+
+export type SelectedContextItem = {
+  kind: "document" | "document_selection" | "session" | "step_visit";
+  label: string;
+  text: string;
 };
 
 export type ExecutePromptResponse = {

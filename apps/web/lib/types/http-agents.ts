@@ -304,6 +304,7 @@ export type ClarificationRequestMetadata = {
   response?: ClarificationAnswer;
   agent_disconnected?: boolean;
   approval?: ClarificationApprovalMeta;
+  continuation_recovery?: ClarificationContinuationRecoveryMeta;
 };
 
 // ClarificationApprovalMeta marks a bundle created by request_approval_kandev.
@@ -312,6 +313,15 @@ export type ClarificationApprovalMeta = {
   document_key?: string;
   title: string;
   version_at_request?: string;
+};
+
+// ClarificationContinuationRecoveryMeta marks a system-authored recovery
+// bundle: an automatic step-entry handoff paused (extraction or reset failure)
+// and the user chooses whether to retry it or continue without a handoff.
+export type ClarificationContinuationRecoveryMeta = {
+  stamp: string;
+  case: "cold" | "unavailable" | "quota_pressure";
+  reason: "extraction_failed" | "reset_failed" | "no_available_profile";
 };
 
 // ClarificationApprovalOutcome is the resolver-filled approval result.

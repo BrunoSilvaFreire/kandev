@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/google/uuid"
@@ -15,8 +17,10 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agent/runtime/routingpolicy"
+	"github.com/kandev/kandev/internal/agent/selection"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/store"
+	agentusage "github.com/kandev/kandev/internal/agent/usage"
 )
 
 var ErrDynamicRoutingDisabled = errors.New("dynamic agent routing is disabled")
@@ -46,7 +50,29 @@ type ProfileExecutionResolver struct {
 	dynamic         store.DynamicProfileRepository
 	engine          *dynamic.Engine
 	bindingResolver *dynamic.CredentialBindingResolver
+	usage           selection.UsageProvider
+	eligibility     CandidateEligibilityFunc
 	enabled         atomic.Bool
+}
+
+// CandidateEligibilityFunc is a narrow, context-aware hard gate applied to a
+// concrete dynamic candidate before ranking. Callers with a real task or
+// workflow session supply the executor-aware launchability check; utility
+// callers leave it unset and keep the profile-configuration validation only.
+type CandidateEligibilityFunc func(ctx context.Context, profile *agentsettingsmodels.AgentProfile) bool
+
+// SetUsageProvider injects the shared subscription-usage provider used for
+// schedule-time capacity ranking. A nil provider leaves every candidate in the
+// unknown capacity band.
+func (r *ProfileExecutionResolver) SetUsageProvider(provider selection.UsageProvider) {
+	r.usage = provider
+}
+
+// SetCandidateEligibility installs the optional executor-aware eligibility
+// gate. It must be cheap and side-effect free; ranking calls it per candidate
+// before selection.
+func (r *ProfileExecutionResolver) SetCandidateEligibility(check CandidateEligibilityFunc) {
+	r.eligibility = check
 }
 
 func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engine, enabled bool) *ProfileExecutionResolver {
@@ -625,16 +651,147 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 			}
 		case concrete == nil || concrete.DeletedAt != nil || !concrete.Enabled:
 			candidate.Enabled = false
-		case r.bindingResolver != nil:
-			binding := profileCredentialBindingDescriptor(concrete)
-			candidate.BindingKey = dynamic.ResourceKey(
-				dynamic.ScopeCredential,
-				r.bindingResolver.Resolve(binding, route.ExecutionProfileID),
-			)
+		default:
+			candidate.Tags = concrete.Tags
+			candidate.Model = concrete.Model
+			if r.eligibility != nil && !r.eligibility(ctx, concrete) {
+				candidate.Enabled = false
+			}
+			if r.bindingResolver != nil {
+				binding := profileCredentialBindingDescriptor(concrete)
+				candidate.BindingKey = dynamic.ResourceKey(
+					dynamic.ScopeCredential,
+					r.bindingResolver.Resolve(binding, route.ExecutionProfileID),
+				)
+			}
 		}
 		profile.Candidates = append(profile.Candidates, candidate)
 	}
+	r.rankDynamicCandidates(ctx, &profile, config.PreferredTags, config.AvoidedTags)
 	return profile, nil
+}
+
+type candidateQuota struct {
+	state     selection.QuotaState
+	remaining float64
+}
+
+// rankDynamicCandidates fetches candidate telemetry concurrently, applies the
+// known-zero eligibility gate, and reorders the profile by the shared schedule
+// ranker. It runs before the engine selection lock; a usage error only marks
+// one candidate unavailable.
+func (r *ProfileExecutionResolver) rankDynamicCandidates(
+	ctx context.Context,
+	profile *dynamic.Profile,
+	preferredTags, avoidedTags []string,
+) {
+	quota := r.fetchCandidateQuota(ctx, profile.Candidates)
+	preferences := selection.RankPreferences{PreferredTags: preferredTags, AvoidedTags: avoidedTags}
+	eligible := make([]selection.RankCandidate, 0, len(profile.Candidates))
+	ineligible := make([]dynamic.Candidate, 0, len(profile.Candidates))
+	preferredUnavailable := false
+	for position := range profile.Candidates {
+		candidate := profile.Candidates[position]
+		if sample, ok := quota[candidate.ID]; ok {
+			candidate.QuotaState = sample.state
+			candidate.Remaining = sample.remaining
+		}
+		if candidate.Enabled && candidate.QuotaState == selection.QuotaKnown && candidate.Remaining <= 0 {
+			candidate.Enabled = false
+		}
+		if !candidate.Enabled {
+			if selection.Matches(candidate.Tags, preferredTags) {
+				preferredUnavailable = true
+			}
+			ineligible = append(ineligible, candidate)
+			continue
+		}
+		eligible = append(eligible, selection.RankCandidate{
+			ProfileID: candidate.ID, Position: position, Tags: candidate.Tags,
+			QuotaState: candidate.QuotaState, Remaining: candidate.Remaining,
+		})
+	}
+	ranked := selection.RankCandidates(selection.RankInput{
+		Candidates: eligible, Preferences: preferences, PreferredUnavailable: preferredUnavailable,
+		Rand: rand.Float64,
+	})
+	byID := make(map[string]dynamic.Candidate, len(profile.Candidates))
+	for _, candidate := range profile.Candidates {
+		byID[candidate.ID] = candidate
+	}
+	ordered := make([]dynamic.Candidate, 0, len(profile.Candidates))
+	for _, entry := range ranked {
+		candidate := byID[entry.ProfileID]
+		candidate.Reason = entry.Reason
+		ordered = append(ordered, candidate)
+	}
+	ordered = append(ordered, ineligible...)
+	profile.Candidates = ordered
+}
+
+// fetchCandidateQuota scores every enabled candidate concurrently. A nil
+// provider leaves each candidate in the unknown band.
+func (r *ProfileExecutionResolver) fetchCandidateQuota(
+	ctx context.Context,
+	candidates []dynamic.Candidate,
+) map[string]candidateQuota {
+	results := make(map[string]candidateQuota, len(candidates))
+	if r.usage == nil {
+		return results
+	}
+	var (
+		mu sync.Mutex
+		wg sync.WaitGroup
+	)
+	for _, candidate := range candidates {
+		if !candidate.Enabled || candidate.ID == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(profileID, model string) {
+			defer wg.Done()
+			sample := candidateQuota{state: selection.QuotaUnknown}
+			usage, err := r.usage.GetUsage(ctx, profileID)
+			if err != nil {
+				sample.state = selection.QuotaUnavailable
+			} else if usage != nil {
+				if remaining, known := agentusage.RemainingPct(usage, model); known {
+					sample.state = selection.QuotaKnown
+					sample.remaining = remaining
+				}
+			}
+			mu.Lock()
+			results[profileID] = sample
+			mu.Unlock()
+		}(candidate.ID, candidate.Model)
+	}
+	wg.Wait()
+	return results
+}
+
+// ProfileQuotaExhausted reports whether the concrete profile has known quota
+// that has been exhausted (known remaining <= 0). It returns false when the
+// resolver is nil, usage is nil, or the candidate's quota is unknown or has headroom.
+func (r *ProfileExecutionResolver) ProfileQuotaExhausted(ctx context.Context, profileID string) bool {
+	if r == nil || r.usage == nil || profileID == "" {
+		return false
+	}
+	model := ""
+	if r.profiles != nil {
+		if p, err := r.profiles.GetAgentProfile(ctx, profileID); err == nil && p != nil {
+			model = p.Model
+		}
+	}
+	sample := r.fetchCandidateQuota(ctx, []dynamic.Candidate{{
+		ID:      profileID,
+		Model:   model,
+		Enabled: true,
+	}})
+	quota, ok := sample[profileID]
+	if !ok {
+		return false
+	}
+	return quota.state == selection.QuotaKnown && quota.remaining <= 0
 }
 
 func decodeDynamicRoutePolicy(raw string) (routingpolicy.Document, map[string]dynamic.Action, error) {

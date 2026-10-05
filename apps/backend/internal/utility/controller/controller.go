@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -114,8 +115,17 @@ func (c *Controller) PreparePromptRequest(ctx context.Context, req dto.ExecutePr
 		SessionID:           req.SessionID,
 		UserPrompt:          req.UserPrompt,
 		ConversationHistory: req.ConversationHistory,
+		SelectedContext:     formatSelectedContext(req.SelectedContext),
 	}
 	return c.svc.PreparePromptRequest(ctx, req.UtilityAgentID, tmplCtx, defaults, sessionless)
+}
+
+func formatSelectedContext(items []dto.SelectedContextItem) string {
+	blocks := make([]string, 0, len(items))
+	for _, item := range items {
+		blocks = append(blocks, "["+item.Label+"]\n"+item.Text)
+	}
+	return strings.Join(blocks, "\n\n")
 }
 
 // CreateCall creates a call record for tracking.

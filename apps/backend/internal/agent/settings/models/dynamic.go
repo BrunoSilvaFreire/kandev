@@ -1,6 +1,34 @@
 package models
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
+
+// CanonicalDynamicPreferences canonicalizes a Dynamic Profile's soft
+// preference lists and rejects a tag that appears in both. It is the single
+// implementation shared by the settings controller and the workflow
+// import/sync provisioner.
+func CanonicalDynamicPreferences(preferred, avoided []string) ([]string, []string, error) {
+	canonicalPreferred, err := CanonicalTags(preferred)
+	if err != nil {
+		return nil, nil, fmt.Errorf("preferred_tags: %w", err)
+	}
+	canonicalAvoided, err := CanonicalTags(avoided)
+	if err != nil {
+		return nil, nil, fmt.Errorf("avoided_tags: %w", err)
+	}
+	preferredSet := make(map[string]struct{}, len(canonicalPreferred))
+	for _, tag := range canonicalPreferred {
+		preferredSet[tag] = struct{}{}
+	}
+	for _, tag := range canonicalAvoided {
+		if _, ok := preferredSet[tag]; ok {
+			return nil, nil, fmt.Errorf("tag %q cannot be both preferred and avoided", tag)
+		}
+	}
+	return canonicalPreferred, canonicalAvoided, nil
+}
 
 // DynamicAgentProfile stores the optimistic version for one dynamic profile's
 // routing document. The parent agent_profiles row remains the profile's
@@ -10,6 +38,11 @@ type DynamicAgentProfile struct {
 	Version   int64     `json:"version"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// PreferredTags and AvoidedTags are soft scheduling preferences matched
+	// against each candidate's concrete profile tags. They never discover
+	// candidates and never override eligibility.
+	PreferredTags []string `json:"preferred_tags"`
+	AvoidedTags   []string `json:"avoided_tags"`
 }
 
 // DynamicAgentRoute is one ordered concrete candidate in a dynamic profile.

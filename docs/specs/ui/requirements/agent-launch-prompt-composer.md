@@ -87,3 +87,18 @@ copy-prompt selection, profile compatibility, and launch contracts remain availa
 - Changing saved-prompt storage, mention search, attachment limits, utility-agent enhancement, voice settings, or the session launch API.
 - Changing task creation, subtask creation, task chat, Quick Chat, explicit context-action results, agent profile selection, or environment reuse.
 - Adding rich inline chips or external `#` entity references to the plain launch prompt.
+
+## Fork refinement (2026-09-25): handoff destination step
+
+- **AC-UI-AGENT-LAUNCH-PROMPT-COMPOSER-001.12:** A handoff launch may
+  optionally name a destination workflow step. The dialog offers the current
+  step's named transitions plus every destination the normal move eligibility
+  (`canMoveToStep`) allows; the default is "Stay in current step", so a plain
+  handoff is unchanged.
+- **AC-UI-AGENT-LAUNCH-PROMPT-COMPOSER-001.13:** The transition runs through
+  the normal workflow move path. After launch the new session is promoted to
+  primary and activated locally, and only then is the move issued. A failed
+  promotion shows an error, keeps the new session, and does not move the task;
+  a failed move keeps the session. Workflow `on_exit`/`on_enter`, routing, and
+  handoff carry therefore run exactly as for any other move, and the new
+  session remains the move's destination.

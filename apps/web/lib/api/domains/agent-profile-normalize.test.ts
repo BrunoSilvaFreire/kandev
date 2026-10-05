@@ -319,6 +319,8 @@ describe("toAgentProfilePayload dynamic candidates", () => {
       kind: "dynamic",
       dynamic: {
         version: 2,
+        preferredTags: [],
+        avoidedTags: [],
         candidates: [
           {
             position: 0,

@@ -128,6 +128,8 @@ func (r *sqliteRepository) initSchema() error {
 	CREATE TABLE IF NOT EXISTS dynamic_agent_profiles (
 		profile_id TEXT PRIMARY KEY,
 		version INTEGER NOT NULL DEFAULT 1,
+		preferred_tags TEXT NOT NULL DEFAULT '[]',
+		avoided_tags TEXT NOT NULL DEFAULT '[]',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (profile_id) REFERENCES agent_profiles(id) ON DELETE CASCADE
@@ -243,6 +245,8 @@ func (r *sqliteRepository) migrateOfficeEnrichmentColumns() error {
 		{"agent_profiles.budget_monthly_cents", `ALTER TABLE agent_profiles ADD COLUMN budget_monthly_cents INTEGER NOT NULL DEFAULT 0`},
 		{"agent_profiles.settings", `ALTER TABLE agent_profiles ADD COLUMN settings TEXT NOT NULL DEFAULT '{}'`},
 		{"agent_profiles.permissions", `ALTER TABLE agent_profiles ADD COLUMN permissions TEXT NOT NULL DEFAULT '{}'`},
+		{"dynamic_agent_profiles.preferred_tags", `ALTER TABLE dynamic_agent_profiles ADD COLUMN preferred_tags TEXT NOT NULL DEFAULT '[]'`},
+		{"dynamic_agent_profiles.avoided_tags", `ALTER TABLE dynamic_agent_profiles ADD COLUMN avoided_tags TEXT NOT NULL DEFAULT '[]'`},
 	}
 	for _, m := range migrations {
 		if err := r.migrate.Apply(m.name, m.stmt); err != nil {
@@ -709,6 +713,14 @@ func (r *sqliteRepository) CreateDynamicAgentProfile(
 	if profile.Version <= 0 {
 		profile.Version = 1
 	}
+	preferredJSON, err := profileTagsToJSON(profile.PreferredTags)
+	if err != nil {
+		return err
+	}
+	avoidedJSON, err := profileTagsToJSON(profile.AvoidedTags)
+	if err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	if profile.CreatedAt.IsZero() {
 		profile.CreatedAt = now
@@ -720,9 +732,11 @@ func (r *sqliteRepository) CreateDynamicAgentProfile(
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`
-		INSERT INTO dynamic_agent_profiles (profile_id, version, created_at, updated_at)
-		VALUES (?, ?, ?, ?)
-	`), profile.ProfileID, profile.Version, profile.CreatedAt, profile.UpdatedAt); err != nil {
+		INSERT INTO dynamic_agent_profiles
+			(profile_id, version, preferred_tags, avoided_tags, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`), profile.ProfileID, profile.Version, preferredJSON, avoidedJSON,
+		profile.CreatedAt, profile.UpdatedAt); err != nil {
 		return err
 	}
 	if err := insertDynamicRoutes(ctx, tx, profile.ProfileID, routes); err != nil {
@@ -750,10 +764,19 @@ func (r *sqliteRepository) GetDynamicAgentProfile(
 	profileID string,
 ) (*models.DynamicAgentProfile, []models.DynamicAgentRoute, error) {
 	profile := &models.DynamicAgentProfile{}
+	var preferredJSON, avoidedJSON string
 	if err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT profile_id, version, created_at, updated_at
+		SELECT profile_id, version, COALESCE(preferred_tags, '[]'), COALESCE(avoided_tags, '[]'),
+			created_at, updated_at
 		FROM dynamic_agent_profiles WHERE profile_id = ?
-	`), profileID).Scan(&profile.ProfileID, &profile.Version, &profile.CreatedAt, &profile.UpdatedAt); err != nil {
+	`), profileID).Scan(&profile.ProfileID, &profile.Version, &preferredJSON, &avoidedJSON,
+		&profile.CreatedAt, &profile.UpdatedAt); err != nil {
+		return nil, nil, err
+	}
+	if err := decodeDynamicTagList("preferred_tags", preferredJSON, &profile.PreferredTags); err != nil {
+		return nil, nil, err
+	}
+	if err := decodeDynamicTagList("avoided_tags", avoidedJSON, &profile.AvoidedTags); err != nil {
 		return nil, nil, err
 	}
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
@@ -810,12 +833,20 @@ func (r *sqliteRepository) updateDynamicAgentProfileTx(
 	expectedVersion int64,
 	routes []models.DynamicAgentRoute,
 ) error {
+	preferredJSON, err := profileTagsToJSON(profile.PreferredTags)
+	if err != nil {
+		return err
+	}
+	avoidedJSON, err := profileTagsToJSON(profile.AvoidedTags)
+	if err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	result, err := execer.ExecContext(ctx, execer.Rebind(`
 		UPDATE dynamic_agent_profiles
-		SET version = version + 1, updated_at = ?
+		SET version = version + 1, preferred_tags = ?, avoided_tags = ?, updated_at = ?
 		WHERE profile_id = ? AND version = ?
-	`), now, profile.ProfileID, expectedVersion)
+	`), preferredJSON, avoidedJSON, now, profile.ProfileID, expectedVersion)
 	if err != nil {
 		return err
 	}
@@ -1288,6 +1319,22 @@ func profileTagsToJSON(tags []string) (string, error) {
 		return "", fmt.Errorf("marshal tags: %w", err)
 	}
 	return string(data), nil
+}
+
+// decodeDynamicTagList unmarshals a dynamic profile preference column and
+// normalizes a missing value to an empty, non-nil list.
+func decodeDynamicTagList(column, raw string, out *[]string) error {
+	if raw == "" {
+		*out = []string{}
+		return nil
+	}
+	if err := json.Unmarshal([]byte(raw), out); err != nil {
+		return fmt.Errorf("parse %s: %w", column, err)
+	}
+	if *out == nil {
+		*out = []string{}
+	}
+	return nil
 }
 
 func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *models.AgentProfile) error {

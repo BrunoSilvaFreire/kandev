@@ -6,6 +6,7 @@ import type { AgentProfile } from "@/lib/types/http";
 import type {
   DynamicAgentCandidate,
   DynamicAgentPolicy,
+  DynamicAgentProfile,
   DynamicErrorClass,
   DynamicErrorPolicy,
 } from "@/lib/types/agent-profile";
@@ -23,6 +24,8 @@ type DynamicAgentProfileEditorDraftProps = {
 export type DynamicAgentProfileEditorDraft = {
   name: string;
   candidates: DynamicAgentCandidate[];
+  preferredTags: string[];
+  avoidedTags: string[];
   profileEnabled: boolean;
   dynamicVersion: number;
   currentProfile: AgentProfile;
@@ -30,6 +33,8 @@ export type DynamicAgentProfileEditorDraft = {
   hasExternalConflict: boolean;
   updateName: (name: string) => void;
   updateProfileEnabled: (enabled: boolean) => void;
+  updatePreferredTags: (tags: string[]) => void;
+  updateAvoidedTags: (tags: string[]) => void;
   addCandidate: (executionProfileId: string) => void;
   moveCandidate: (index: number, direction: -1 | 1) => void;
   removeCandidate: (index: number) => void;
@@ -57,12 +62,23 @@ const defaultDynamicPolicy = (): DynamicAgentPolicy => ({
   hard: defaultDynamicErrorPolicy(),
 });
 
+export function buildDynamicDraftDocument(
+  version: number,
+  preferredTags: string[],
+  avoidedTags: string[],
+  candidates: DynamicAgentCandidate[],
+): DynamicAgentProfile {
+  return { version, preferredTags, avoidedTags, candidates };
+}
+
 export function dynamicDraftRevision(
   name: string,
+  preferredTags: string[],
+  avoidedTags: string[],
   candidates: DynamicAgentCandidate[],
   enabled: boolean,
 ): string {
-  return JSON.stringify({ name, candidates, enabled });
+  return JSON.stringify({ name, preferredTags, avoidedTags, candidates, enabled });
 }
 
 // eslint-disable-next-line max-lines-per-function -- coordinates one draft and its candidate mutations.
@@ -74,6 +90,10 @@ export function useDynamicAgentProfileEditorDraft({
   const [candidates, setCandidates] = useState<DynamicAgentCandidate[]>(
     profile.dynamic?.candidates ?? [],
   );
+  const [preferredTags, setPreferredTags] = useState<string[]>(
+    profile.dynamic?.preferredTags ?? [],
+  );
+  const [avoidedTags, setAvoidedTags] = useState<string[]>(profile.dynamic?.avoidedTags ?? []);
   const [profileEnabled, setProfileEnabled] = useState(profile.enabled !== false);
   const [dynamicVersion, setDynamicVersion] = useState(profile.dynamic?.version ?? 1);
   const [savedProfile, setSavedProfile] = useState(profile);
@@ -87,7 +107,7 @@ export function useDynamicAgentProfileEditorDraft({
     ...profile,
     name,
     enabled: profileEnabled,
-    dynamic: { version: dynamicVersion, candidates },
+    dynamic: buildDynamicDraftDocument(dynamicVersion, preferredTags, avoidedTags, candidates),
   };
   savedProfileRef.current = savedProfile;
   currentProfileRef.current = currentProfile;
@@ -96,11 +116,18 @@ export function useDynamicAgentProfileEditorDraft({
     nextName: string,
     nextCandidates: DynamicAgentCandidate[],
     nextEnabled = profileEnabled,
+    nextPreferredTags = preferredTags,
+    nextAvoidedTags = avoidedTags,
   ) => {
     onDraftChange?.({
       name: nextName,
       enabled: nextEnabled,
-      dynamic: { version: dynamicVersion, candidates: nextCandidates },
+      dynamic: buildDynamicDraftDocument(
+        dynamicVersion,
+        nextPreferredTags,
+        nextAvoidedTags,
+        nextCandidates,
+      ),
     });
   };
 
@@ -112,6 +139,16 @@ export function useDynamicAgentProfileEditorDraft({
   const updateProfileEnabled = (enabled: boolean) => {
     setProfileEnabled(enabled);
     notifyDraft(name, candidates, enabled);
+  };
+
+  const updatePreferredTags = (tags: string[]) => {
+    setPreferredTags(tags);
+    notifyDraft(name, candidates, profileEnabled, tags);
+  };
+
+  const updateAvoidedTags = (tags: string[]) => {
+    setAvoidedTags(tags);
+    notifyDraft(name, candidates, profileEnabled, preferredTags, tags);
   };
 
   const addCandidate = (executionProfileId: string) => {
@@ -189,6 +226,8 @@ export function useDynamicAgentProfileEditorDraft({
     setName(nextProfile.name);
     setProfileEnabled(nextProfile.enabled !== false);
     setCandidates(nextProfile.dynamic?.candidates ?? []);
+    setPreferredTags(nextProfile.dynamic?.preferredTags ?? []);
+    setAvoidedTags(nextProfile.dynamic?.avoidedTags ?? []);
     setDynamicVersion(nextProfile.dynamic?.version ?? 1);
     setHasExternalConflict(false);
     submittedProfileRef.current = null;
@@ -198,6 +237,8 @@ export function useDynamicAgentProfileEditorDraft({
     setName(nextProfile.name);
     setProfileEnabled(nextProfile.enabled !== false);
     setCandidates(nextProfile.dynamic?.candidates ?? []);
+    setPreferredTags(nextProfile.dynamic?.preferredTags ?? []);
+    setAvoidedTags(nextProfile.dynamic?.avoidedTags ?? []);
     setDynamicVersion(nextProfile.dynamic?.version ?? 1);
   }, []);
 
@@ -248,6 +289,8 @@ export function useDynamicAgentProfileEditorDraft({
   return {
     name,
     candidates,
+    preferredTags,
+    avoidedTags,
     profileEnabled,
     dynamicVersion,
     currentProfile,
@@ -255,6 +298,8 @@ export function useDynamicAgentProfileEditorDraft({
     hasExternalConflict,
     updateName,
     updateProfileEnabled,
+    updatePreferredTags,
+    updateAvoidedTags,
     addCandidate,
     moveCandidate,
     removeCandidate,

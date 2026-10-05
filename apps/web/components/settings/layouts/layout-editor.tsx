@@ -55,6 +55,8 @@ export const placeholderComponents: Record<string, React.FunctionComponent<IDock
   // Reusable panels rendered through the same placeholder box in the editor.
   "prompt-history": PlaceholderPanel,
   usage: PlaceholderPanel,
+  documents: PlaceholderPanel,
+  "task-history": PlaceholderPanel,
   todos: PlaceholderPanel,
 };
 

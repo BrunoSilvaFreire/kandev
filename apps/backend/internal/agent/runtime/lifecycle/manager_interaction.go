@@ -2476,6 +2476,8 @@ func (m *Manager) classifyAndMaybeRemediate(execution *AgentExecution, exitCode 
 		zap.Bool("user_action", e.UserAction),
 		zap.String("remediation_path", e.RemediationPath))
 
+	m.recordQuotaSignal(execution, e)
+
 	if e.Code != routingerr.CodeNpxCacheCorrupted || e.RemediationPath == "" {
 		return
 	}
@@ -2494,6 +2496,22 @@ func (m *Manager) classifyAndMaybeRemediate(execution *AgentExecution, exitCode 
 				zap.Error(err))
 		}
 	}()
+}
+
+// recordQuotaSignal forwards a classified quota or rate-limit failure to the
+// injected recorder. It is nil-safe and never affects the caller.
+func (m *Manager) recordQuotaSignal(execution *AgentExecution, e *routingerr.Error) {
+	if m.quotaRecorder == nil {
+		return
+	}
+	if e.Code != routingerr.CodeQuotaLimited && e.Code != routingerr.CodeRateLimited {
+		return
+	}
+	var reset time.Time
+	if e.ResetHint != nil {
+		reset = *e.ResetHint
+	}
+	m.quotaRecorder.RecordLimitHit(execution.AgentProfileID, execution.AgentID, string(e.Code), reset)
 }
 
 // RespondToPermission sends a response to an agent's permission request.

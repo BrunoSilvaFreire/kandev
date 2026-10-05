@@ -165,7 +165,7 @@ func TestCreateNewSessionForStep_RemovesPreparedSessionWhenDynamicResolutionFail
 	if active == nil || active.ID != current.ID || active.State != models.TaskSessionStateRunning {
 		t.Fatalf("active session after failed resolution = %+v, want running %q", active, current.ID)
 	}
-	if reusable, err := svc.findReusableSessionForProfile(ctx, current.TaskID, dynamicProfileID, current.ID); err != nil {
+	if reusable, err := svc.findReusableSessionForProfile(ctx, current.TaskID, dynamicProfileID, current.ID, ""); err != nil {
 		t.Fatalf("find reusable session: %v", err)
 	} else if reusable != nil {
 		t.Fatalf("stale replacement session remained reusable: %+v", reusable)

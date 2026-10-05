@@ -9,6 +9,7 @@ import { Separator } from "@kandev/ui/separator";
 import { Switch } from "@kandev/ui/switch";
 import { AgentLogo } from "@/components/agent-logo";
 import { DynamicAgentCandidateList } from "@/components/settings/dynamic-agent-candidate-list";
+import { DynamicAgentSchedulingPreferences } from "@/components/settings/dynamic-agent-scheduling-preferences";
 import { ProfileEnabledHelp } from "@/components/settings/profile-enabled-help";
 import { ProfileNameField } from "@/components/settings/profile-form-fields";
 import { useDynamicAgentProfileEditorState } from "@/components/settings/dynamic-agent-profile-editor-state";
@@ -113,11 +114,20 @@ export function DynamicAgentProfileEditor({
         onChange={state.updateName}
       />
       <DynamicRoutingPolicyHelp />
+      <DynamicAgentSchedulingPreferences
+        preferredTags={state.preferredTags}
+        avoidedTags={state.avoidedTags}
+        onPreferredChange={state.updatePreferredTags}
+        onAvoidedChange={state.updateAvoidedTags}
+        conflict={state.preferenceConflict}
+      />
       <DynamicAgentCandidateList
         candidates={state.candidates}
         concreteProfiles={state.concreteProfiles}
         availableProfileOptions={state.availableProfileOptions}
         enabledLabel={state.enabledLabel}
+        preferredTags={state.preferredTags}
+        avoidedTags={state.avoidedTags}
         addCandidate={state.addCandidate}
         moveCandidate={state.moveCandidate}
         removeCandidate={state.removeCandidate}

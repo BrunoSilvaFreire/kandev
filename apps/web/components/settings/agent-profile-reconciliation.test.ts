@@ -188,11 +188,17 @@ describe("reconcileAgentProfileSnapshot dynamic drafts", () => {
         },
       },
     };
-    const previous = profile({ kind: "dynamic", dynamic: { version: 1, candidates: [] } });
-    const draft = profile({ kind: "dynamic", dynamic: { version: 1, candidates: [candidate] } });
+    const previous = profile({
+      kind: "dynamic",
+      dynamic: { version: 1, preferredTags: [], avoidedTags: [], candidates: [] },
+    });
+    const draft = profile({
+      kind: "dynamic",
+      dynamic: { version: 1, preferredTags: [], avoidedTags: [], candidates: [candidate] },
+    });
     const incoming = profile({
       kind: "dynamic",
-      dynamic: { version: 2, candidates: [] },
+      dynamic: { version: 2, preferredTags: [], avoidedTags: [], candidates: [] },
       updatedAt: UPDATED_AT,
     });
 

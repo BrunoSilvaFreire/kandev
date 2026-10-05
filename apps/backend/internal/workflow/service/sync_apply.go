@@ -83,17 +83,28 @@ func (s *Service) ApplySyncedWorkflows(ctx context.Context, workspaceID string, 
 			frozenPaths[f.Path] = true
 			continue
 		}
-		for _, pw := range f.Export.Workflows {
+		// Sync intentionally reuses and updates existing workflows, so it must
+		// not skip provisioning for them (nil skipNames).
+		export, dynamicBindings, convertErr := s.convertLegacyTaggedExport(ctx, workspaceID, f.Export, nil)
+		if convertErr != nil {
+			// A definition that cannot be converted is left frozen so its
+			// synced workflow is not treated as removed.
+			frozenPaths[f.Path] = true
+			result.Warnings = append(result.Warnings, fmt.Sprintf("%s: %v", f.Path, convertErr))
+			continue
+		}
+		for index, pw := range export.Workflows {
 			key := syncKey(f.Path, pw.Name)
 			if desired[key] {
 				result.Warnings = append(result.Warnings, fmt.Sprintf("%s: duplicate workflow %q ignored", f.Path, pw.Name))
 				continue
 			}
 			desired[key] = true
+			bindings := dynamicBindingsForWorkflow(dynamicBindings, index)
 			if wf, ok := synced[key]; ok {
-				s.updateSyncedWorkflow(ctx, wf, pw, result)
+				s.updateSyncedWorkflow(ctx, wf, pw, bindings, result)
 			} else {
-				s.createSyncedWorkflow(ctx, workspaceID, pw, f.Path, result)
+				s.createSyncedWorkflow(ctx, workspaceID, pw, f.Path, bindings, result)
 			}
 		}
 	}
@@ -111,8 +122,15 @@ func (s *Service) ApplySyncedWorkflows(ctx context.Context, workspaceID string, 
 	return result, nil
 }
 
-func (s *Service) createSyncedWorkflow(ctx context.Context, workspaceID string, pw models.WorkflowPortable, path string, result *SyncApplyResult) {
-	wf, err := s.importSingleWorkflow(ctx, workspaceID, pw)
+func (s *Service) createSyncedWorkflow(
+	ctx context.Context,
+	workspaceID string,
+	pw models.WorkflowPortable,
+	path string,
+	dynamicBindings map[int]string,
+	result *SyncApplyResult,
+) {
+	wf, err := s.importSingleWorkflow(ctx, workspaceID, pw, dynamicBindings)
 	if err != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("%s: failed to create workflow %q: %v", path, pw.Name, err))
 		return
@@ -136,7 +154,13 @@ func (s *Service) createSyncedWorkflow(ctx context.Context, workspaceID string, 
 // the definition are left untouched so a no-drift sync writes (and
 // broadcasts) nothing. The workflow is skipped with a warning when steps
 // can't be matched unambiguously or when a removed step still holds tasks.
-func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workflow, pw models.WorkflowPortable, result *SyncApplyResult) {
+func (s *Service) updateSyncedWorkflow(
+	ctx context.Context,
+	wf *taskmodels.Workflow,
+	pw models.WorkflowPortable,
+	dynamicBindings map[int]string,
+	result *SyncApplyResult,
+) {
 	steps, err := s.repo.ListStepsByWorkflow(ctx, wf.ID)
 	if err != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: failed to list steps: %v", wf.Name, err))
@@ -148,29 +172,9 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 		return
 	}
 
-	// Position → step ID: matched steps keep their ID, new steps get one.
-	posToID := make(map[int]string, len(pw.Steps))
-	for _, sp := range pw.Steps {
-		if st, ok := existingByName[sp.Name]; ok {
-			posToID[sp.Position] = st.ID
-		} else {
-			posToID[sp.Position] = uuid.New().String()
-		}
-	}
-	// Validate the complete desired step set before mutating workflow fields or
-	// persisting any step. A malformed later step must leave the synced workflow
-	// untouched so the next sync can retry after the source is fixed.
-	desiredSteps := make([]*models.WorkflowStep, 0, len(pw.Steps))
-	for _, sp := range pw.Steps {
-		step := s.stepFromPortableForSync(wf.ID, sp, posToID, existingByName[sp.Name])
-		if err := models.ValidateWorkflowStep(step); err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: invalid step %q: %v", wf.Name, sp.Name, err))
-			return
-		}
-		desiredSteps = append(desiredSteps, step)
-	}
-	if err := validateWorkflowSessionTargets(desiredSteps); err != nil {
-		result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: invalid workflow session targets: %v", wf.Name, err))
+	posToID, warning := s.buildSyncedSteps(wf, pw, existingByName, dynamicBindings)
+	if warning != "" {
+		result.Warnings = append(result.Warnings, warning)
 		return
 	}
 
@@ -182,6 +186,7 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 	for _, sp := range pw.Steps {
 		existing := existingByName[sp.Name]
 		step := s.stepFromPortableForSync(wf.ID, sp, posToID, existing)
+		applyDynamicStepBinding(step, sp, dynamicBindings)
 		var rebinding bool
 		var oldProfileID, existingID string
 		var reviewRebindings []profileRebinding
@@ -216,6 +221,41 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 	if changed {
 		result.Updated = append(result.Updated, wf.Name)
 	}
+}
+
+// buildSyncedSteps maps each portable step position to its step ID (matched
+// steps keep their ID, new steps get one) and validates the complete desired
+// step set before any workflow field or step is mutated. It returns a warning
+// and no IDs when a step is invalid, so a malformed later step leaves the
+// synced workflow untouched and the next sync can retry after the source is
+// fixed.
+func (s *Service) buildSyncedSteps(
+	wf *taskmodels.Workflow,
+	pw models.WorkflowPortable,
+	existingByName map[string]*models.WorkflowStep,
+	dynamicBindings map[int]string,
+) (map[int]string, string) {
+	posToID := make(map[int]string, len(pw.Steps))
+	for _, sp := range pw.Steps {
+		if st, ok := existingByName[sp.Name]; ok {
+			posToID[sp.Position] = st.ID
+		} else {
+			posToID[sp.Position] = uuid.New().String()
+		}
+	}
+	desiredSteps := make([]*models.WorkflowStep, 0, len(pw.Steps))
+	for _, sp := range pw.Steps {
+		step := s.stepFromPortableForSync(wf.ID, sp, posToID, existingByName[sp.Name])
+		applyDynamicStepBinding(step, sp, dynamicBindings)
+		if err := models.ValidateWorkflowStep(step); err != nil {
+			return nil, fmt.Sprintf("workflow %q: invalid step %q: %v", wf.Name, sp.Name, err)
+		}
+		desiredSteps = append(desiredSteps, step)
+	}
+	if err := validateWorkflowSessionTargets(desiredSteps); err != nil {
+		return nil, fmt.Sprintf("workflow %q: invalid workflow session targets: %v", wf.Name, err)
+	}
+	return posToID, ""
 }
 
 func (s *Service) logStepProfileRebindings(wf *taskmodels.Workflow, stepName, stepID string, rebinding bool, oldProfileID, newProfileID string, reviewRebindings []profileRebinding) {

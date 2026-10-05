@@ -18,6 +18,10 @@ const (
 	routeStatusActive         = "active"
 	routeStatusActionRequired = "action_required"
 	routeStatusRetrying       = "retrying"
+
+	// selectionReasonCandidateOrder is the fallback route reason when neither
+	// the caller nor the candidate supplies a more specific one.
+	selectionReasonCandidateOrder = "candidate_order"
 )
 
 func WithClock(now func() time.Time) EngineOption {
@@ -100,7 +104,7 @@ func (e *Engine) Select(sessionID string, profile Profile, expectedGeneration in
 }
 
 func (e *Engine) SelectContext(ctx context.Context, sessionID string, profile Profile, expectedGeneration int64, excludeProfileID string) (RouteDecision, error) {
-	return e.selectContext(ctx, sessionID, profile, expectedGeneration, excludeProfileID, "", "candidate_order")
+	return e.selectContext(ctx, sessionID, profile, expectedGeneration, excludeProfileID, "", selectionReasonCandidateOrder)
 }
 
 // SelectContextWithReason is used by generation-fenced manual route actions
@@ -127,7 +131,7 @@ func (e *Engine) SelectContextWithPreference(
 	excludeProfileID string,
 	preferredProfileID string,
 ) (RouteDecision, error) {
-	return e.selectContext(ctx, sessionID, profile, expectedGeneration, excludeProfileID, preferredProfileID, "candidate_order")
+	return e.selectContext(ctx, sessionID, profile, expectedGeneration, excludeProfileID, preferredProfileID, selectionReasonCandidateOrder)
 }
 
 func (e *Engine) selectContext(
@@ -164,7 +168,7 @@ func (e *Engine) selectContext(
 			ExecutionProfileID: candidate.ID,
 			Generation:         generation,
 			ProfileVersion:     profile.Version,
-			Reason:             reason,
+			Reason:             selectionReason(candidate, reason),
 			Status:             routeStatusStarting,
 		}
 		nextState := RouteState{
@@ -199,6 +203,22 @@ func (e *Engine) selectContext(
 	return RouteDecision{}, &NoEligibleCandidateError{
 		SessionID: sessionID, LogicalProfile: profile.ID, Generation: generation,
 	}
+}
+
+// selectionReason prefers the candidate's schedule-time reason for a fresh
+// selection while preserving an explicit manual or policy reason supplied by
+// the caller.
+func selectionReason(candidate Candidate, requested string) string {
+	if requested != "" && requested != selectionReasonCandidateOrder {
+		return requested
+	}
+	if candidate.Reason != "" {
+		return candidate.Reason
+	}
+	if requested != "" {
+		return requested
+	}
+	return selectionReasonCandidateOrder
 }
 
 func (e *Engine) loadStateLocked(ctx context.Context, sessionID string) (RouteState, bool, error) {

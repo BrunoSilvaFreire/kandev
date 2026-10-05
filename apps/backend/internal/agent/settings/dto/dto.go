@@ -69,8 +69,13 @@ type AgentProfileDTO struct {
 // profile whose kind is "dynamic". Candidates stay opaque profile IDs on the
 // wire; the server resolves and validates their safe display data.
 type DynamicAgentProfileDTO struct {
-	Version    int64                      `json:"version"`
-	Candidates []DynamicAgentCandidateDTO `json:"candidates"`
+	Version int64 `json:"version"`
+	// PreferredTags and AvoidedTags are soft scheduling preferences matched
+	// against each candidate's concrete profile tags. They never discover
+	// candidates. A tag present in both lists is rejected during normalization.
+	PreferredTags []string                   `json:"preferred_tags"`
+	AvoidedTags   []string                   `json:"avoided_tags"`
+	Candidates    []DynamicAgentCandidateDTO `json:"candidates"`
 }
 
 // DynamicAgentPolicyDTO is the canonical, versioned policy document persisted

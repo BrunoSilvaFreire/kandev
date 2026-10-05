@@ -73,6 +73,7 @@ func workflowImportProfileCandidate(profile *agentsettingsmodels.AgentProfile) w
 		AgentName: profile.AgentDisplayName,
 		Model:     profile.Model,
 		Mode:      profile.Mode,
+		Tags:      profile.Tags,
 		UpdatedAt: profile.UpdatedAt,
 	}
 }

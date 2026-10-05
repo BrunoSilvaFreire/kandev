@@ -23,6 +23,7 @@ import (
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	analyticsservice "github.com/kandev/kandev/internal/analytics/service"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/azuredevops"
@@ -2192,12 +2193,53 @@ func buildAgentProfileResolver(repos *Repositories) wfmodels.AgentProfileResolve
 		if err != nil || profile == nil {
 			return nil
 		}
-		return &wfmodels.AgentProfilePortable{
+		portable := &wfmodels.AgentProfilePortable{
 			AgentName: profile.AgentDisplayName,
 			Model:     profile.Model,
 			Mode:      profile.Mode,
 		}
+		if profile.AgentID == agents.DynamicAgentID {
+			portable.Dynamic = dynamicProfileDescriptor(repos, profile)
+		}
+		return portable
 	}
+}
+
+// dynamicProfileDescriptor emits the portable Dynamic Profile shape so an
+// export round-trips its soft preferences and ordered candidates. A profile
+// that cannot be loaded resolves to a descriptor with no candidates rather
+// than failing the export.
+func dynamicProfileDescriptor(repos *Repositories, profile *agentsettingsmodels.AgentProfile) *wfmodels.DynamicAgentProfilePortable {
+	repo, ok := repos.AgentSettings.(settingsstore.DynamicProfileRepository)
+	if !ok {
+		return nil
+	}
+	config, routes, err := repo.GetDynamicAgentProfile(context.Background(), profile.ID)
+	if err != nil || config == nil {
+		return nil
+	}
+	descriptor := &wfmodels.DynamicAgentProfilePortable{
+		MigratedFrom:  profile.MigratedFrom,
+		PreferredTags: config.PreferredTags,
+		AvoidedTags:   config.AvoidedTags,
+		Candidates:    make([]wfmodels.DynamicAgentCandidatePortable, 0, len(routes)),
+	}
+	for _, route := range routes {
+		execution, execErr := repos.AgentSettings.GetAgentProfile(context.Background(), route.ExecutionProfileID)
+		if execErr != nil || execution == nil {
+			continue
+		}
+		descriptor.Candidates = append(descriptor.Candidates, wfmodels.DynamicAgentCandidatePortable{
+			AgentProfile: wfmodels.AgentProfilePortable{
+				AgentName: execution.AgentDisplayName,
+				Model:     execution.Model,
+				Mode:      execution.Mode,
+			},
+			CandidateProfileID: execution.ID,
+			Enabled:            route.Enabled,
+		})
+	}
+	return descriptor
 }
 
 // agentProfileStillMatches reports whether the profile with id still has the

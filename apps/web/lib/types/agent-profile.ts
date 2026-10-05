@@ -67,6 +67,13 @@ export type DynamicAgentCandidate = {
 
 export type DynamicAgentProfile = {
   version: number;
+  /**
+   * Soft scheduling preferences matched against each candidate's concrete
+   * profile tags. They never discover candidates and never override capacity or
+   * health. A tag cannot appear in both lists.
+   */
+  preferredTags: string[];
+  avoidedTags: string[];
   candidates: DynamicAgentCandidate[];
 };
 
@@ -254,6 +261,8 @@ export type AgentProfilePayload = {
   updated_at: string;
   dynamic?: {
     version: number;
+    preferred_tags?: string[];
+    avoided_tags?: string[];
     candidates: Array<{
       position: number;
       execution_profile_id: string;

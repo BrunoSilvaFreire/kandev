@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -80,7 +81,7 @@ func NewHandlers(ctrl *controller.Controller, executor InferenceExecutor, hostEx
 }
 
 // RegisterRoutes registers the utility agent routes.
-func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, executor InferenceExecutor, hostExecutor HostUtilityExecutor, userSettings UserSettingsProvider, log *logger.Logger) {
+func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, executor InferenceExecutor, hostExecutor HostUtilityExecutor, userSettings UserSettingsProvider, log *logger.Logger) *Handlers {
 	handlers := NewHandlers(ctrl, executor, hostExecutor, userSettings, log)
 	api := router.Group("/api/v1/utility")
 	api.GET("/agents", handlers.httpListAgents)
@@ -93,6 +94,7 @@ func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, executor In
 	api.GET("/agents/:id/calls", handlers.httpListCalls)
 	api.GET("/inference-agents", handlers.httpListInferenceAgents)
 	api.POST("/inference-agents/:id/refresh", handlers.httpRefreshInferenceAgent)
+	return handlers
 }
 
 func (h *Handlers) httpListAgents(c *gin.Context) {
@@ -191,25 +193,14 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, dto.ExecutePromptResponse{Error: "invalid payload"})
 		return
 	}
+	if err := dto.ValidateSelectedContext(req.SelectedContext); err != nil {
+		c.JSON(http.StatusBadRequest, dto.ExecutePromptResponse{Error: err.Error()})
+		return
+	}
 
 	ctx := c.Request.Context()
 
-	// Get default utility settings from user settings
-	var defaults *service.DefaultUtilitySettings
-	if h.userSettings != nil {
-		agentID, model, err := h.userSettings.GetDefaultUtilitySettings(ctx)
-		if err == nil && (agentID != "" || model != "") {
-			defaults = &service.DefaultUtilitySettings{AgentID: agentID, Model: model}
-		}
-		if profileProvider, ok := h.userSettings.(userUtilityProfileSettingsProvider); ok {
-			if profileID, profileErr := profileProvider.GetDefaultUtilityAgentProfileID(ctx); profileErr == nil {
-				if defaults == nil {
-					defaults = &service.DefaultUtilitySettings{}
-				}
-				defaults.ProfileID = profileID
-			}
-		}
-	}
+	defaults := h.resolveDefaultUtilitySettings(ctx)
 
 	sessionless := req.SessionID == ""
 
@@ -249,6 +240,58 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 		return
 	}
 	h.executeSessionPrompt(w, ctx, req, prepared, callID)
+}
+
+func (h *Handlers) resolveDefaultUtilitySettings(ctx context.Context) *service.DefaultUtilitySettings {
+	if h.userSettings == nil {
+		return nil
+	}
+	var defaults *service.DefaultUtilitySettings
+	if agentID, model, err := h.userSettings.GetDefaultUtilitySettings(ctx); err == nil && (agentID != "" || model != "") {
+		defaults = &service.DefaultUtilitySettings{AgentID: agentID, Model: model}
+	}
+	if profileID := h.resolveDefaultUtilityProfileID(ctx); profileID != "" {
+		if defaults == nil {
+			defaults = &service.DefaultUtilitySettings{}
+		}
+		defaults.ProfileID = profileID
+	}
+	return defaults
+}
+
+func (h *Handlers) resolveDefaultUtilityProfileID(ctx context.Context) string {
+	if profileProvider, ok := h.userSettings.(userUtilityProfileSettingsProvider); ok {
+		if profileID, err := profileProvider.GetDefaultUtilityAgentProfileID(ctx); err == nil {
+			return profileID
+		}
+	}
+	return ""
+}
+
+// ExecuteSessionlessPrompt runs a sessionless utility prompt by utility agent ID
+// and conversation history, resolving default utility settings and recording call status.
+func (h *Handlers) ExecuteSessionlessPrompt(ctx context.Context, utilityAgentID, conversationHistory string) (string, error) {
+	defaults := h.resolveDefaultUtilitySettings(ctx)
+	req := dto.ExecutePromptRequest{
+		UtilityAgentID:      utilityAgentID,
+		ConversationHistory: conversationHistory,
+	}
+	prepared, err := h.controller.PreparePromptRequest(ctx, req, defaults, true)
+	if err != nil {
+		return "", err
+	}
+	if prepared.AgentCLI == "" {
+		return "", lifecycle.ErrInferenceAgentIDRequired
+	}
+	callID, err := h.controller.CreateCall(ctx, req.UtilityAgentID, "", prepared.ResolvedPrompt, prepared.Model, prepared.AgentProfileID, prepared.ExecutionProfileID)
+	if err != nil {
+		return "", err
+	}
+	result, _, err := h.executeSessionlessPrepared(ctx, prepared, callID)
+	if err != nil {
+		return "", err
+	}
+	return result.Response, nil
 }
 
 // executeSessionPrompt runs a prompt against an existing task session's
@@ -327,50 +370,19 @@ func (h *Handlers) executeSessionless(
 	prepared *service.PromptRequest,
 	callID string,
 ) {
-	if h.hostExecutor == nil {
-		_ = h.controller.FailCall(ctx, callID, "host utility not configured", 0)
-		w.finish(http.StatusServiceUnavailable, dto.ExecutePromptResponse{
-			CallID: callID,
-			Error:  "host utility not configured; session_id is required",
-		})
-		return
-	}
 	if w.stream {
 		ctx = agentctlutil.WithProgressReporter(ctx, func(p agentctlutil.PromptProgress) {
 			w.progressFrame(p)
 		})
 		w.beginStream()
 	}
-	var result *hostutility.PromptResult
-	var err error
-	if prepared.AgentProfileID != "" {
-		profileExecutor, ok := h.hostExecutor.(profileHostUtilityExecutor)
-		if !ok {
-			_ = h.controller.FailCall(ctx, callID, "profile-aware host utility executor is unavailable", 0)
-			w.finish(http.StatusServiceUnavailable, dto.ExecutePromptResponse{CallID: callID, Error: "profile-aware host utility executor is unavailable"})
-			return
-		}
-		result, err = h.executeSessionlessProfilePrompt(ctx, profileExecutor, prepared, callID)
-	} else {
-		result, err = h.hostExecutor.ExecutePrompt(ctx, prepared.AgentCLI, prepared.Model, "", prepared.ResolvedPrompt)
-	}
+	result, status, err := h.executeSessionlessPrepared(ctx, prepared, callID)
 	if err != nil {
-		h.logger.Error("failed to execute sessionless prompt", zap.Error(err), zap.String("call_id", callID))
-		_ = h.controller.FailCall(ctx, callID, err.Error(), 0)
-		w.finish(http.StatusInternalServerError, dto.ExecutePromptResponse{
+		w.finish(status, dto.ExecutePromptResponse{
 			CallID: callID,
-			Error:  "failed to execute prompt: " + err.Error(),
+			Error:  err.Error(),
 		})
 		return
-	}
-	if result == nil {
-		const message = "host utility returned no response"
-		_ = h.controller.FailCall(ctx, callID, message, 0)
-		w.finish(http.StatusInternalServerError, dto.ExecutePromptResponse{CallID: callID, Error: message})
-		return
-	}
-	if err := h.controller.CompleteCall(ctx, callID, result.Response, result.PromptTokens, result.ResponseTokens, result.DurationMs); err != nil {
-		h.logger.Warn("failed to update call record", zap.Error(err), zap.String("call_id", callID))
 	}
 	w.finish(http.StatusOK, dto.ExecutePromptResponse{
 		Success:        true,
@@ -381,6 +393,44 @@ func (h *Handlers) executeSessionless(
 		ResponseTokens: result.ResponseTokens,
 		DurationMs:     result.DurationMs,
 	})
+}
+
+// executeSessionlessPrepared executes a prepared sessionless prompt request and records call status.
+func (h *Handlers) executeSessionlessPrepared(
+	ctx context.Context,
+	prepared *service.PromptRequest,
+	callID string,
+) (*hostutility.PromptResult, int, error) {
+	if h.hostExecutor == nil {
+		_ = h.controller.FailCall(ctx, callID, "host utility not configured", 0)
+		return nil, http.StatusServiceUnavailable, errors.New("host utility not configured; session_id is required")
+	}
+	var result *hostutility.PromptResult
+	var err error
+	if prepared.AgentProfileID != "" {
+		profileExecutor, ok := h.hostExecutor.(profileHostUtilityExecutor)
+		if !ok {
+			_ = h.controller.FailCall(ctx, callID, "profile-aware host utility executor is unavailable", 0)
+			return nil, http.StatusServiceUnavailable, errors.New("profile-aware host utility executor is unavailable")
+		}
+		result, err = h.executeSessionlessProfilePrompt(ctx, profileExecutor, prepared, callID)
+	} else {
+		result, err = h.hostExecutor.ExecutePrompt(ctx, prepared.AgentCLI, prepared.Model, "", prepared.ResolvedPrompt)
+	}
+	if err != nil {
+		h.logger.Error("failed to execute sessionless prompt", zap.Error(err), zap.String("call_id", callID))
+		_ = h.controller.FailCall(ctx, callID, err.Error(), 0)
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to execute prompt: %w", err)
+	}
+	if result == nil {
+		const message = "host utility returned no response"
+		_ = h.controller.FailCall(ctx, callID, message, 0)
+		return nil, http.StatusInternalServerError, errors.New(message)
+	}
+	if err := h.controller.CompleteCall(ctx, callID, result.Response, result.PromptTokens, result.ResponseTokens, result.DurationMs); err != nil {
+		h.logger.Warn("failed to update call record", zap.Error(err), zap.String("call_id", callID))
+	}
+	return result, http.StatusOK, nil
 }
 
 func utilityFailure(storedErr error, response string, providerID string) *routingerr.Error {

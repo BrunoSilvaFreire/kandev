@@ -50,6 +50,8 @@ const dynamicProfile: AgentProfile = {
   updatedAt: "2026-01-01T00:00:00Z",
   dynamic: {
     version: 1,
+    preferredTags: [],
+    avoidedTags: [],
     candidates: [
       {
         position: 0,

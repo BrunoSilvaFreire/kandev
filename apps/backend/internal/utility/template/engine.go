@@ -28,6 +28,7 @@ type Context struct {
 
 	// Conversation
 	ConversationHistory string // Formatted conversation transcript (for summarize-session)
+	SelectedContext     string // Explicit, labelled context selected by the user
 
 	// Custom key-value pairs for extensibility
 	Custom map[string]string
@@ -95,6 +96,7 @@ func (e *Engine) buildTemplateData(ctx *Context) map[string]string {
 		"WorkspacePath":       ctx.WorkspacePath,
 		"UserPrompt":          ctx.UserPrompt,
 		"ConversationHistory": ctx.ConversationHistory,
+		"SelectedContext":     ctx.SelectedContext,
 	}
 
 	// Add custom key-value pairs
@@ -122,6 +124,7 @@ func (e *Engine) AvailableVariables() []VariableInfo {
 		{Name: "WorkspacePath", Description: "Path to the workspace/worktree", Example: "/home/user/project", Category: "session"},
 		{Name: "UserPrompt", Description: "User's original prompt text", Example: "Fix the login bug", Category: "input"},
 		{Name: "ConversationHistory", Description: "Formatted conversation transcript", Example: "User: Fix the bug\nAgent: I'll look into...", Category: "session"},
+		{Name: "SelectedContext", Description: "Explicit user-selected context", Example: "[Spec]\nUse the rate-limit contract", Category: "input"},
 	}
 }
 

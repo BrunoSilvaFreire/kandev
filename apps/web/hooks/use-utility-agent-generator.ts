@@ -6,6 +6,7 @@ import {
   executeUtilityPrompt,
   type ExecutePromptRequest,
   type ExecutePromptProgress,
+  type SelectedContextItem,
 } from "@/lib/api/domains/utility-api";
 import { useToast } from "@/components/toast-provider";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
@@ -49,6 +50,7 @@ type GenerateOptions = {
   diffSummary?: string;
   // User's original prompt for enhancement
   userPrompt?: string;
+  selectedContext?: SelectedContextItem[];
 };
 
 // useGenerationPhases tracks one live progress phase per generator type and
@@ -130,6 +132,7 @@ export function useUtilityAgentGenerator({
         commit_log: options?.commitLog,
         diff_summary: options?.diffSummary,
         user_prompt: options?.userPrompt,
+        selected_context: options?.selectedContext,
       };
     },
     [sessionId, taskTitle, taskDescription, collectGitContext],
@@ -239,8 +242,8 @@ function useGeneratorCallbacks(
   );
 
   const enhancePrompt = useCallback(
-    (userPrompt: string, onSuccess: ResultDelivery) =>
-      generate(ENHANCE_PROMPT, { onSuccess, userPrompt }),
+    (userPrompt: string, onSuccess: ResultDelivery, selectedContext?: SelectedContextItem[]) =>
+      generate(ENHANCE_PROMPT, { onSuccess, userPrompt, selectedContext }),
     [generate],
   );
 

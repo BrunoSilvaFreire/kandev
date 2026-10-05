@@ -85,3 +85,16 @@ Reuse the existing localized Blank and summary labels.
 
 [Blank handoff context](../../../plans/handoff-blank-context/plan.md) records the
 completed correction and its implementation evidence.
+
+## Fork refinement (2026-09-25): handoff destination step
+
+`HandoffPreset` gains an optional `targetStepId`; `HandoffStepSelect` renders
+the eligible destinations and defaults to `HANDOFF_STAY_IN_STEP`.
+`useSessionLaunchSubmit` accepts an optional `onLaunched(sessionId)` callback
+that runs after `activateSession` and before `onClose`. The handoff passes
+`useHandoffStepMove`, which awaits `session.set_primary`, then calls the
+existing move API (`moveTask`) with the chosen step. The contract is
+deterministic and testable without a dev instance: the submit-ordering test
+pins launch → primary promotion → local activation → move, and the handoff E2E
+confirms the task arrives at the chosen step. No explicit source-session
+parameter is needed; `resolvePrimaryOrActiveSession` reads the durable primary.

@@ -39,6 +39,7 @@ type ImportProfileCandidate struct {
 	AgentName string    `json:"agent_name"`
 	Model     string    `json:"model"`
 	Mode      string    `json:"mode"`
+	Tags      []string  `json:"tags,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
@@ -153,6 +154,7 @@ func validateImportExport(export *models.WorkflowExport) error {
 func collectImportProfileSteps(
 	export *models.WorkflowExport,
 	existingNames map[string]bool,
+	skipDynamic bool,
 ) ([]string, []ImportProfileStep) {
 	skipped := make([]string, 0)
 	steps := make([]ImportProfileStep, 0)
@@ -162,7 +164,7 @@ func collectImportProfileSteps(
 			continue
 		}
 		for _, step := range workflow.Steps {
-			if step.AgentProfile == nil {
+			if step.AgentProfile == nil || (skipDynamic && isDynamicPortableStep(step)) {
 				continue
 			}
 			steps = append(steps, ImportProfileStep{
@@ -354,7 +356,24 @@ func (s *Service) importProfilePreviewData(
 		return nil, err
 	}
 
-	skipped, steps := collectImportProfileSteps(export, existingNames)
+	// Preview the same converted view that ImportWorkflowsWithBindings will
+	// resolve, so a step the provisioner will claim is never presented for a
+	// manual binding (which would then fail as an unknown step).
+	previewExport := export
+	skipDynamic := s.dynamicProvisioner != nil
+	if skipDynamic {
+		snapshot, snapErr := s.concreteProfileSnapshots(ctx)
+		if snapErr != nil {
+			return nil, snapErr
+		}
+		converted, convErr := models.ConvertTaggedWorkflows(export, snapshot, workspaceID, existingNames)
+		if convErr != nil {
+			return nil, convErr
+		}
+		previewExport = converted
+	}
+
+	skipped, steps := collectImportProfileSteps(previewExport, existingNames, skipDynamic)
 	preview := &ImportProfilePreview{
 		Skipped:  skipped,
 		Profiles: make([]ImportProfileCandidate, 0),
@@ -383,11 +402,11 @@ func (s *Service) PreviewImportWorkflows(
 	return s.importProfilePreviewData(ctx, export, workspaceID)
 }
 
-func expectedImportProfileSteps(export *models.WorkflowExport) map[string]models.StepPortable {
+func expectedImportProfileSteps(export *models.WorkflowExport, skipDynamic bool) map[string]models.StepPortable {
 	expected := make(map[string]models.StepPortable)
 	for workflowIndex, workflow := range export.Workflows {
 		for _, step := range workflow.Steps {
-			if step.AgentProfile == nil {
+			if step.AgentProfile == nil || (skipDynamic && isDynamicPortableStep(step)) {
 				continue
 			}
 			expected[importProfileKey(workflowIndex, step.Position)] = step
@@ -468,7 +487,7 @@ func (s *Service) resolveImportProfileBindings(
 			continue
 		}
 		for _, step := range workflow.Steps {
-			if step.AgentProfile == nil {
+			if step.AgentProfile == nil || s.dynamicStepNeedsProvisioning(step) {
 				continue
 			}
 			key := importProfileKey(workflowIndex, step.Position)
@@ -552,8 +571,15 @@ func (s *Service) ImportWorkflowsWithBindings(
 	if err != nil {
 		return nil, err
 	}
+	export, dynamicBindings, err := s.convertLegacyTaggedExport(ctx, workspaceID, export, existingNames)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateImportExport(export); err != nil {
+		return nil, err
+	}
 
-	expected := expectedImportProfileSteps(export)
+	expected := expectedImportProfileSteps(export, s.dynamicProvisioner != nil)
 	byKey, err := validateImportProfileBindings(bindings, expected)
 	if err != nil {
 		return nil, err
@@ -565,6 +591,7 @@ func (s *Service) ImportWorkflowsWithBindings(
 	if len(conflicts) > 0 {
 		return nil, &ImportProfileResolutionError{Conflicts: conflicts}
 	}
+	mergeDynamicBindings(directProfileIDs, dynamicBindings)
 
 	prepared, result, err := s.prepareImportedWorkflows(ctx, export, existingNames, directProfileIDs)
 	if err != nil {

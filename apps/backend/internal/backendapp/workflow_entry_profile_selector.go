@@ -137,6 +137,7 @@ func (s *workflowEntryProfileSelector) eligibleCandidates(
 			candidates = append(candidates, selection.Candidate{
 				ProfileID: profile.ID,
 				Tags:      profile.Tags,
+				Model:     profile.Model,
 			})
 		}
 	}

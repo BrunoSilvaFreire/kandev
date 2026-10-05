@@ -38,6 +38,11 @@ export type DynamicAgentProfileEditorState = {
   availableProfileOptions: ReturnType<typeof toAgentProfileOption>[];
   updateName: (name: string) => void;
   updateProfileEnabled: (enabled: boolean) => void;
+  updatePreferredTags: (tags: string[]) => void;
+  updateAvoidedTags: (tags: string[]) => void;
+  preferredTags: string[];
+  avoidedTags: string[];
+  preferenceConflict: string | null;
   addCandidate: (executionProfileId: string) => void;
   moveCandidate: (index: number, direction: -1 | 1) => void;
   removeCandidate: (index: number) => void;
@@ -51,17 +56,66 @@ export type DynamicAgentProfileEditorState = {
   discardDraft: () => void;
 };
 
-function dynamicProfilePayload(
-  name: string,
-  enabled: boolean,
-  version: number,
-  candidates: DynamicAgentCandidate[],
-) {
+export function dynamicTagConflict(preferred: string[], avoided: string[]): string | null {
+  const preferredSet = new Set(preferred);
+  return avoided.find((tag) => preferredSet.has(tag)) ?? null;
+}
+
+type DraftGateInput = {
+  routingEnabled: boolean;
+  saving: boolean;
+  hasExternalConflict: boolean;
+  preferenceConflict: string | null;
+  name: string;
+  candidateCount: number;
+  policiesValid: boolean;
+};
+
+function canSaveDynamicDraft(input: DraftGateInput): boolean {
+  return (
+    input.routingEnabled &&
+    !input.saving &&
+    !input.hasExternalConflict &&
+    !input.preferenceConflict &&
+    Boolean(input.name.trim()) &&
+    input.candidateCount > 0 &&
+    input.policiesValid
+  );
+}
+
+function resolveDraftInvalidReason(input: {
+  name: string;
+  candidateCount: number;
+  preferenceConflict: string | null;
+  hasExternalConflict: boolean;
+  t: (key: string, options?: Record<string, unknown>) => string;
+}): string {
+  if (!input.name.trim()) return input.t("agents:profileNameRequired");
+  if (input.candidateCount === 0) return input.t("agents:noDynamicCandidates");
+  if (input.preferenceConflict)
+    return input.t("agents:dynamicPreferenceConflict", { tag: input.preferenceConflict });
+  if (input.hasExternalConflict) return input.t("agents:profileExternalChangeInvalidReason");
+  return input.t("agents:dynamicPolicyValidation");
+}
+
+type DynamicProfilePayloadInput = {
+  name: string;
+  enabled: boolean;
+  version: number;
+  preferredTags: string[];
+  avoidedTags: string[];
+  candidates: DynamicAgentCandidate[];
+};
+
+export function dynamicProfilePayload(input: DynamicProfilePayloadInput) {
+  const { name, enabled, version, preferredTags, avoidedTags, candidates } = input;
   return {
     name: name.trim(),
     enabled,
     dynamic: {
       version,
+      preferred_tags: preferredTags,
+      avoided_tags: avoidedTags,
       candidates: candidates.map((candidate, position) => ({
         position,
         execution_profile_id: candidate.executionProfileId,
@@ -144,13 +198,19 @@ export function useDynamicAgentProfileEditorState({
     [draft.candidates, settingsAgents],
   );
 
+  const preferenceConflict = dynamicTagConflict(draft.preferredTags, draft.avoidedTags);
   const save = async () => {
     if (
-      !routingEnabled ||
-      !draft.name.trim() ||
-      draft.candidates.length === 0 ||
       !profile.dynamic ||
-      draft.hasExternalConflict
+      !canSaveDynamicDraft({
+        routingEnabled,
+        saving: false,
+        hasExternalConflict: draft.hasExternalConflict,
+        preferenceConflict,
+        name: draft.name,
+        candidateCount: draft.candidates.length,
+        policiesValid: true,
+      })
     ) {
       return;
     }
@@ -161,17 +221,16 @@ export function useDynamicAgentProfileEditorState({
       const draftPayload = {
         name: draft.name.trim(),
         enabled: draft.profileEnabled,
-        dynamic: {
-          version: draft.dynamicVersion,
-          candidates: draft.candidates,
-        },
+        dynamic: submitted.dynamic,
       };
-      const payload = dynamicProfilePayload(
-        draft.name,
-        draft.profileEnabled,
-        draft.dynamicVersion,
-        draft.candidates,
-      );
+      const payload = dynamicProfilePayload({
+        name: draft.name,
+        enabled: draft.profileEnabled,
+        version: draft.dynamicVersion,
+        preferredTags: draft.preferredTags,
+        avoidedTags: draft.avoidedTags,
+        candidates: draft.candidates,
+      });
       if (onDraftChange) {
         onDraftChange(draftPayload);
         return;
@@ -208,9 +267,17 @@ export function useDynamicAgentProfileEditorState({
     }
   };
 
-  const draftRevision = dynamicDraftRevision(draft.name, draft.candidates, draft.profileEnabled);
+  const draftRevision = dynamicDraftRevision(
+    draft.name,
+    draft.preferredTags,
+    draft.avoidedTags,
+    draft.candidates,
+    draft.profileEnabled,
+  );
   const savedRevision = dynamicDraftRevision(
     draft.savedProfile.name,
+    draft.savedProfile.dynamic?.preferredTags ?? [],
+    draft.savedProfile.dynamic?.avoidedTags ?? [],
     draft.savedProfile.dynamic?.candidates ?? [],
     draft.savedProfile.enabled !== false,
   );
@@ -219,22 +286,26 @@ export function useDynamicAgentProfileEditorState({
       isDynamicErrorPolicyValid(candidate.policies.transient) &&
       isDynamicErrorPolicyValid(candidate.policies.hard),
   );
-  let invalidReason = t("agents:dynamicPolicyValidation");
-  if (!draft.name.trim()) invalidReason = t("agents:profileNameRequired");
-  else if (draft.candidates.length === 0) invalidReason = t("agents:noDynamicCandidates");
-  else if (draft.hasExternalConflict)
-    invalidReason = t("agents:profileExternalChangeInvalidReason");
+  const invalidReason = resolveDraftInvalidReason({
+    name: draft.name,
+    candidateCount: draft.candidates.length,
+    preferenceConflict,
+    hasExternalConflict: draft.hasExternalConflict,
+    t,
+  });
   useSettingsSaveContributor({
     id: `dynamic-profile:${profile.id}`,
     revision: draftRevision,
     isDirty: standalone && draftRevision !== savedRevision,
-    canSave:
-      routingEnabled &&
-      !saving &&
-      !draft.hasExternalConflict &&
-      Boolean(draft.name.trim()) &&
-      draft.candidates.length > 0 &&
+    canSave: canSaveDynamicDraft({
+      routingEnabled,
+      saving,
+      hasExternalConflict: draft.hasExternalConflict,
+      preferenceConflict,
+      name: draft.name,
+      candidateCount: draft.candidates.length,
       policiesValid,
+    }),
     invalidReason,
     save,
     discard: () => {
@@ -254,6 +325,11 @@ export function useDynamicAgentProfileEditorState({
     availableProfileOptions,
     updateName: draft.updateName,
     updateProfileEnabled: draft.updateProfileEnabled,
+    updatePreferredTags: draft.updatePreferredTags,
+    updateAvoidedTags: draft.updateAvoidedTags,
+    preferredTags: draft.preferredTags,
+    avoidedTags: draft.avoidedTags,
+    preferenceConflict,
     addCandidate: draft.addCandidate,
     moveCandidate: draft.moveCandidate,
     removeCandidate: draft.removeCandidate,

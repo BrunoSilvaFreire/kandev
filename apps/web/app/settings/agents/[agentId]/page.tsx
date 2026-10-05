@@ -31,6 +31,7 @@ import { SettingsRedirect } from "@/src/settings-route-helpers";
 import { saveNewAgent, saveExistingAgent, isProfileDirty } from "./agent-save-helpers";
 import type { DraftProfile, DraftAgent } from "./agent-save-helpers";
 import { AgentHeader, ProfilesCard } from "./agent-setup-parts";
+import { UsageCredentialCard } from "./usage-credential-card";
 import { isHandledApiError } from "@/lib/api/client";
 
 const defaultMcpConfig: NonNullable<DraftProfile["mcp_config"]> = {
@@ -57,7 +58,10 @@ const createDraftProfile = (
 ): DraftProfile => ({
   id: toAgentProfileId(`draft-${generateUUID()}`),
   kind,
-  dynamic: kind === "dynamic" ? { version: 1, candidates: [] } : undefined,
+  dynamic:
+    kind === "dynamic"
+      ? { version: 1, preferredTags: [], avoidedTags: [], candidates: [] }
+      : undefined,
   agentId,
   name: "",
   agentDisplayName,
@@ -440,6 +444,7 @@ function AgentSetupForm({
         onDelete={canManage ? handleDeleteAgent : undefined}
       />
       <Separator />
+      <UsageCredentialCard agentType={draftAgent.name} />
       <ProfilesCard
         displayName={displayName}
         isCreateMode={isCreateMode}

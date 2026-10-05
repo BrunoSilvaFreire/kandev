@@ -67,6 +67,7 @@ import (
 	runtimeskill "github.com/kandev/kandev/internal/agent/runtime/lifecycle/skill"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	agentusage "github.com/kandev/kandev/internal/agent/usage"
 	agentctltracing "github.com/kandev/kandev/internal/agentctl/tracing"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/utility/profilebinding"
@@ -968,6 +969,18 @@ func startAgentInfrastructure(
 	// and the settings batch endpoint so credential-path cache sharing is
 	// preserved across all three.
 	usageAdapter := newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
+	// Dynamic Profile schedule-time ranking reuses the same subscription-usage
+	// adapter as Office and the legacy workflow selector, preserving
+	// credential-path cache sharing across all consumers.
+	if services.DynamicProfileResolver != nil {
+		services.DynamicProfileResolver.SetUsageProvider(usageAdapter)
+	}
+	// Legacy tagged workflow documents convert into generated Dynamic Profiles
+	// only where dynamic routing can resolve them. With the flag off, imports
+	// and syncs keep the legacy tagged behavior unchanged.
+	if services.Workflow != nil && services.DynamicProfileResolver != nil && services.DynamicProfileResolver.Enabled() {
+		services.Workflow.SetDynamicProfileProvisioner(newGeneratedDynamicProvisioner(repos, log))
+	}
 	entryProfileSelector := newWorkflowEntryProfileSelector(repos.AgentSettings, agentRegistry, usageAdapter, log)
 	services.Task.SetWorkflowEntryProfileSelector(entryProfileSelector)
 	orchestratorSvc.SetWorkflowEntryProfileSelector(entryProfileSelector)
@@ -2822,6 +2835,21 @@ func buildHTTPServer(
 		}
 		return err
 	})
+	usageAdapter.opencodeCookie = secretByName(secretsSvc, agentusage.OpenCodeGoCookieSecretName)
+	usageAdapter.junieAPIKey = secretByName(secretsSvc, agentusage.JunieAPIKeySecretName)
+	// Provider usage history shares the usage adapter's live fetch path: the
+	// adapter's cache recorder feeds measured observations, and the lifecycle
+	// manager records classified quota/rate-limit failures. Neither adds a
+	// second provider poll.
+	osHome, _ := os.UserHomeDir()
+	providerUsageSvc, providerUsageErr := buildProviderUsageService(dbPool, usageAdapter, repos.AgentSettings, osHome, log)
+	if providerUsageErr != nil {
+		return nil, providerUsageErr
+	}
+	usageAdapter.limitHits = providerUsageSvc.Repository()
+	usageAdapter.svc.SetRecorder(providerUsageSvc.RecordLive)
+	lifecycleMgr.SetQuotaSignalRecorder(providerUsageSvc)
+
 	registerRoutes(routeParams{
 		router:                        router,
 		gateway:                       gateway,
@@ -2845,6 +2873,8 @@ func buildHTTPServer(
 		agentSettingsController:       agentSettingsController,
 		agentSettingsRepo:             repos.AgentSettings,
 		profileUsageProvider:          usageAdapter,
+		usageAdapter:                  usageAdapter,
+		providerUsageSvc:              providerUsageSvc,
 		agentList:                     agentRegistry,
 		agentRegistry:                 agentRegistry,
 		userCtrl:                      usercontroller.NewController(services.User),
@@ -2969,5 +2999,33 @@ func migrateDefaultUtilityProfile(
 	profileID := profile.ID
 	if _, err := userSvc.UpdateUserSettings(ctx, &userservice.UpdateUserSettingsRequest{DefaultUtilityAgentProfileID: &profileID}); err != nil {
 		log.Warn("failed to persist migrated default utility profile", zap.Error(err))
+	}
+}
+
+// secretByName returns a lookup that reveals the global secret with the exact
+// name, preferring a global-scope item over a workspace copy. A missing secret
+// is an empty value, not an error, so callers report "credentials missing".
+func secretByName(secretsSvc *secrets.Service, name string) func(context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) {
+		items, err := secretsSvc.List(ctx)
+		if err != nil {
+			return "", err
+		}
+		var fallback *secrets.SecretListItem
+		for _, item := range items {
+			if item.Name != name {
+				continue
+			}
+			if item.Scope == secrets.ScopeGlobal {
+				return secretsSvc.Reveal(ctx, item.ID)
+			}
+			if fallback == nil {
+				fallback = item
+			}
+		}
+		if fallback != nil {
+			return secretsSvc.Reveal(ctx, fallback.ID)
+		}
+		return "", nil
 	}
 }

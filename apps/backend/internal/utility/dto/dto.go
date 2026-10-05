@@ -1,11 +1,46 @@
 package dto
 
 import (
+	"errors"
 	"time"
 
 	"github.com/kandev/kandev/internal/utility/models"
 	"github.com/kandev/kandev/internal/utility/template"
 )
+
+const (
+	maxSelectedContextItems = 8
+	maxSelectedContextBytes = 32 * 1024
+)
+
+var ErrInvalidSelectedContext = errors.New("invalid selected context")
+
+// SelectedContextItem is one explicitly selected, bounded prompt input.
+type SelectedContextItem struct {
+	Kind  string `json:"kind"`
+	Label string `json:"label"`
+	Text  string `json:"text"`
+}
+
+// ValidateSelectedContext keeps utility prompts bounded before template resolution.
+func ValidateSelectedContext(items []SelectedContextItem) error {
+	if len(items) > maxSelectedContextItems {
+		return ErrInvalidSelectedContext
+	}
+	total := 0
+	for _, item := range items {
+		switch item.Kind {
+		case "document", "document_selection", "session", "step_visit":
+		default:
+			return ErrInvalidSelectedContext
+		}
+		total += len(item.Label) + len(item.Text)
+		if total > maxSelectedContextBytes {
+			return ErrInvalidSelectedContext
+		}
+	}
+	return nil
+}
 
 // UtilityAgentDTO represents a utility agent for API responses.
 type UtilityAgentDTO struct {
@@ -132,16 +167,17 @@ type ExecutePromptRequest struct {
 	SessionID string `json:"session_id"`
 
 	// Context variables for template resolution.
-	GitDiff             string `json:"git_diff,omitempty"`
-	CommitLog           string `json:"commit_log,omitempty"`
-	ChangedFiles        string `json:"changed_files,omitempty"`
-	DiffSummary         string `json:"diff_summary,omitempty"`
-	BranchName          string `json:"branch_name,omitempty"`
-	BaseBranch          string `json:"base_branch,omitempty"`
-	TaskTitle           string `json:"task_title,omitempty"`
-	TaskDescription     string `json:"task_description,omitempty"`
-	UserPrompt          string `json:"user_prompt,omitempty"`
-	ConversationHistory string `json:"conversation_history,omitempty"`
+	GitDiff             string                `json:"git_diff,omitempty"`
+	CommitLog           string                `json:"commit_log,omitempty"`
+	ChangedFiles        string                `json:"changed_files,omitempty"`
+	DiffSummary         string                `json:"diff_summary,omitempty"`
+	BranchName          string                `json:"branch_name,omitempty"`
+	BaseBranch          string                `json:"base_branch,omitempty"`
+	TaskTitle           string                `json:"task_title,omitempty"`
+	TaskDescription     string                `json:"task_description,omitempty"`
+	UserPrompt          string                `json:"user_prompt,omitempty"`
+	ConversationHistory string                `json:"conversation_history,omitempty"`
+	SelectedContext     []SelectedContextItem `json:"selected_context,omitempty"`
 }
 
 // ExecutePromptResponse is the response from executing a utility prompt.

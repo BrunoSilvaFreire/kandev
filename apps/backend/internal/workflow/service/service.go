@@ -34,6 +34,7 @@ type Service struct {
 	resolveProfile       models.AgentProfileResolver
 	matchProfile         models.AgentProfileMatcher
 	importProfileCatalog ImportProfileCatalog
+	dynamicProvisioner   DynamicProfileProvisioner
 	syncOps              SyncWorkflowOps
 	sessionAccessChecker func(context.Context, string) error
 	// workflowAccessChecker / workspaceAccessChecker carry the task domain's
@@ -757,13 +758,21 @@ func (s *Service) ImportWorkflows(ctx context.Context, workspaceID string, expor
 		existingNames[wf.Name] = true
 	}
 
+	export, dynamicBindings, err := s.convertLegacyTaggedExport(ctx, workspaceID, export, existingNames)
+	if err != nil {
+		return nil, err
+	}
+	if err := export.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid export data: %w", err)
+	}
+
 	result := &ImportResult{}
-	for _, pw := range export.Workflows {
+	for index, pw := range export.Workflows {
 		if existingNames[pw.Name] {
 			result.Skipped = append(result.Skipped, pw.Name)
 			continue
 		}
-		if _, err := s.importSingleWorkflow(ctx, workspaceID, pw); err != nil {
+		if _, err := s.importSingleWorkflow(ctx, workspaceID, pw, dynamicBindingsForWorkflow(dynamicBindings, index)); err != nil {
 			return nil, fmt.Errorf("failed to import workflow %q: %w", pw.Name, err)
 		}
 		result.Created = append(result.Created, pw.Name)
@@ -776,28 +785,20 @@ func (s *Service) ImportWorkflows(ctx context.Context, workspaceID string, expor
 	return result, nil
 }
 
-func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, pw models.WorkflowPortable) (*taskmodels.Workflow, error) {
+func (s *Service) importSingleWorkflow(
+	ctx context.Context,
+	workspaceID string,
+	pw models.WorkflowPortable,
+	dynamicBindings map[int]string,
+) (*taskmodels.Workflow, error) {
 	// Generate UUIDs for all steps and build position→ID map.
 	posToID := make(map[int]string, len(pw.Steps))
 	for _, sp := range pw.Steps {
 		posToID[sp.Position] = uuid.New().String()
 	}
-
-	// Build and validate every step before creating the workflow or persisting
-	// any step. This keeps imports atomic with respect to validation failures.
-	steps := make([]*models.WorkflowStep, 0, len(pw.Steps))
-	for _, sp := range pw.Steps {
-		step := s.stepFromPortable("pending-workflow", sp, posToID, "")
-		if err := models.ValidateWorkflowStep(step); err != nil {
-			return nil, fmt.Errorf("validate step %q: %w", sp.Name, err)
-		}
-		if err := s.validateImportedStepReferences(ctx, step, sp.Name); err != nil {
-			return nil, err
-		}
-		steps = append(steps, step)
-	}
-	if err := validateWorkflowSessionTargets(steps); err != nil {
-		return nil, fmt.Errorf("validate workflow session targets: %w", err)
+	steps, err := s.buildImportedSteps(ctx, pw, posToID, dynamicBindings)
+	if err != nil {
+		return nil, err
 	}
 
 	wf, err := s.workflowProvider.CreateWorkflow(ctx, workspaceID, pw.Name, pw.Description)
@@ -830,6 +831,35 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 		}
 	}
 	return wf, nil
+}
+
+// buildImportedSteps builds and validates every step before the workflow or
+// any step is persisted. This keeps imports atomic with respect to validation
+// failures: a malformed step leaves no partial workflow behind.
+func (s *Service) buildImportedSteps(
+	ctx context.Context,
+	pw models.WorkflowPortable,
+	posToID map[int]string,
+	dynamicBindings map[int]string,
+) ([]*models.WorkflowStep, error) {
+	steps := make([]*models.WorkflowStep, 0, len(pw.Steps))
+	for _, sp := range pw.Steps {
+		step := s.stepFromPortable("pending-workflow", sp, posToID, "")
+		if profileID := dynamicBindings[sp.Position]; profileID != "" {
+			step.AgentProfileID = profileID
+		}
+		if err := models.ValidateWorkflowStep(step); err != nil {
+			return nil, fmt.Errorf("validate step %q: %w", sp.Name, err)
+		}
+		if err := s.validateImportedStepReferences(ctx, step, sp.Name); err != nil {
+			return nil, err
+		}
+		steps = append(steps, step)
+	}
+	if err := validateWorkflowSessionTargets(steps); err != nil {
+		return nil, fmt.Errorf("validate workflow session targets: %w", err)
+	}
+	return steps, nil
 }
 
 // validateImportedStepReferences authorizes the tasks an imported step would

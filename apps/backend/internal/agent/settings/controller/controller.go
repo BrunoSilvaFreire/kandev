@@ -60,6 +60,7 @@ var (
 	ErrDynamicProfilePositions              = errors.New("dynamic profile candidate positions must be contiguous")
 	ErrDynamicProfileRule                   = errors.New("unsupported dynamic profile rule")
 	ErrDynamicProfileCandidate              = errors.New("invalid dynamic profile candidate")
+	ErrInvalidDynamicPreferences            = errors.New("invalid dynamic profile scheduling preferences")
 	ErrDynamicProfileVersionConflict        = store.ErrDynamicProfileVersionConflict
 	ErrDynamicProfileDuplicationUnsupported = errors.New("dynamic profile duplication is not supported")
 )

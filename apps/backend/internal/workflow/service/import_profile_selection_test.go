@@ -217,7 +217,7 @@ func TestValidateImportProfileBindingsRejectsMalformedBindingSets(t *testing.T) 
 			Steps: []models.StepPortable{{Name: "Build", Position: 0, AgentProfile: requested}},
 		}},
 	}
-	expected := expectedImportProfileSteps(export)
+	expected := expectedImportProfileSteps(export, false)
 
 	tests := []struct {
 		name     string

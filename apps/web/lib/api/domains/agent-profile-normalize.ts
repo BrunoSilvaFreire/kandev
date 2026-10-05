@@ -176,6 +176,11 @@ function normalizeDynamicPolicy(
   };
 }
 
+function pickDynamicTags(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((tag): tag is string => typeof tag === "string");
+}
+
 function pickDynamic(raw: RawProfile): DynamicAgentProfile | undefined {
   const value = raw.dynamic;
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
@@ -184,6 +189,8 @@ function pickDynamic(raw: RawProfile): DynamicAgentProfile | undefined {
   const candidates = Array.isArray(document.candidates) ? document.candidates : [];
   return {
     version,
+    preferredTags: pickDynamicTags(document.preferredTags ?? document.preferred_tags),
+    avoidedTags: pickDynamicTags(document.avoidedTags ?? document.avoided_tags),
     candidates: candidates.flatMap((candidate) => {
       if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
       const item = candidate as Record<string, unknown>;
@@ -317,6 +324,8 @@ export function toAgentProfilePayload(
   if (profile.dynamic) {
     payload.dynamic = {
       version: profile.dynamic.version,
+      preferred_tags: profile.dynamic.preferredTags,
+      avoided_tags: profile.dynamic.avoidedTags,
       candidates: profile.dynamic.candidates.map((candidate) => {
         const policy = candidate.policies ?? legacyRulesToPolicy(candidate.rules ?? {});
         return {

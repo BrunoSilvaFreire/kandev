@@ -55,6 +55,25 @@ describe("useUtilityAgentGenerator enhancePrompt", () => {
     expect(result.current.isEnhancingPrompt).toBe(false);
   });
 
+  it("sends only the explicitly selected enhancement context", async () => {
+    mockExecuteUtilityPrompt.mockResolvedValue({ success: true, response: "improved" });
+    const { result } = renderHook(() => useUtilityAgentGenerator({ sessionId: null }));
+
+    await act(async () => {
+      await result.current.enhancePrompt("original", () => true, [
+        { kind: "document", label: "Spec", text: "Keep retries bounded." },
+      ]);
+    });
+
+    expect(mockExecuteUtilityPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_prompt: "original",
+        selected_context: [{ kind: "document", label: "Spec", text: "Keep retries bounded." }],
+      }),
+      expect.any(Object),
+    );
+  });
+
   it("does not toast when delivery declines the result", async () => {
     mockExecuteUtilityPrompt.mockResolvedValue({ success: true, response: "improved" });
     const { result } = renderHook(() => useUtilityAgentGenerator({ sessionId: null }));

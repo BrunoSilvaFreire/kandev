@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agent/runtime/routingpolicy"
+	"github.com/kandev/kandev/internal/agent/selection"
 )
 
 type Action string
@@ -40,6 +41,17 @@ type Candidate struct {
 	BindingKey string
 	Rules      map[string]Action
 	Policies   routingpolicy.Document
+	// Tags are the concrete profile's canonical tags and QuotaState/Remaining
+	// its bounded live capacity. Reason is the closed schedule-time selection
+	// reason the resolver assigned to this candidate; the engine persists it
+	// for a fresh selection when no explicit manual/policy reason was given.
+	Tags       []string
+	QuotaState selection.QuotaState
+	Remaining  float64
+	Reason     string
+	// Model is the concrete profile's model. It scopes a model-specific quota
+	// bucket so an unrelated model's exhaustion cannot disable this candidate.
+	Model string
 }
 
 type Profile struct {
