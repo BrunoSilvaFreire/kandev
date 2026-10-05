@@ -208,6 +208,7 @@ export type UserSettings = {
   unread_divider?: boolean;
   agent_generated_task_titles?: boolean;
   auto_focus_new_tasks?: boolean;
+  agent_tab_close_behavior?: "delete_session" | "hide_panel";
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
   show_release_notification?: boolean;
   release_notes_last_seen_version?: string;
@@ -229,6 +230,7 @@ export type UserSettings = {
   sidebar_task_colors?: SidebarTaskColorsApi;
   task_create_last_used?: TaskCreateLastUsedApi;
   jira_saved_views?: unknown;
+  jira_default_view_id?: string;
   jira_task_presets?: unknown;
   github_saved_presets?: unknown;
   github_default_query_presets?: unknown;
@@ -291,6 +293,7 @@ export type UserSettingsUpdatePayload = {
   unread_divider?: boolean;
   agent_generated_task_titles?: boolean;
   auto_focus_new_tasks?: boolean;
+  agent_tab_close_behavior?: "delete_session" | "hide_panel";
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
   show_release_notification?: boolean;
   release_notes_last_seen_version?: string;
@@ -321,6 +324,7 @@ export type UserSettingsUpdatePayload = {
   sidebar_task_color_patch?: SidebarTaskColorPatchApi;
   task_create_last_used?: TaskCreateLastUsedApi;
   jira_saved_views?: unknown[] | null;
+  jira_default_view_id?: string;
   jira_task_presets?: unknown[] | null;
   github_saved_presets?: unknown[] | null;
   github_default_query_presets?: object | null;

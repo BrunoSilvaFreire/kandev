@@ -10,6 +10,9 @@ import type { EntityReference } from "@/lib/types/entity-reference";
 import type { TaskPlanCommentRef, TaskPreviewFeedbackRef } from "@/lib/types/http";
 import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
 import { useChatInputContainer } from "./use-chat-input-container";
+import { SessionRecoveryCard } from "./session-recovery-card";
+import { useSessionComposerRecovery } from "./session-recovery-context";
+import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { SessionStoppedBanner } from "./session-stopped-banner";
 import { ResumeHandoffOffer } from "./resume-handoff-offer";
 import { EnhanceContextPicker } from "./enhance-context-picker";
@@ -51,6 +54,8 @@ export type ChatInputContainerHandle = {
   getValue: () => string;
   getSelectionStart: () => number;
   insertText: (text: string, from: number, to: number) => void;
+  clearAcceptedPayload?: (payload: Pick<ChatSubmitPayload, "message" | "attachments">) => boolean;
+  restoreStagedAttachments?: (attachments: MessageAttachment[]) => void;
   clear: () => void;
   getAttachments: () => MessageAttachment[];
 };
@@ -75,6 +80,8 @@ type ChatInputContainerProps = {
   sessionId: string | null;
   taskId: string | null;
   workspaceId?: string | null;
+  workspaceResolutionFailed?: boolean;
+  onRetryWorkspaceResolution?: () => void;
   entityReferencesEnabled?: boolean;
   taskTitle?: string;
   taskDescription: string;
@@ -171,10 +178,17 @@ function buildContextAreaProps(
   s: ContainerState,
   p: ChatInputContainerProps,
 ): ChatInputContextAreaProps {
+  const hasPendingFileAttachment = s.allItems.some(
+    (item) =>
+      (item.kind === "image" || item.kind === "file-attachment") &&
+      Boolean(item.attachment.file && !item.attachment.attachmentId),
+  );
   return {
     hasContextZone: s.hasContextZone,
     allItems: s.allItems,
     sessionId: p.sessionId,
+    scopeError: Boolean(p.workspaceResolutionFailed) && hasPendingFileAttachment,
+    onRetryScope: p.onRetryWorkspaceResolution,
   };
 }
 
@@ -324,10 +338,15 @@ function useChatPromptEnhancement({
   };
 }
 
-function useChatInputRecoveryActions(taskId: string | null, sessionId: string | null) {
+function useChatInputRecoveryActions(
+  taskId: string | null,
+  sessionId: string | null,
+  errorStamp?: string,
+) {
   return useSessionRecoveryActions({
     taskId: taskId ?? "",
     sessionId: sessionId ?? "",
+    errorStamp,
   });
 }
 
@@ -344,6 +363,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     const s = useChatInputContainer({
       ref,
       sessionId,
+      taskId,
       workspaceId: props.workspaceId,
       isSending,
       isStarting,
@@ -367,7 +387,12 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       onSubmit: props.onSubmit,
     });
 
-    const recoveryActions = useChatInputRecoveryActions(taskId, sessionId);
+    const composerRecovery = useSessionComposerRecovery(sessionId);
+    const recoveryActions = useChatInputRecoveryActions(
+      taskId,
+      sessionId,
+      composerRecovery?.model?.stamp,
+    );
 
     const promptEnhancement = useChatPromptEnhancement({
       inputRef: s.inputRef,
@@ -385,6 +410,27 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       })
     ) {
       return null;
+    }
+
+    if (composerRecovery?.model && taskId) {
+      return (
+        <>
+          <SessionRecoveryCard
+            model={composerRecovery.model}
+            actions={{
+              ...recoveryActions,
+              busyAction: recoveryActions.busyAction ?? composerRecovery.pending,
+            }}
+            onNewSession={() => s.setShowNewSessionDialog(true)}
+          />
+          <NewSessionDialog
+            open={s.showNewSessionDialog}
+            onOpenChange={s.setShowNewSessionDialog}
+            taskId={taskId}
+            workspaceId={props.workspaceId}
+          />
+        </>
+      );
     }
 
     if (

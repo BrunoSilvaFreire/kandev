@@ -28,14 +28,6 @@ export type MessagesState = {
   >;
 };
 
-/** Prompts are fetched independently from the transcript with their own page metadata. */
-export type PromptsState = MessagesState & {
-  /** Incremented when a session is removed to reject stale prompt requests. */
-  generationBySession: Record<string, number>;
-  /** Incremented whenever an authoritative prompt refresh begins. */
-  refreshGenerationBySession: Record<string, number>;
-};
-
 export type TurnsState = {
   bySession: Record<string, Turn[]>;
   activeBySession: Record<string, string | null>; // sessionId -> active turnId
@@ -69,6 +61,13 @@ export type TaskSessionsState = {
   items: Record<string, TaskSession>;
   /** Monotonic client event generation used to order live activity against REST refreshes. */
   activityEpochBySession?: Record<string, number>;
+  /** Monotonic cursor generation used to keep older REST snapshots from regressing read state. */
+  readCursorEpochBySession?: Record<string, number>;
+};
+
+export type TaskSessionHydrationEpoch = {
+  activity: number;
+  readCursor: number;
 };
 
 export type TaskSessionsByTaskState = {
@@ -262,7 +261,6 @@ export type QueueState = {
 
 export type SessionSliceState = {
   messages: MessagesState;
-  messagePrompts: PromptsState;
   turns: TurnsState;
   taskSessions: TaskSessionsState;
   taskSessionsByTask: TaskSessionsByTaskState;
@@ -327,18 +325,6 @@ export type SessionSliceActions = {
   ) => void;
   /** Sets the session's message-loading flag. */
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
-  replacePromptMessages: (
-    sessionId: string,
-    messages: Message[],
-    meta?: { hasMore?: boolean; oldestCursor?: string | null },
-  ) => void;
-  prependPromptMessages: (
-    sessionId: string,
-    messages: Message[],
-    meta?: { hasMore?: boolean; oldestCursor?: string | null },
-  ) => void;
-  setPromptMessagesLoading: (sessionId: string, loading: boolean) => void;
-  setPromptMessagesLoadingMore: (sessionId: string, loading: boolean) => void;
   /** Upserts a turn row, rejecting stale updates (see shouldApplyTurnUpdate). */
   addTurn: (turn: Turn) => void;
   /** Merges a complete REST snapshot and reconciles its marker atomically. */
@@ -377,7 +363,10 @@ export type SessionSliceActions = {
    * boundary on arrival.
    */
   reconcileWorkspaceSourcesAdopted: (sessionIds: string[], boundaryTimestamp?: string) => void;
-  setTaskSession: (session: TaskSession) => void;
+  setTaskSession: (
+    session: TaskSession,
+    hydrationEpochAtRequestStart?: TaskSessionHydrationEpoch,
+  ) => void;
   /**
    * Narrowly updates only a session's Slack-style read cursor
    * (last_read_message_id) — never the full session object. Used for the
@@ -397,7 +386,7 @@ export type SessionSliceActions = {
   setTaskSessionsForTask: (
     taskId: string,
     sessions: TaskSession[],
-    activityEpochsAtRequestStart: Readonly<Record<string, number>>,
+    hydrationEpochsAtRequestStart: Readonly<Record<string, TaskSessionHydrationEpoch>>,
   ) => void;
   upsertTaskSessionFromEvent: (taskId: string, session: TaskSession) => void;
   setTaskSessionsLoading: (taskId: string, loading: boolean) => void;
@@ -408,6 +397,7 @@ export type SessionSliceActions = {
   setPendingModel: (sessionId: string, modelId: string) => void;
   clearPendingModel: (sessionId: string) => void;
   setActiveModel: (sessionId: string, modelId: string) => void;
+  clearActiveModel: (sessionId: string) => void;
   // Task plan actions
   setTaskPlan: (taskId: string, plan: TaskPlan | null) => void;
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;

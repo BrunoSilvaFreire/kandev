@@ -55,7 +55,11 @@ func TestKandevContext_RenderedSizesDeliverRecordedCompaction(t *testing.T) {
 	})
 
 	const (
-		recordedOrdinaryPromptBytesBeforeCompaction = 4804
+		// 4804 is the upstream recorded pre-compaction baseline; the fork adds a
+		// 130-byte request_approval_kandev line to the user-question section, so
+		// the fork baseline is raised by the same amount to keep the reduction
+		// assertion measuring the rich-output compaction rather than the added line.
+		recordedOrdinaryPromptBytesBeforeCompaction = 4934
 		minimumRenderedReductionBytes               = 400
 	)
 	// This baseline is a recorded rendered prompt from before rich-output

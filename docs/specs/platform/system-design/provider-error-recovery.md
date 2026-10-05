@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
 created: 2026-08-08
-updated: 2026-09-15
+updated: 2026-10-03
 owners:
   - Kandev
 ---
@@ -12,13 +12,14 @@ owners:
 
 ## Purpose and boundaries
 
-This design preserves the technical source detail for `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` during migration.
+Design for `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001`.
+Usable-runtime lifetime follows [turn continuity](transient-turn-runtime-continuity.md).
 
 ## Requirement mapping
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | [Migrated source detail](#migrated-source-detail), [Cursor normal-completion failure projection](#cursor-normal-completion-failure-projection), [Cursor retry-safety semantics](#cursor-retry-safety-semantics), [Interactive transient retry notice lifecycle](#interactive-transient-retry-notice-lifecycle). Matching ACP diagnostic and error projection is owned by [Part 3](provider-error-recovery-03.md#matching-acp-diagnostic-and-error-projection). |
+| `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | [Source detail](#migrated-source-detail), [Cursor failure projection](#cursor-normal-completion-failure-projection), [Cursor retry safety](#cursor-retry-safety-semantics), [Retry notice lifecycle](#interactive-transient-retry-notice-lifecycle). ACP diagnostic/error projection: [Part 3](provider-error-recovery-03.md#matching-acp-diagnostic-and-error-projection). |
 
 ## Migrated source detail
 
@@ -133,27 +134,21 @@ The policy layer has two configurable classes:
 | `transient` | The provider, network, transport, or selected model is temporarily unable to serve the request. | `network_unavailable`, `provider_unavailable`, `provider_overloaded`, `model_capacity`, confirmed short `rate_limited`, and launch-safe `agent_transport_lost` |
 | `hard` | The selected account, subscription, credentials, provider configuration, or model cannot continue without a longer reset or user/configuration change. | `quota_limited`, `subscription_required`, `auth_required`, `missing_credentials`, `provider_not_configured`, and `model_unavailable` |
 
-The semantic code remains authoritative diagnostic detail. The class is the
-stable policy input. A catalogue revision can add new codes and signatures,
-but it must assign every recoverable code to exactly one class.
+Semantic codes retain diagnostic detail. Every recoverable catalogue code maps to one policy class.
+Task, repository, permission, local-runtime, cancellation, and resume-state errors remain outside classified provider policy.
 
-Task, repository, permission, local runtime, cancellation, and resume-state
-errors are not provider errors. They retain their existing owner and cannot
-trigger candidate switching through this policy.
-
-Unrecognized, low-confidence, stale, or conflicting evidence has classification
-state `unclassified`. It is not a third configurable class. It stops automatic
-recovery and surfaces manual recovery so an unknown string cannot silently
-repeat work or change providers. Historical attempts retain the semantic code,
-class, rule ID, and catalogue version assigned when the attempt occurred.
+Unknown, low-confidence, stale, or conflicting evidence is `unclassified`, not a third configurable class.
+It requires manual recovery except for the task-scoped
+[repeated-failure extension](../../agents/system-design/dynamic-unclassified-fallback.md), which also admits proven agent startup failures.
+An unknown string alone never authorizes recovery. Historical attempts retain their code, class, rule ID, and catalogue version.
 
 ### Replay and effect-safety gate
 
 Classification does not by itself authorize retry or switching.
 
-- Automatic retry, reset waiting, or fallback requires evidence tied to the
-  current invocation and a failure boundary that is known to be pre-result and
-  effect-safe.
+- Original-prompt replay, reset waiting, and fallback require current-invocation,
+  pre-result, effect-safe evidence. Native continuation has a separate
+  [interruption contract](provider-interruption-continuation.md).
 - A provider-supported resumable retry guarantee can satisfy this gate when it
   identifies the same provider-native session and generation.
 - Assistant output, tool activity, partial utility output, ambiguous prompt
@@ -180,12 +175,11 @@ Cursor recovery choices. They preserve the provider-neutral safety boundary in
    tool call, and missing evidence all fail closed. The observed incident had
    thoughts and a `Read File` call in flight, so it enters manual recovery even
    though its classification is transient.
-2. **Continuation mode.** An eligible concrete-profile retry retains the
-   selected execution profile. It uses the existing provider-native resume
-   identity before it sends the cached original prompt again. It does not create
-   a fresh provider route or switch providers. This replay is allowed only at
-   the safe point above. An unsafe turn exposes the existing manual Resume and
-   Start fresh choices. The user, not the classifier, chooses continuation.
+2. **Replay mode.** Eligible retries retain the execution profile and native
+   identity before sending the cached original prompt at the safe point above.
+   Separate opt-in native continuation follows its distinct contract, admitting
+   output or completed reads while refusing writes or uncertain work. Otherwise
+   the existing manual Resume and Start fresh choices remain available.
 3. **Cursor-owned retry.** Kandev does not schedule while the original
    `session/prompt` RPC remains open. Provider progress after a marker clears
    the pending marker. Only a later terminal marker can re-arm it. The prompt
@@ -239,7 +233,8 @@ uses the same limits, while the backend remains authoritative.
 
 Policy evaluation follows this order:
 
-1. Reject stale, unclassified, or effect-unsafe failures.
+1. Reject stale or effect-unsafe failures. Reject unclassified failures unless
+   the separate task-scoped repeated-failure extension admits them.
 2. If reset waiting is enabled, has not already been used for this candidate
    and class in the current route cycle, and a validated future `retry_after`
    or `reset_at` is no later than `max_wait_seconds`, persist a wait for that
@@ -467,7 +462,7 @@ relocated there at the size limit, and extended since.
 | `active` | Current, classified, effect-safe failure with eligible reset wait | `waiting_for_reset` |
 | `active` | Current, classified, effect-safe failure with retry budget | `retry_wait` |
 | `active` | Recovery exhausted with `skip` | `switching` |
-| `active` | Recovery exhausted with `stop`, or unsafe/unclassified failure | `action_required` |
+| `active` | Recovery exhausted with `stop`, unsafe failure, or ineligible unclassified failure | `action_required` |
 | `waiting_for_reset` | Deadline reached and generation current | `retrying` |
 | `retry_wait` | Deadline reached and generation current | `retrying` |
 | `waiting_for_reset` or `retry_wait` | Skip now | `switching` |
@@ -562,7 +557,8 @@ relocated there at the size limit, and extended since.
   without creating a manual recovery message.
 - **GIVEN** an authorized user selects Cancel while a retry loop is active,
   **WHEN** cancellation completes, **THEN** the retry notice is retired and the
-  manual Resume and Start fresh recovery message is rendered.
+  composer remains available when retention is proven. Otherwise,
+  the manual Resume and Start fresh recovery message is rendered.
 
 ## Out of scope
 

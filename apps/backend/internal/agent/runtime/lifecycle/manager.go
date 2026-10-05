@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -40,14 +41,16 @@ const (
 
 // Manager manages agent instance lifecycles
 type Manager struct {
-	registry        *registry.Registry
-	eventBus        bus.EventBus
-	credsMgr        CredentialsManager
-	profileResolver ProfileResolver
-	ownerAdmission  OwnerAdmission
-	worktreeMgr     *worktree.Manager
-	mcpProvider     McpConfigProvider
-	logger          *logger.Logger
+	registry              *registry.Registry
+	eventBus              bus.EventBus
+	credsMgr              CredentialsManager
+	profileResolver       ProfileResolver
+	ownerAdmission        OwnerAdmission
+	worktreeMgr           *worktree.Manager
+	mcpProvider           McpConfigProvider
+	cursorInventoryLoader func(context.Context) (mcpconfig.CursorNativeInventory, error)
+	cursorNativeMCPRunner mcpconfig.NativeMCPCommandRunner
+	logger                *logger.Logger
 	// dataDir is the kandev root directory. Misnamed for historical reasons:
 	// cmd/kandev/agents.go passes cfg.ResolvedHomeDir() (the kandev root —
 	// typically ~/.kandev) here, not ResolvedDataDir(). Used for:
@@ -72,10 +75,17 @@ type Manager struct {
 	historyManager *SessionHistoryManager // Stores session history for context injection (fork_session pattern)
 
 	// Workspace info provider for on-demand instance creation
-	workspaceInfoProvider WorkspaceInfoProvider
+	workspaceInfoProvider          WorkspaceInfoProvider
+	workspaceRecoveryErrorReporter WorkspaceRecoveryErrorReporter
+
+	// taskRuntimeFences serialize runtime creation with task-scoped cleanup.
+	taskRuntimeFences taskRuntimeOwnershipFences
 
 	// bootMessageService creates boot messages displayed in chat during agent startup.
 	bootMessageService BootMessageService
+
+	// startupRecoveryDelay overrides the managed-runtime retry delay in tests.
+	startupRecoveryDelay func() time.Duration
 
 	// preparerRegistry maps executor types to environment preparers.
 	preparerRegistry *PreparerRegistry
@@ -248,7 +258,12 @@ type Manager struct {
 	// environment so user shell terminals can be given the same profile env
 	// vars the agent subprocess gets. See executor_profile_env.go. Nil → the
 	// terminal inherits only the backend process environment.
-	executorProfileReader ExecutorProfileReader
+	executorProfileReader         ExecutorProfileReader
+	sessionSettingsSnapshotWriter SessionSettingsSnapshotWriter
+	pluginExecutorProfileLoader   PluginExecutorProfileLoader
+	pluginRuntimeAPIURL           string
+	pluginExecutorCallbackMu      sync.Mutex
+	pluginExecutorCallbacks       map[string]*ExecutorCreateRequest
 
 	// agentProfileReader resolves the full agent_profiles row (including the
 	// office-enrichment fields added in ADR 0005 Wave A) for the launch-prep
@@ -304,6 +319,13 @@ type Manager struct {
 	activityLeaseOwners map[string]uint64
 	activityPending     map[string]map[uint64]*executionActivityClaim
 	activityGeneration  uint64
+}
+
+// SetCursorNativeMCPCommandRunner installs the bounded runner used for native
+// Cursor MCP approval and readiness checks. Production uses the exec runner;
+// tests inject a fake so they never mutate a developer's Cursor account.
+func (m *Manager) SetCursorNativeMCPCommandRunner(runner mcpconfig.NativeMCPCommandRunner) {
+	m.cursorNativeMCPRunner = runner
 }
 
 // SetOwnerAdmission wires the durable owner gate used by run-owned launches.
@@ -553,6 +575,14 @@ func (m *Manager) WorktreeManager() *worktree.Manager {
 // can connect before startup wiring installs the dispatcher.
 func (m *Manager) SetMCPHandler(handler agentctl.MCPHandler) {
 	m.streamManager.setMCPHandler(handler)
+}
+
+// MCPHandlerFor returns the execution-bound MCP handler for one execution's stream.
+func (m *Manager) MCPHandlerFor(execution *AgentExecution) agentctl.MCPHandler {
+	if m == nil || m.streamManager == nil {
+		return nil
+	}
+	return m.streamManager.mcpHandlerFor(execution)
 }
 
 // SetMCPIdentityScoper installs the per-user scoping hook for in-session MCP
@@ -827,6 +857,12 @@ func (m *Manager) SetWorkspaceInfoProvider(provider WorkspaceInfoProvider) {
 	m.workspaceInfoProvider = provider
 }
 
+// SetWorkspaceRecoveryErrorReporter installs the task-service callback for
+// verified managed-clone relocation refusals.
+func (m *Manager) SetWorkspaceRecoveryErrorReporter(reporter WorkspaceRecoveryErrorReporter) {
+	m.workspaceRecoveryErrorReporter = reporter
+}
+
 // SetBootMessageService sets the service used to create boot messages in chat
 // during agent startup. If not set, no boot messages will be created.
 func (m *Manager) SetBootMessageService(svc BootMessageService) {
@@ -841,6 +877,7 @@ func (m *Manager) SetPreparerRegistry(registry *PreparerRegistry) {
 // SetSecretStore sets the secret store for encrypting runtime auth tokens.
 func (m *Manager) SetSecretStore(store secrets.SecretStore) {
 	m.secretStore = store
+	m.wireKubernetesEnvironmentStore()
 }
 
 // SetAgentProfileReader wires the reader the launch-prep SkillDeployer uses

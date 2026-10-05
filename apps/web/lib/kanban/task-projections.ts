@@ -1,6 +1,12 @@
 import type { Task } from "@/components/kanban-card";
-import { mapSelectedRepositoryIds } from "@/lib/kanban/filters";
-import { applyKanbanFilterClauses, applyKanbanViewFilters } from "@/lib/view-model/kanban";
+import {
+  filterTasksByRepositories,
+  mapSelectedRepositoryIds,
+  taskMatchesRepositorySearch,
+  type RepositorySearchLookup,
+} from "@/lib/kanban/filters";
+import { taskMatchesPriorityFilter } from "@/lib/kanban/priority-filter-tokens";
+import { applyKanbanFilterClauses } from "@/lib/view-model/kanban";
 import type { KanbanFilterDimension } from "@/lib/view-model/kanban";
 import type { ViewFilterClause } from "@/lib/view-model/types";
 import type { RepositoryGroup } from "@/lib/view-model/repository-group";
@@ -9,6 +15,7 @@ import type { TaskPriority } from "@/lib/types/http";
 
 type FilterTasksOptions = {
   searchQuery?: string;
+  repositoriesById?: RepositorySearchLookup;
   vcsSearchTextByTaskId?: Record<string, string>;
   matchesPluginTaskFilters?: (taskId: string) => boolean;
   hiddenStepIds?: Set<string>;
@@ -32,6 +39,7 @@ export function filterTasks(
   const {
     hiddenStepIds,
     searchQuery,
+    repositoriesById,
     vcsSearchTextByTaskId,
     matchesPluginTaskFilters,
     priorityFilterTokens,
@@ -45,11 +53,11 @@ export function filterTasks(
       tasks = tasks.filter((task) => !effectiveHidden.has(task.workflowStepId));
     }
   }
-  // Persisted shared clauses win; otherwise the legacy repository/priority lens.
+  // Persisted shared clauses win; otherwise the legacy repository lens.
   if (clauses && clauses.length > 0) {
     tasks = applyKanbanFilterClauses(tasks, clauses, { repositoryGroups });
   } else {
-    tasks = applyKanbanViewFilters(tasks, repoFilter, priorityFilterTokens);
+    tasks = filterTasksByRepositories(tasks, repoFilter);
   }
   if (searchQuery) {
     const query = searchQuery.toLowerCase();
@@ -57,6 +65,7 @@ export function filterTasks(
       (task) =>
         task.title.toLowerCase().includes(query) ||
         (task.description && task.description.toLowerCase().includes(query)) ||
+        taskMatchesRepositorySearch(task, query, repositoriesById) ||
         changeRequestSearchText(task).toLowerCase().includes(query) ||
         (vcsSearchTextByTaskId?.[task.id]?.toLowerCase().includes(query) ?? false),
     );
@@ -64,11 +73,15 @@ export function filterTasks(
   if (matchesPluginTaskFilters) {
     tasks = tasks.filter((task) => matchesPluginTaskFilters(task.id));
   }
+  if (priorityFilterTokens && priorityFilterTokens.length > 0) {
+    tasks = tasks.filter((task) => taskMatchesPriorityFilter(task.priority, priorityFilterTokens));
+  }
   return tasks;
 }
 
 type WorkflowTaskProjectionOptions = {
   searchQuery: string;
+  repositoriesById?: RepositorySearchLookup;
   vcsSearchTextByTaskId?: Record<string, string>;
   matchesPluginTaskFilters?: (taskId: string) => boolean;
   hiddenStepIds?: Set<string>;

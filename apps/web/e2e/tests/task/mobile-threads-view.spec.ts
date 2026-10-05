@@ -3,11 +3,12 @@ import { test, expect } from "../../fixtures/test-base";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { seedSecondaryClarificationTask } from "../../helpers/clarification";
-import { createStandardProfile, openTaskSession } from "../../helpers/git-helper";
+import { openTaskSession } from "../../helpers/git-helper";
 import { assertNoHorizontalOverflow } from "../../helpers/session-stream-overload";
 import { waitForLatestSessionDone } from "../../helpers/session";
 import { attachGatewayTrafficCapture, type GatewayTrafficFrame } from "../../helpers/ws-traffic";
 import { requireBox } from "../../helpers/layout-assertions";
+import { expectTouchControl } from "../../helpers/control-sizing";
 import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
 import { closeQuickTerminalTab } from "../terminal/terminal-test-helpers";
 import { swipeDeckLeft } from "./mobile-threads-swipe-helpers";
@@ -119,11 +120,10 @@ test.describe("Mobile Threads view", () => {
     seedData,
   }) => {
     test.setTimeout(180_000);
-    const profile = await createStandardProfile(apiClient, "mobile-threads");
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       AGENT_TITLE,
-      profile.id,
+      seedData.agentProfileId,
       {
         description: "/e2e:simple-message",
         workflow_id: seedData.workflowId,
@@ -180,7 +180,6 @@ test.describe("Mobile Threads view", () => {
     seedData,
   }) => {
     test.setTimeout(180_000);
-    const profile = await createStandardProfile(apiClient, "mobile-threads-picker");
     const titles = [
       "Review checkout accessibility across keyboard and touch",
       "Investigate a very long payment reconciliation identifier",
@@ -188,12 +187,17 @@ test.describe("Mobile Threads view", () => {
     ];
     const tasks = [];
     for (const title of titles) {
-      const task = await apiClient.createTaskWithAgent(seedData.workspaceId, title, profile.id, {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      });
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        title,
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
       await openTaskSession(testPage, title);
       await waitForLatestSessionDone(apiClient, task.id, 1, `agent turn for ${title}`);
       const { sessions } = await apiClient.listTaskSessions(task.id);
@@ -422,11 +426,10 @@ test.describe("Mobile Threads view", () => {
     seedData,
   }) => {
     test.setTimeout(180_000);
-    const profile = await createStandardProfile(apiClient, "mobile-threads-saved-view");
     const firstTask = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Mobile saved view first work",
-      profile.id,
+      seedData.agentProfileId,
       {
         description: "/e2e:simple-message",
         workflow_id: seedData.workflowId,
@@ -437,7 +440,7 @@ test.describe("Mobile Threads view", () => {
     const secondTask = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Mobile saved view second work",
-      profile.id,
+      seedData.agentProfileId,
       {
         description: "/e2e:simple-message",
         workflow_id: seedData.workflowId,
@@ -550,8 +553,7 @@ test.describe("Mobile Threads view", () => {
     const buttons = geometryDrawer.locator("button:visible");
     const buttonCount = await buttons.count();
     for (let index = 0; index < buttonCount; index += 1) {
-      const box = await buttons.nth(index).boundingBox();
-      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      await expectTouchControl(buttons.nth(index));
     }
     await assertNoHorizontalOverflow(testPage, "mobile Threads saved views");
     await expect(testPage.getByTestId("mobile-home-menu-scroll")).toHaveClass(

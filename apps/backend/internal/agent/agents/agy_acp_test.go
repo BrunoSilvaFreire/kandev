@@ -19,7 +19,7 @@ func TestAgyACP(t *testing.T) {
 	if len(a.Logo(LogoLight)) == 0 || len(a.Logo(LogoDark)) == 0 {
 		t.Fatal("logos must reuse Antigravity assets")
 	}
-	if got := a.BuildCommand(CommandOptions{}).Args(); len(got) != 6 || got[3] != "agy-acp@0.5.2" || got[4] != "--no-sandbox" || got[5] != "--dangerously-skip-permissions" {
+	if got := a.BuildCommand(CommandOptions{}).Args(); len(got) != 8 || got[3] != "--prefix" || got[4] != "~/.kandev/managed-npm-runtime" || got[5] != "agy-acp@0.5.2" || got[6] != "--no-sandbox" || got[7] != "--dangerously-skip-permissions" {
 		t.Fatalf("command = %v", got)
 	}
 	if a.NativeBinaryName() != "agy-acp" {

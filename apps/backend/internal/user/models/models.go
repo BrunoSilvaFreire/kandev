@@ -60,6 +60,20 @@ func NormalizeLastSeenDisplay(value string) string {
 }
 
 const (
+	AgentTabCloseBehaviorDeleteSession = "delete_session"
+	AgentTabCloseBehaviorHidePanel     = "hide_panel"
+)
+
+// NormalizeAgentTabCloseBehavior preserves the fork's default non-destructive
+// panel-hide behavior; only an explicit delete_session selects delete-on-close.
+func NormalizeAgentTabCloseBehavior(value string) string {
+	if value == AgentTabCloseBehaviorDeleteSession {
+		return value
+	}
+	return AgentTabCloseBehaviorHidePanel
+}
+
+const (
 	// RoleAdmin unlocks user management and system settings mutation when
 	// authentication is enabled. It does NOT grant visibility into other
 	// users' workspaces (hard privacy isolation).
@@ -157,6 +171,7 @@ type UserSettings struct {
 	SidebarTaskColors                 map[string]*string                `json:"sidebar_task_colors"`
 	TaskCreateLastUsed                TaskCreateLastUsed                `json:"task_create_last_used"`
 	JiraSavedViews                    json.RawMessage                   `json:"jira_saved_views"`
+	JiraDefaultViewID                 string                            `json:"jira_default_view_id"`
 	JiraTaskPresets                   json.RawMessage                   `json:"jira_task_presets"`
 	GitHubSavedPresets                json.RawMessage                   `json:"github_saved_presets"`
 	GitHubDefaultQueryPresets         json.RawMessage                   `json:"github_default_query_presets"`
@@ -171,6 +186,7 @@ type UserSettings struct {
 	TerminalFontSize                  int                               `json:"terminal_font_size"`
 	ChangesPanelLayout                string                            `json:"changes_panel_layout"` // "flat" | "tree"
 	LastSeenDisplay                   string                            `json:"last_seen_display"`    // "absolute" | "relative"
+	AgentTabCloseBehavior             string                            `json:"agent_tab_close_behavior"`
 	SystemMetricsDisplay              SystemMetricsDisplaySettings      `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                              `json:"app_status_bar_enabled"`
 	SidebarHoverEnabled               bool                              `json:"sidebar_hover_enabled"`

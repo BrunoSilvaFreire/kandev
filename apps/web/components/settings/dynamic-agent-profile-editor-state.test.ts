@@ -15,7 +15,12 @@ const candidate: DynamicAgentCandidate = {
   position: 0,
   executionProfileId: agentProfileId("candidate"),
   enabled: true,
-  policies: { version: 1, transient: policy(), hard: policy() },
+  policies: {
+    version: 1,
+    transient: policy(),
+    hard: policy(),
+    unclassified: { enabled: true, consecutiveFailureThreshold: 4 },
+  },
 };
 
 describe("dynamicTagConflict", () => {

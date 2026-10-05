@@ -20,6 +20,7 @@ func PublicTaskMetadata(metadata map[string]interface{}) map[string]interface{} 
 	}
 	public := maps.Clone(metadata)
 	delete(public, MetaKeyWorkflowMovePending)
+	delete(public, MetaKeyTaskManagementDeferredFence)
 	delete(public, MetaKeyStepHandoffCarry)
 	// The pending-continuation record carries the paused entry's exact prompt
 	// (and, across a reset failure, the extracted handoff): server-owned

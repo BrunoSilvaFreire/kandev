@@ -1,11 +1,12 @@
 import { expect, test } from "../../fixtures/test-base";
+import { expectControlHeight } from "../../helpers/control-sizing";
 import type { Locator, Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { ApiClient } from "../../helpers/api-client";
-import { waitForHttp } from "../../helpers/causal-waits";
-import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
+import { waitForHttp, watchWs } from "../../helpers/causal-waits";
+import { makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 import { mockFolderAvailability } from "../../helpers/open-task-folder";
 
@@ -138,6 +139,7 @@ test.describe("Attach local workspace sources", () => {
       })
       .toBeTruthy();
 
+    const wsWatcher = watchWs(testPage);
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -197,6 +199,10 @@ test.describe("Attach local workspace sources", () => {
     await expect(dialog.getByTestId("source-mode-local")).toHaveCount(0);
     const addRepository = dialog.getByRole("button", { name: "Add repository" });
     const submit = dialog.getByTestId("add-workspace-sources-submit");
+    const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
+    // @covers AC-UI-CONTROL-SIZING-001.1, AC-UI-CONTROL-SIZING-001.3, AC-UI-CONTROL-SIZING-001.6
+    await expectControlHeight(cancel, 28);
+    await expectControlHeight(submit, 28);
     await expect(submit).toBeDisabled();
     await addRepository.click();
     await expect(testPage.getByRole("menuitem", { name: "Local Git repository" })).toBeVisible();
@@ -215,7 +221,10 @@ test.describe("Attach local workspace sources", () => {
     const savedRepositoryError = savedRepositoryRow.getByRole("alert");
     await expect(savedRepositoryError).toHaveText("Choose a repository and base branch.");
     await expect(savedRepositoryError).toHaveCSS("font-size", "12px");
-    await savedRepositoryRow.getByRole("button", { name: "Remove source" }).click();
+    const removeSource = savedRepositoryRow.getByRole("button", { name: "Remove source" });
+    // @covers AC-UI-CONTROL-SIZING-001.1, AC-UI-CONTROL-SIZING-001.3
+    await expectControlHeight(removeSource, 28);
+    await removeSource.click();
     await addRepository.click();
     await testPage.getByRole("menuitem", { name: "Local Git repository" }).click();
     const repositoryRow = dialog.getByTestId("workspace-source-row");
@@ -265,14 +274,28 @@ test.describe("Attach local workspace sources", () => {
       worktree.worktree_path ? [worktree.worktree_path] : [],
     );
     expect(repoPaths).toHaveLength(2);
+    const filePaths = repoPaths.map((_, index) => `changes/repository-${index}.txt`);
+    await session.clickTab("Files");
+    const pendingDir = path.join(backend.tmpDir, "pending-changes");
+    fs.mkdirSync(pendingDir, { recursive: true });
+    const pendingFiles = filePaths.map((_, index) => {
+      const pendingFile = path.join(pendingDir, `repository-${index}.txt`);
+      fs.writeFileSync(pendingFile, `repository ${index}\n`);
+      return pendingFile;
+    });
     for (const [index, repoPath] of repoPaths.entries()) {
-      new GitHelper(repoPath, makeGitEnv(backend.tmpDir)).createFile(
-        `changes/repository-${index}.txt`,
-        `repository ${index}\n`,
-      );
+      const destination = path.join(repoPath, filePaths[index]!);
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.renameSync(pendingFiles[index]!, destination);
     }
 
+    const refreshResponse = wsWatcher.waitForResponse("session.git.refresh");
     await session.clickTab("Changes");
+    const refresh = await refreshResponse;
+    expect(refresh.payload.mode).toBe("fresh");
+    expect(refresh.payload.task_environment_id).toBeTruthy();
+    expect(Array.isArray(refresh.payload.snapshots)).toBe(true);
+    expect(refresh.payload.snapshots).toHaveLength(2);
     const changes = session.changes;
     await expect(changes.getByTestId("changes-repo-group")).toHaveCount(2, { timeout: 30_000 });
     await expect(

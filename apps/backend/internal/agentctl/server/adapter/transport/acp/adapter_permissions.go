@@ -23,6 +23,9 @@ func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRe
 	if sessionID == "" {
 		sessionID = fallbackSessionID
 	}
+	if sessionID == fallbackSessionID {
+		a.poisonContinuationSafety()
+	}
 
 	// Only emit a synthetic tool_call event if no ToolCall notification preceded this.
 	// waitForActiveToolCall bounds the race window between a SessionUpdate.ToolCall
@@ -44,10 +47,12 @@ func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRe
 	}
 
 	if handler == nil {
-		// Auto-approve if no handler
-		if len(req.Options) > 0 {
-			return &PermissionResponse{OptionID: req.Options[0].OptionID}, nil
-		}
+		// A missing handler is a Kandev wiring failure, not a permission
+		// decision. Selecting req.Options[0] would approve or refuse depending
+		// on the provider's option order; cancel loudly instead.
+		a.logger.Warn("no permission handler installed, cancelling request",
+			zap.String("tool_call_id", req.ToolCallID),
+			zap.Int("option_count", len(req.Options)))
 		return &PermissionResponse{Cancelled: true}, nil
 	}
 

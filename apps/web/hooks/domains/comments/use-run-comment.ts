@@ -31,7 +31,7 @@ import { planCommentAdmissionConflict } from "@/lib/plan-comment-refs";
 import { getTaskPlanComments } from "@/lib/api/domains/plan-comment-api";
 import { listTaskSessions } from "@/lib/api/domains/session-api";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
-import { captureTaskSessionActivityEpochs } from "@/lib/state/slices/session/activity-epochs";
+import { captureTaskSessionHydrationEpochs } from "@/lib/state/slices/session/hydration-epochs";
 import { hasPendingPlanCommentMigration } from "./plan-comment-migration";
 
 /**
@@ -392,7 +392,7 @@ async function refreshPrimarySessionProjection(
   const stateAtRequestStart = storeApi.getState();
   const sessionsAtRequestStart = listedTaskSessions(stateAtRequestStart, taskId);
   const sessionIdsAtRequestStart = new Set(sessionsAtRequestStart.map((session) => session.id));
-  const activityEpochsAtRequestStart = captureTaskSessionActivityEpochs(
+  const hydrationEpochsAtRequestStart = captureTaskSessionHydrationEpochs(
     stateAtRequestStart,
     taskId,
   );
@@ -415,7 +415,7 @@ async function refreshPrimarySessionProjection(
       (session) => !sessionIdsAtRequestStart.has(session.id) && !fetchedSessionIds.has(session.id),
     );
     const sessions = [...fetchedSessions, ...sessionsAddedDuringLoad];
-    storeApi.getState().setTaskSessionsForTask(taskId, sessions, activityEpochsAtRequestStart);
+    storeApi.getState().setTaskSessionsForTask(taskId, sessions, hydrationEpochsAtRequestStart);
     const primary = sessions.find((candidate) => candidate.is_primary);
     applyTaskPrimaryProjection(taskId, primary?.id ?? null, primary?.state, storeApi);
     applySessionPrimaryProjection(taskId, primary?.id ?? null, primary?.state, storeApi);

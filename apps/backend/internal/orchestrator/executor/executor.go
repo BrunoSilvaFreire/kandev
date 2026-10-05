@@ -80,6 +80,7 @@ type executorStore interface {
 	GetExecutor(ctx context.Context, id string) (*models.Executor, error)
 	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
 	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
+	ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error)
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
 	HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error)
 	DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error
@@ -122,6 +123,17 @@ type bootstrapFailureCommitter interface {
 		taskID, sessionID, agentExecutionID string,
 		expectedState models.TaskSessionState,
 		expectedStamp string,
+		errorValue models.LastAgentError,
+	) (changed bool, updatedAt time.Time, err error)
+}
+
+type bootstrapFailureAttemptCommitter interface {
+	CommitBootstrapFailureIfCurrentAttempt(
+		ctx context.Context,
+		taskID, sessionID, agentExecutionID string,
+		expectedState models.TaskSessionState,
+		expectedStamp string,
+		expectedStartAttemptID string,
 		errorValue models.LastAgentError,
 	) (changed bool, updatedAt time.Time, err error)
 }
@@ -220,11 +232,15 @@ var (
 	ErrTaskArchived            = errors.New("task is archived")
 	ErrStaleExecution          = errors.New("stale execution: no live execution in memory")
 	ErrAgentCommandMissing     = errors.New("existing execution has no agent command configured")
+	// ErrSessionAdvancedToRunning reports that another launch advanced the
+	// session before this launch could persist its prepared runtime data.
+	ErrSessionAdvancedToRunning = errors.New("session state advanced to RUNNING before runtime persistence")
 	// ErrSessionStateSuperseded means a runtime registered successfully, but a
 	// concurrent terminal session transition won the persistence race. Callers
 	// must not start the process and must arbitrate exact-execution teardown
 	// ownership before deciding whether to force-stop the registered runtime.
-	ErrSessionStateSuperseded = errors.New("session state superseded by terminal transition")
+	ErrSessionStateSuperseded   = errors.New("session state superseded by terminal transition")
+	errSessionAdvancedToRunning = ErrSessionAdvancedToRunning
 	// ErrOrphanRecoveryIncomplete means StopByTaskID stopped every session it
 	// found but could not load at least one registry-only orphan's row, so the
 	// task-scoped stop is not fully confirmed. Callers that already observed a
@@ -424,6 +440,17 @@ type AgentManagerClient interface {
 	WaitForAgentctlReady(ctx context.Context, sessionID string) error
 }
 
+type gitStatusDetailsReader interface {
+	GetGitStatusWithDetails(context.Context, string) (*client.GitStatusResult, error)
+}
+
+func getGitStatusWithDetails(ctx context.Context, manager AgentManagerClient, sessionID string) (*client.GitStatusResult, error) {
+	if reader, ok := manager.(gitStatusDetailsReader); ok {
+		return reader.GetGitStatusWithDetails(ctx, sessionID)
+	}
+	return manager.GetGitStatusFresh(ctx, sessionID)
+}
+
 // PromptTurnIDSetter is an optional lifecycle capability. Keeping it out of
 // AgentManagerClient lets test and legacy adapters continue to work while the
 // production lifecycle carries durable turn identity with completion events.
@@ -476,19 +503,25 @@ type AgentProfileInfo struct {
 
 // LaunchAgentRequest contains parameters for launching an agent
 type LaunchAgentRequest struct {
-	TaskID            string
-	WorkspaceID       string // Kandev workspace ID — used to build scratch dir for repo-less tasks
-	SessionID         string
-	TaskEnvironmentID string // Env owning this session (shared across sessions in the same task)
+	RequiredNativeConversationID string
+	TaskID                       string
+	TaskScope                    lifecycle.TaskLaunchScope
+	SessionSettingsPolicy        ResumeSettingsPolicy
+	WorkspaceID                  string // Kandev workspace ID — used to build scratch dir for repo-less tasks
+	SessionID                    string
+	TaskEnvironmentID            string // Env owning this session (shared across sessions in the same task)
 	// WorkspaceReuseRequired selects attach-only preparation of an already-ready
 	// task environment. It must never be inferred from a sibling execution ID.
 	WorkspaceReuseRequired bool
 	// AllowBranchReplacement is granted only by the explicit new-branch recovery
 	// action. It permits lifecycle to replace a confirmed missing worktree branch.
 	AllowBranchReplacement bool
-	TaskTitle              string // Human-readable task title for semantic worktree naming
-	AgentProfileID         string
-	TurnID                 string // Durable Kandev turn for the initial prompt, when present
+	// WorkspaceInventoryRecoveryReceipt is an output populated only after the
+	// guarded, server-authorized preservation repair succeeds.
+	WorkspaceInventoryRecoveryReceipt *models.WorkspaceInventoryRecoveryReceipt
+	TaskTitle                         string // Human-readable task title for semantic worktree naming
+	AgentProfileID                    string
+	TurnID                            string // Durable Kandev turn for the initial prompt, when present
 	// OfficeAgentProfileID is the stable Office identity. AgentProfileID stays
 	// the concrete execution profile inside the executor for compatibility.
 	OfficeAgentProfileID string
@@ -553,6 +586,7 @@ type LaunchAgentRequest struct {
 	CheckoutOptions         *models.RepositoryCheckoutOptions
 	ContributionDestination *models.ContributionDestination
 	ComparisonTarget        *models.ComparisonTarget
+	QualifiedPRBase         *models.PRBase
 	WorktreeBranchPrefix    string // Branch prefix for worktree branches
 	WorktreeBranchTemplate  string // Branch name template for worktree branches
 	WorktreeBranchTicket    string // External ticket value for branch templates
@@ -609,6 +643,7 @@ type RepoSpec struct {
 	CheckoutOptions         *models.RepositoryCheckoutOptions
 	ContributionDestination *models.ContributionDestination
 	ComparisonTarget        *models.ComparisonTarget
+	QualifiedPRBase         *models.PRBase
 	WorktreeID              string
 	// AllowBranchReplacement permits explicit branch replacement for this repo.
 	AllowBranchReplacement bool
@@ -655,6 +690,9 @@ const McpModeOffice = mcpmode.Office
 // created by a user-configured automation.
 const McpModeAutomation = mcpmode.Automation
 
+// McpModeManagedConversation selects the isolated managed-conversation MCP surface.
+const McpModeManagedConversation = "managed-conversation"
+
 // LaunchOptions contains optional parameters for LaunchPreparedSession.
 type LaunchOptions struct {
 	AgentProfileID       string
@@ -666,14 +704,23 @@ type LaunchOptions struct {
 	// process is started. Callers use this boundary to bind turn-scoped
 	// evidence to the execution that actually won admission.
 	OnExecutionAdmitted func(executionID string)
-	Prompt              string
-	PriorACPSession     string // ACP session ID to resume for the same concrete profile
-	WorkflowStepID      string
-	StartAgent          bool
-	McpMode             string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
-	McpProfile          *mcpprofile.Context
-	Attachments         []v1.MessageAttachment
-	Env                 map[string]string
+	// OnInitialPromptAccepted transfers startup ownership after lifecycle reports
+	// that the initial prompt was accepted by the provider. OnInitialPromptFailed
+	// closes that ownership when delivery fails before acceptance.
+	OnInitialPromptAccepted func(executionID string)
+	OnInitialPromptFailed   func()
+	Prompt                  string
+	PriorACPSession         string // ACP session ID to resume for the same concrete profile
+	WorkflowStepID          string
+	StartAgent              bool
+	// RefuseIfAgentRunning makes peer-message admission fail closed when the
+	// selected session already has an active agent. Other internal launch paths
+	// retain their existing workspace reuse behavior.
+	RefuseIfAgentRunning bool
+	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
+	McpProfile           *mcpprofile.Context
+	Attachments          []v1.MessageAttachment
+	Env                  map[string]string
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
 	// durable profile selection.
 	AdditionalSkillSlugs []string
@@ -767,7 +814,8 @@ type TaskExecution struct {
 	WorktreePath   string
 	WorktreeBranch string
 	// PrepareResult carries the env preparation result for deferred persistence
-	PrepareResult *lifecycle.EnvPrepareResult
+	PrepareResult                     *lifecycle.EnvPrepareResult
+	WorkspaceInventoryRecoveryReceipt *models.WorkspaceInventoryRecoveryReceipt
 }
 
 // FromTaskSession converts a models.TaskSession to TaskExecution
@@ -819,15 +867,39 @@ type SessionStateTransitionFunc func(
 	onChanged func(),
 ) (changed bool, finalState models.TaskSessionState, err error)
 
+// ResumeCredentialSnapshotRestore describes the prior non-secret Git
+// credential-routing value. Present=false removes the key during rollback.
+type ResumeCredentialSnapshotRestore struct {
+	Value   interface{}
+	Present bool
+}
+
+// ResumeFailureRollbackRequest contains the immutable attempt identity and
+// state projection needed to roll back a failed resume atomically.
+type ResumeFailureRollbackRequest struct {
+	TaskID             string
+	SessionID          string
+	AttemptID          string
+	ExpectedState      models.TaskSessionState
+	NextState          models.TaskSessionState
+	ErrorMessage       string
+	CredentialSnapshot *ResumeCredentialSnapshotRestore
+}
+
+// ResumeFailureRollbackFunc commits an attempt-fenced resume rollback and
+// publishes its accepted session transition.
+type ResumeFailureRollbackFunc func(context.Context, ResumeFailureRollbackRequest) (bool, error)
+
 // BootstrapFailureTransitionFunc atomically commits a bootstrap error and
 // its FAILED session transition, then publishes the accepted transition.
-// expectedState and expectedStamp come from the executor's final ownership
-// read and are checked again by the repository commit.
+// expectedState, expectedStamp, and expectedStartAttemptID come from the
+// executor's final ownership read and are checked again by the repository commit.
 type BootstrapFailureTransitionFunc func(
 	ctx context.Context,
 	taskID, sessionID, agentExecutionID string,
 	expectedState models.TaskSessionState,
 	expectedStamp string,
+	expectedStartAttemptID string,
 	errorValue models.LastAgentError,
 ) (changed bool, finalState models.TaskSessionState, err error)
 
@@ -996,6 +1068,9 @@ type Executor struct {
 	// Strict session-state callback used by operations that need to distinguish
 	// accepted writes from terminal/no-op races.
 	onSessionStateTransition SessionStateTransitionFunc
+
+	// Attempt-fenced resume rollback callback that publishes accepted transitions.
+	onResumeFailureRollback ResumeFailureRollbackFunc
 
 	// Atomic bootstrap-failure callback used by the orchestrator to commit the
 	// typed error, FAILED state, and corresponding publication as one ownership
@@ -1241,9 +1316,64 @@ type TaskRepositoryBaseBranchUpdater interface {
 	UpdateTaskRepositoryBaseBranch(ctx context.Context, taskID, taskRepositoryID, baseBranch string) error
 }
 
-// PRBaseResolver returns the current base branch for one provider pull request.
+// PRBaseResolver returns the current repository-qualified base for one PR.
 type PRBaseResolver interface {
-	ResolvePRBaseBranch(ctx context.Context, workspaceID, owner, repo string, number int) (string, error)
+	ResolvePRBase(ctx context.Context, workspaceID string, lookup PRBaseLookup) (models.PRBase, error)
+}
+
+// PRBaseResolutionError marks provider failures that make a legacy PR
+// association unsafe to resolve by branch alone.
+type PRBaseResolutionError struct {
+	cause                error
+	knownCrossRepository bool
+	invalidAssociation   bool
+}
+
+func (e *PRBaseResolutionError) Error() string {
+	if e == nil || e.cause == nil {
+		return "pull request base resolution failed"
+	}
+	return e.cause.Error()
+}
+
+func (e *PRBaseResolutionError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+// KnownCrossRepository reports whether the resolver has identified a target
+// repository that differs from the checked out repository.
+func (e *PRBaseResolutionError) KnownCrossRepository() bool {
+	return e != nil && e.knownCrossRepository
+}
+
+// InvalidAssociation reports that provider data did not match the exact task
+// repository and checkout binding.
+func (e *PRBaseResolutionError) InvalidAssociation() bool {
+	return e != nil && e.invalidAssociation
+}
+
+// NewPRBaseResolutionError classifies a provider-side resolution failure for
+// the launch boundary. Invalid or known cross-repository associations cannot
+// continue with a bare task-repository branch.
+func NewPRBaseResolutionError(cause error, knownCrossRepository, invalidAssociation bool) *PRBaseResolutionError {
+	return &PRBaseResolutionError{
+		cause: cause, knownCrossRepository: knownCrossRepository, invalidAssociation: invalidAssociation,
+	}
+}
+
+// PRBaseLookup ties a provider lookup to one task-repository attachment.
+type PRBaseLookup struct {
+	TaskID             string
+	TaskRepositoryID   string
+	RepositoryID       string
+	Number             int
+	CheckoutBranch     string
+	AttachedOwner      string
+	AttachedRepository string
+	Target             *models.ComparisonTarget
 }
 
 // ExecutorConfig holds configuration for the Executor
@@ -1325,6 +1455,12 @@ func (e *Executor) SetOnSessionStateChange(fn SessionStateChangeFunc) {
 // detailed lifecycle operations.
 func (e *Executor) SetOnSessionStateTransition(fn SessionStateTransitionFunc) {
 	e.onSessionStateTransition = fn
+}
+
+// SetOnResumeFailureRollback wires the attempt-fenced state transition and
+// event publication used when an agent resume fails after entering STARTING.
+func (e *Executor) SetOnResumeFailureRollback(fn ResumeFailureRollbackFunc) {
+	e.onResumeFailureRollback = fn
 }
 
 // SetOnBootstrapFailureTransition wires the atomic bootstrap-failure commit

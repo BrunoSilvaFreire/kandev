@@ -79,7 +79,10 @@ const kanbanValueAccessor: ViewValueAccessor<KanbanFilterableTask, KanbanFilterD
 ) => {
   switch (dimension) {
     case "repository":
-      return task.repositoryId;
+      return (
+        task.repositories?.map((repository) => repository.repository_id) ??
+        (task.repositoryId ? [task.repositoryId] : [])
+      );
     case "repositoryGroup":
       return task.repositoryIds ?? [];
     case "workflow":

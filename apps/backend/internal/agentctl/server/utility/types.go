@@ -7,6 +7,7 @@ import (
 	"context"
 
 	"github.com/kandev/kandev/internal/common/acpprovider"
+	"github.com/kandev/kandev/pkg/agent"
 )
 
 // PromptProgressPhase is the coarse phase of a utility prompt, streamed to the
@@ -130,6 +131,10 @@ type ProbeRequest struct {
 	// Refresh asks agent-specific discovery fallbacks to invalidate their own
 	// model caches. ACP session discovery itself always starts a fresh process.
 	Refresh bool `json:"refresh,omitempty"`
+	// ProfileContext marks probes started from a concrete profile discovery
+	// request. It prevents launch settings and provider diagnostics from entering
+	// command logs or client-visible errors.
+	ProfileContext bool `json:"profile_context,omitempty"`
 
 	// InferenceConfig is the agent's inference configuration.
 	// Command and WorkDir are required; Model is intentionally omitted for probes.
@@ -193,6 +198,14 @@ const (
 	// ProbeFailureManagedRuntimeNPMResolution means the trusted top-level npm
 	// package failed exact-version resolution with ETARGET.
 	ProbeFailureManagedRuntimeNPMResolution ProbeFailureCode = "managed_runtime_npm_resolution"
+	// ProbeFailureManagedRuntimeNPMPolicy means npm rejected the trusted exact
+	// package version under a date-qualified release policy.
+	ProbeFailureManagedRuntimeNPMPolicy ProbeFailureCode = "managed_runtime_npm_policy"
+	// ProbeFailureUnsupportedContext means the selected inference protocol
+	// cannot honor the profile's command prefix or CLI flags.
+	ProbeFailureUnsupportedContext ProbeFailureCode = "unsupported_profile_context"
+	// ProbeFailureAuthenticationRequired is a sanitized authentication failure.
+	ProbeFailureAuthenticationRequired ProbeFailureCode = "authentication_required"
 )
 
 // ProbeAuthMethod is a single advertised authentication method.
@@ -253,7 +266,9 @@ type ProbePromptCapabilities struct {
 
 // InferenceConfigDTO is the inference configuration passed from backend to agentctl.
 type InferenceConfigDTO struct {
-	// Command is the ACP command for one-shot inference.
+	// Protocol selects the one-shot inference transport. Empty means ACP.
+	Protocol agent.Protocol `json:"protocol,omitempty"`
+	// Command is the protocol command for one-shot inference.
 	// e.g., ["npx", "-y", "@agentclientprotocol/claude-agent-acp"]
 	Command []string `json:"command"`
 	// ModelFlag is the flag template for specifying the model.
@@ -272,6 +287,12 @@ type InferenceConfigDTO struct {
 	// (base URL + bearer key) right after the ACP initialize handshake, the
 	// same mechanism the live session adapter uses.
 	ProviderGatewayAuth *acpprovider.GatewayAuth `json:"provider_gateway_auth,omitempty"`
+	// OperatorDefined marks a command that came from a custom agent the
+	// install operator registered in Settings rather than from an agent
+	// definition compiled into the binary. Such a command cannot appear in
+	// the probe allow-list, because it does not exist until the operator
+	// types it. See resolveSpawnCommand.
+	OperatorDefined bool `json:"operator_defined,omitempty"`
 }
 
 // PromptResponse is the response from executing a utility prompt.

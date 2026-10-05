@@ -60,6 +60,7 @@ const defaultDynamicPolicy = (): DynamicAgentPolicy => ({
   version: 1,
   transient: defaultDynamicErrorPolicy(),
   hard: defaultDynamicErrorPolicy(),
+  unclassified: { enabled: false, consecutiveFailureThreshold: 0 },
 });
 
 export function buildDynamicDraftDocument(

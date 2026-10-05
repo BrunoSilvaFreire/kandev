@@ -358,6 +358,9 @@ export type AgentUpdateJobStatus =
   | "failed";
 
 export type AgentUpdateJob = {
+  automatic?: boolean;
+  runtime_id?: string;
+  previous_version?: string;
   job_id: string;
   agent_name: string;
   status: AgentUpdateJobStatus;
@@ -446,6 +449,7 @@ export type UserSettingsState = {
   unreadDivider: boolean;
   agentGeneratedTaskTitles: boolean;
   autoFocusNewTasks: boolean;
+  agentTabCloseBehavior: "delete_session" | "hide_panel";
   mcpTaskAgentProfileDefault: MCPTaskAgentProfileDefault;
   showAnchoredPromptBar: boolean;
   showScrollToLastPrompt: boolean;
@@ -521,6 +525,11 @@ export type TaskCreateLastUsedState = {
 };
 
 export type SettingsSliceState = {
+  agentRuntimeUpdates: {
+    byAgent: Record<string, import("@/lib/api/domains/agent-update-api").AgentUpdateStatus>;
+    checkedAt: number;
+    loading: boolean;
+  };
   executors: ExecutorsState;
   settingsAgents: SettingsAgentsState;
   agentDiscovery: AgentDiscoveryState;
@@ -541,6 +550,11 @@ export type SettingsSliceState = {
 };
 
 export type SettingsSliceActions = {
+  setAgentRuntimeUpdateStatuses: (
+    statuses: import("@/lib/api/domains/agent-update-api").AgentUpdateStatus[],
+    checkedAt: number,
+  ) => void;
+  setAgentRuntimeUpdateLoading: (loading: boolean) => void;
   setExecutors: (executors: ExecutorsState["items"]) => void;
   setSettingsAgents: (agents: SettingsAgentsState["items"]) => void;
   setAgentDiscovery: (agents: AgentDiscoveryState["items"]) => void;

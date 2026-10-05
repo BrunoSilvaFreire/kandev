@@ -1,6 +1,7 @@
 import type { RepositoryCheckoutOptions } from "@/lib/types/repository-checkout-options";
 import type React from "react";
 import type { RefObject } from "react";
+import type { ComboboxOption } from "@/components/combobox";
 import type {
   LocalRepository,
   Repository,
@@ -390,6 +391,7 @@ export type TaskFormInputsHandle = {
   getValue: () => string;
   setValue: (v: string) => void;
   getAttachments: () => FileAttachment[];
+  clearAttachments?: () => void;
 };
 
 export type DialogFormState = {
@@ -639,11 +641,7 @@ export type DialogFormBodyProps = {
   onJiraImport?: (ticket: JiraTicket) => void;
   onLinearImport?: (issue: LinearIssue) => void;
   agentProfileOptions: ReturnType<typeof useAgentProfileOptions>;
-  executorProfileOptions: Array<{
-    value: string;
-    label: string;
-    renderLabel?: () => React.ReactNode;
-  }>;
+  executorProfileOptions: ComboboxOption[];
   agentProfiles: AgentProfileOption[];
   agentProfilesLoading: boolean;
   executorsLoading: boolean;

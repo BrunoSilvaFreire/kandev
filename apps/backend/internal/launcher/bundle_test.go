@@ -2,11 +2,74 @@ package launcher
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestValidateRuntimeBundleAcceptsStandardManifestBundle(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "bin", "kandev"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl"))
+	writeRemoteHelperManifest(t, dir, "standard")
+
+	bundle, err := validateRuntimeBundle(dir, "test", BuildInfo{Version: "1.2.3", Commit: strings.Repeat("a", 40)})
+	if err != nil {
+		t.Fatalf("validate standard bundle: %v", err)
+	}
+	if bundle.Dir != dir {
+		t.Fatalf("bundle dir = %q, want %q", bundle.Dir, dir)
+	}
+}
+
+func TestValidateRuntimeBundleRejectsManifestIdentityMismatch(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "bin", "kandev"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl"))
+	writeRemoteHelperManifest(t, dir, "standard")
+
+	_, err := validateRuntimeBundle(dir, "test", BuildInfo{Version: "9.9.9", Commit: strings.Repeat("b", 40)})
+	if err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("validate mismatched bundle error = %v, want identity mismatch", err)
+	}
+}
+
+func writeRemoteHelperManifest(t *testing.T, dir, variant string) {
+	t.Helper()
+	type helper struct {
+		Platform  string `json:"platform"`
+		Asset     string `json:"asset"`
+		SHA256    string `json:"sha256"`
+		SizeBytes int64  `json:"size_bytes"`
+	}
+	manifest := struct {
+		SchemaVersion int      `json:"schema_version"`
+		Version       string   `json:"version"`
+		Commit        string   `json:"commit"`
+		Variant       string   `json:"variant"`
+		Helpers       []helper `json:"helpers"`
+	}{
+		SchemaVersion: 1,
+		Version:       "1.2.3",
+		Commit:        strings.Repeat("a", 40),
+		Variant:       variant,
+		Helpers: []helper{
+			{Platform: "linux/amd64", Asset: "agentctl-linux-amd64.gz", SHA256: strings.Repeat("a", 64), SizeBytes: 10},
+			{Platform: "linux/arm64", Asset: "agentctl-linux-arm64.gz", SHA256: strings.Repeat("b", 64), SizeBytes: 10},
+			{Platform: "darwin/amd64", Asset: "agentctl-darwin-amd64.gz", SHA256: strings.Repeat("c", 64), SizeBytes: 10},
+			{Platform: "darwin/arm64", Asset: "agentctl-darwin-arm64.gz", SHA256: strings.Repeat("d", 64), SizeBytes: 10},
+		},
+	}
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "remote-helpers.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestValidateRuntimeBundleAcceptsSingleBinaryLayout(t *testing.T) {
 	dir := t.TempDir()
@@ -32,26 +95,20 @@ func TestValidateRuntimeBundleRejectsMissingLauncher(t *testing.T) {
 	}
 }
 
-func TestValidateRuntimeBundleAcceptsHostOnlyBundle(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "bin", "kandev"))
-	writeFile(t, filepath.Join(dir, "bin", "agentctl"))
-
-	if _, err := validateRuntimeBundle(dir, "test"); err != nil {
-		t.Fatalf("host-only bundle (no remote helpers) should be accepted: %v", err)
-	}
-}
-
-func TestValidateRuntimeBundleAcceptsPartialRemoteHelpers(t *testing.T) {
+func TestValidateRuntimeBundleRejectsMissingRemoteHelper(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "bin", "kandev"))
 	writeFile(t, filepath.Join(dir, "bin", "agentctl"))
 	writeFile(t, filepath.Join(dir, "bin", "agentctl-linux-amd64"))
 	writeFile(t, filepath.Join(dir, "bin", "agentctl-linux-arm64"))
 	writeFile(t, filepath.Join(dir, "bin", "agentctl-darwin-amd64"))
-	// darwin/arm64 intentionally absent.
-	if _, err := validateRuntimeBundle(dir, "test"); err != nil {
-		t.Fatalf("partial remote-helper set should be accepted: %v", err)
+
+	_, err := validateRuntimeBundle(dir, "test")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if got, want := err.Error(), "agentctl darwin/arm64 helper not found"; !strings.Contains(got, want) {
+		t.Fatalf("error = %q, want substring %q", got, want)
 	}
 }
 
@@ -155,9 +212,9 @@ func writeMachO(t *testing.T, path string, signed bool) {
 	}
 }
 
-func TestAgentctlRemoteHelpers(t *testing.T) {
-	got := make([]string, 0, len(agentctlRemoteHelpers))
-	for _, helper := range agentctlRemoteHelpers {
+func TestRequiredAgentctlRemoteHelpers(t *testing.T) {
+	got := make([]string, 0, len(requiredAgentctlRemoteHelpers))
+	for _, helper := range requiredAgentctlRemoteHelpers {
 		got = append(got, helper.Name)
 	}
 	want := []string{
@@ -283,7 +340,7 @@ func TestResolveRuntimeBundleReportsBothLookupsInError(t *testing.T) {
 
 func writeRemoteAgentctlHelpers(t *testing.T, dir string) {
 	t.Helper()
-	for _, helper := range agentctlRemoteHelpers {
+	for _, helper := range requiredAgentctlRemoteHelpers {
 		path := filepath.Join(dir, "bin", helper.Name)
 		// MustBeSigned helpers now fail closed on an unparsable artifact, so a
 		// plain stub no longer passes validation — write a signed Mach-O.

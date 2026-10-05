@@ -26,6 +26,7 @@ export type ChatInputToolbarProps = {
   canCancelAgent?: boolean;
   /** Whether the input has content to send (text, comments, or context) */
   hasContent?: boolean;
+  planActionDisabledReason?: string;
   isDisabled: boolean;
   submitDisabledReason?: string;
   isSending: boolean;
@@ -185,6 +186,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
         canCancelAgent={props.canCancelAgent}
         hasContent={props.hasContent ?? false}
         onImplementPlan={props.onImplementPlan}
+        planActionDisabledReason={props.planActionDisabledReason}
         onEnhancePrompt={props.onEnhancePrompt}
         isEnhancingPrompt={props.isEnhancingPrompt}
         isUtilityConfigured={props.isUtilityConfigured}

@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import {
   IconChartBar,
   IconFileDescription,
-  IconHistory,
   IconLayoutGrid,
   IconTimeline,
 } from "@tabler/icons-react";
@@ -21,7 +20,6 @@ type PluginPanelPickerProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSelect: (panel: MobileSessionPanel) => void;
-  showPromptHistory?: boolean;
   showUsage?: boolean;
   showDocuments?: boolean;
   showTaskHistory?: boolean;
@@ -55,15 +53,13 @@ function PickerOption({
   );
 }
 
-/** Core (non-plugin) picker rows: Prompt history, Usage, Documents. */
+/** Core (non-plugin) picker rows: Usage, Documents, Task history. */
 function CorePanelOptions({
-  showPromptHistory,
   showUsage,
   showDocuments,
   showTaskHistory,
   onSelect,
 }: {
-  showPromptHistory: boolean;
   showUsage: boolean;
   showDocuments: boolean;
   showTaskHistory: boolean;
@@ -72,14 +68,6 @@ function CorePanelOptions({
   const { t } = useTranslation();
   return (
     <>
-      {showPromptHistory && (
-        <PickerOption
-          testId="mobile-prompt-history-option"
-          icon={<IconHistory className="h-5 w-5 shrink-0 text-muted-foreground" />}
-          label={t("task:promptHistory")}
-          onSelect={() => onSelect("prompt-history")}
-        />
-      )}
       {showUsage && (
         <PickerOption
           testId="mobile-usage-option"
@@ -113,7 +101,6 @@ export function PluginPanelPicker({
   open,
   onOpenChange,
   onSelect,
-  showPromptHistory = false,
   showUsage = false,
   showDocuments = false,
   showTaskHistory = false,
@@ -160,7 +147,6 @@ export function PluginPanelPicker({
           </button>
         ))}
         <CorePanelOptions
-          showPromptHistory={showPromptHistory}
           showUsage={showUsage}
           showDocuments={showDocuments}
           showTaskHistory={showTaskHistory}

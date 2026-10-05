@@ -6,19 +6,28 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconArchive, IconArchiveOff, IconLoader, IconTrash } from "@tabler/icons-react";
 import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
+import { cleanupSharesParentWorkspace } from "@/components/task/task-cleanup-summary";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
-import { type Repository, type Task, type Workflow } from "@/lib/types/http";
+import { type Repository, type Task } from "@/lib/types/http";
 import { isTaskInFlight } from "@/lib/ui/state-icons";
 import { formatRelativeTime } from "@/lib/utils";
 import { TasksPagination } from "./tasks-pagination";
 import { TaskListRowPrimaryContent } from "./rich-task-list-row";
 import { PullToRefresh } from "@/components/mobile/pull-to-refresh";
 import { TasksListControls } from "./tasks-list-controls";
-import { buildTaskSections, flattenTaskTree, type TaskListSection } from "./tasks-list-sections";
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useRepositoryGroups } from "@/hooks/use-repository-groups";
 import type { TaskListFacetValue } from "@/lib/plugins/types";
+import { workspaceModeFromMetadata } from "@/lib/kanban/map-task";
+
+import {
+  buildTaskSections,
+  type TaskTreeNode,
+  type TaskListSection,
+  type TaskListStepPreviews,
+  type TaskListWorkflow,
+} from "@/lib/tasks/task-list-sections";
 
 export type TasksListViewProps = {
   total: number;
@@ -30,8 +39,9 @@ export type TasksListViewProps = {
   onTasksListGroupChange: (group: string) => void;
   facetOptions?: ReadonlyArray<{ value: string; label: string }>;
   facetValues?: Record<string, readonly TaskListFacetValue[]>;
+  workflowStepPreviews?: TaskListStepPreviews;
   tasks: Task[];
-  workflows: Workflow[];
+  workflows: TaskListWorkflow[];
   repositories: Repository[];
   showTaskDetails: boolean;
   pageCount: number;
@@ -73,6 +83,7 @@ export function TasksListView({
   onRefresh,
   facetOptions,
   facetValues,
+  workflowStepPreviews,
 }: TasksListViewProps) {
   // Not a <main>: AppShell owns that landmark, one per page.
   const content = (
@@ -100,6 +111,7 @@ export function TasksListView({
           onDelete={handleDelete}
           onRowClick={handleRowClick}
           facetValues={facetValues}
+          workflowStepPreviews={workflowStepPreviews}
         />
         <TasksPagination
           total={total}
@@ -126,9 +138,10 @@ function TaskRows({
   onDelete,
   onRowClick,
   facetValues = {},
+  workflowStepPreviews = {},
 }: {
   tasks: Task[];
-  workflows: Workflow[];
+  workflows: TaskListWorkflow[];
   repositories: Repository[];
   showTaskDetails: boolean;
   tasksListGroup: string;
@@ -138,19 +151,17 @@ function TaskRows({
   onUnarchive: (taskId: string) => Promise<void>;
   onDelete: (
     taskId: string,
-    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean; confirmationId?: string },
   ) => Promise<void>;
   onRowClick: (task: Task) => void;
   facetValues?: Record<string, readonly TaskListFacetValue[]>;
+  workflowStepPreviews?: TaskListStepPreviews;
 }) {
   const { t, i18n } = useTranslation();
   const repositoryGroups = useRepositoryGroups();
   const workflowMap = useMemo(() => new Map(workflows.map((w) => [w.id, w.name])), [workflows]);
   const repoMap = useMemo(() => new Map(repositories.map((r) => [r.id, r.name])), [repositories]);
-  // `groupForTask` resolves its headings from the catalog (the no-workflow /
-  // no-repository fallbacks, and now the task-state vocabulary). Without the
-  // language in the deps a section header keeps the previous locale until the
-  // task list itself changes.
+  // Section headings resolve from the active locale even when the tasks do not change.
   const sections = useMemo(
     () =>
       buildTaskSections(tasks, {
@@ -158,9 +169,21 @@ function TaskRows({
         workflowMap,
         repoMap,
         facetValues,
+        workflows,
+        workflowStepPreviews,
         repositoryGroups,
       }),
-    [facetValues, repoMap, repositoryGroups, tasks, tasksListGroup, workflowMap, i18n.language],
+    [
+      facetValues,
+      repoMap,
+      repositoryGroups,
+      tasks,
+      tasksListGroup,
+      workflowMap,
+      workflows,
+      workflowStepPreviews,
+      i18n.language,
+    ],
   );
 
   if (isLoading) {
@@ -198,6 +221,10 @@ function TaskRows({
   );
 }
 
+function flattenTaskTree(nodes: TaskTreeNode[]): TaskTreeNode[] {
+  return nodes.flatMap((node) => [node, ...flattenTaskTree(node.children)]);
+}
+
 function TaskListRow({
   task,
   level,
@@ -220,7 +247,7 @@ function TaskListRow({
   onUnarchive: (taskId: string) => Promise<void>;
   onDelete: (
     taskId: string,
-    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean; confirmationId?: string },
   ) => Promise<void>;
   onRowClick: (task: Task) => void;
 }) {
@@ -293,7 +320,7 @@ function TaskListSectionView({
   onUnarchive: (taskId: string) => Promise<void>;
   onDelete: (
     taskId: string,
-    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean; confirmationId?: string },
   ) => Promise<void>;
   onRowClick: (task: Task) => void;
 }) {
@@ -400,10 +427,11 @@ function TaskRowActions({
   onUnarchive: (taskId: string) => Promise<void>;
   onDelete: (
     taskId: string,
-    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean; confirmationId?: string },
   ) => Promise<void>;
 }) {
   const { t } = useTranslation();
+  const workspaceMode = workspaceModeFromMetadata(task.metadata);
   const archiveAnchorRef = useRef<HTMLButtonElement>(null);
   const { isFinePointer } = useResponsiveBreakpoint();
   return (
@@ -457,9 +485,10 @@ function TaskRowActions({
         taskId={task.id}
         isInFlight={isTaskInFlight(task.foreground_activity)}
         executorType={task.primary_executor_type}
+        sharesParentWorkspace={cleanupSharesParentWorkspace(workspaceMode)}
         isDeleting={isDeleting}
-        onConfirm={({ cascade, discardWorktreeChanges }) =>
-          onDelete(task.id, { cascade, discardWorktreeChanges })
+        onConfirm={({ cascade, discardWorktreeChanges, confirmationId }) =>
+          onDelete(task.id, { cascade, discardWorktreeChanges, confirmationId })
         }
       />
       <TaskArchiveConfirmation

@@ -11,50 +11,56 @@ function deferred<T>() {
 }
 
 describe("useSessionTabDelete", () => {
-  it("opens the confirmation from the context menu and deletes with toast feedback", async () => {
-    const setConfirmDelete = vi.fn();
-    const handleDelete = vi.fn().mockResolvedValue(true);
-    const { result } = renderHook(() => useSessionTabDelete(setConfirmDelete, handleDelete));
-
-    act(() => result.current.handleMenuDelete());
-    expect(setConfirmDelete).toHaveBeenCalledWith(true);
-
-    await act(async () => {
-      await result.current.handleConfirmDelete();
-    });
-
-    expect(handleDelete).toHaveBeenCalledWith({ feedback: "toast" });
-    expect(result.current.isDeleting).toBe(false);
-  });
-
-  it("tracks the deleting state until the request settles", async () => {
+  it("uses inline feedback and clears the spinner after a tab delete settles", async () => {
     const setConfirmDelete = vi.fn();
     const pending = deferred<boolean>();
     const handleDelete = vi.fn(() => pending.promise);
     const { result } = renderHook(() => useSessionTabDelete(setConfirmDelete, handleDelete));
 
+    act(() => result.current.handleCloseTab());
+    expect(setConfirmDelete).toHaveBeenCalledWith(true);
+
     let deletePromise!: Promise<void>;
     act(() => {
       deletePromise = result.current.handleConfirmDelete();
     });
-    expect(result.current.isDeleting).toBe(true);
+
+    expect(result.current.isDeletingFromTab).toBe(true);
+    expect(handleDelete).toHaveBeenCalledWith({ feedback: "inline" });
 
     await act(async () => {
       pending.resolve(true);
       await deletePromise;
     });
-    expect(result.current.isDeleting).toBe(false);
+
+    expect(result.current.isDeletingFromTab).toBe(false);
   });
 
-  it("clears the deleting state when the request fails", async () => {
+  it("clears the spinner when a tab delete fails", async () => {
     const setConfirmDelete = vi.fn();
     const handleDelete = vi.fn().mockResolvedValue(false);
     const { result } = renderHook(() => useSessionTabDelete(setConfirmDelete, handleDelete));
 
+    act(() => result.current.handleCloseTab());
     await act(async () => {
       await result.current.handleConfirmDelete();
     });
 
-    expect(result.current.isDeleting).toBe(false);
+    expect(result.current.isDeletingFromTab).toBe(false);
+    expect(handleDelete).toHaveBeenCalledWith({ feedback: "inline" });
+  });
+
+  it("keeps context-menu deletion on toast feedback without the tab spinner", async () => {
+    const setConfirmDelete = vi.fn();
+    const handleDelete = vi.fn().mockResolvedValue(true);
+    const { result } = renderHook(() => useSessionTabDelete(setConfirmDelete, handleDelete));
+
+    act(() => result.current.handleMenuDelete());
+    await act(async () => {
+      await result.current.handleConfirmDelete();
+    });
+
+    expect(result.current.isDeletingFromTab).toBe(false);
+    expect(handleDelete).toHaveBeenCalledWith({ feedback: "toast" });
   });
 });

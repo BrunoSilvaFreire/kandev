@@ -17,7 +17,15 @@ export type {
 } from "./agent-profile";
 
 import type { AgentProfile } from "./agent-profile";
+import type { CLIFlag } from "./agent-profile";
 import type { BackendMessage } from "./backend-message";
+
+/**
+ * How kandev drives a custom agent's command. Absent means terminal
+ * passthrough, which is what every definition stored before the field existed
+ * decodes to.
+ */
+export type CustomAgentProtocol = "acp";
 
 export type TUIConfig = {
   command: string;
@@ -33,6 +41,15 @@ export type TUIConfig = {
    * list here, or a strategy added in Go silently stops being selectable.
    */
   mcp_strategy?: string;
+  /**
+   * Runtime kandev drives the command with. Absent means terminal passthrough;
+   * `"acp"` means kandev speaks the Agent Client Protocol to it on standard
+   * input and output, which is what gives the agent structured chat, tool
+   * calls, models, and modes.
+   */
+  protocol?: CustomAgentProtocol;
+  /** Use paced unframed writes for TUIs that reject bracketed-paste markers. */
+  disable_bracketed_paste?: boolean;
 };
 
 /** One selectable MCP injection mechanism, served by the backend. */
@@ -149,7 +166,20 @@ export type CapabilityStatus =
   | "auth_required"
   | "not_installed"
   | "failed"
-  | "not_configured";
+  | "not_configured"
+  | "unsupported";
+
+export type ProfileLaunchSettingsRequest = {
+  env_vars: { key: string; value?: string; secret_id?: string }[];
+  cli_flags: CLIFlag[];
+  command_prefix: string;
+};
+
+export type ProfileCapabilityRequest = {
+  profile_id?: string;
+  launch_settings?: ProfileLaunchSettingsRequest;
+  refresh?: boolean;
+};
 
 export type ModelConfig = {
   default_model: string;
@@ -173,6 +203,7 @@ export type DynamicModelsResponse = {
   current_mode_id?: string;
   commands?: CommandEntry[];
   error: string | null;
+  context_revision?: string;
 };
 
 export type ResolveAgentModelConfigRequest = {
@@ -180,6 +211,8 @@ export type ResolveAgentModelConfigRequest = {
   mode?: string;
   config_options?: Record<string, string>;
   refresh?: boolean;
+  profile_id?: string;
+  launch_settings?: ProfileLaunchSettingsRequest;
 };
 
 export type AgentModelConfigResponse = {
@@ -188,6 +221,7 @@ export type AgentModelConfigResponse = {
   status: CapabilityStatus;
   config_options: ConfigOptionEntry[];
   error: string | null;
+  context_revision?: string;
 };
 
 export type PermissionSetting = {
@@ -226,10 +260,12 @@ export type ToolStatus = {
 
 export type LoginCommand = {
   cmd: string[];
+  variants?: Record<string, string[]>;
   description?: string;
 };
 
 export type RuntimeUpdate = {
+  managed_fallback?: boolean;
   supported: boolean;
   package: string;
   current_version?: string;
@@ -285,6 +321,8 @@ export type ClarificationQuestion = {
   title: string;
   prompt: string;
   options: ClarificationOption[];
+  /** Omitted for existing agents, which retain the custom-answer field. */
+  allow_custom_text?: boolean;
 };
 
 // Each per-question chat message carries its own metadata. For multi-question

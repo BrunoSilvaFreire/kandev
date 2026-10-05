@@ -82,6 +82,10 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 			},
 		},
 	}
+	if mcpBackendClient != nil && !cfg.DisableAskQuestion && cfg.SessionID != "" {
+		mcpBackendClient.SetSessionID(cfg.SessionID)
+		procMgr.SetUserInputRequestHandler(newCodexUserInputRequestHandler(cfg, mcpBackendClient, s.logger))
+	}
 
 	s.router.Use(httpmw.RequestLogger(s.logger, "agentctl-instance"))
 	// Exempt paths from auth:
@@ -120,6 +124,7 @@ func (s *Server) setupRoutes() {
 		// Process control
 		api.POST("/agent/configure", s.handleAgentConfigure)
 		api.POST("/agent/managed-runtime/cache-repair", s.handleManagedRuntimeCacheRepair)
+		api.POST("/agent/background-work/action", s.handleBackgroundWorkAction)
 		api.POST("/start", s.handleStart)
 		api.POST("/stop", s.handleStop)
 
@@ -428,14 +433,16 @@ type StartRequest struct {
 }
 
 type StartResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message,omitempty"`
-	Command string `json:"command,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Success           bool   `json:"success"`
+	Message           string `json:"message,omitempty"`
+	Command           string `json:"command,omitempty"`
+	ProcessGeneration uint64 `json:"process_generation,omitempty"`
+	Error             string `json:"error,omitempty"`
 }
 
 func (s *Server) handleStart(c *gin.Context) {
-	if err := s.procMgr.Start(c.Request.Context()); err != nil {
+	processGeneration, err := s.procMgr.StartWithGeneration(c.Request.Context())
+	if err != nil {
 		s.logger.Error("failed to start agent", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, StartResponse{
 			Success: false,
@@ -445,9 +452,10 @@ func (s *Server) handleStart(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, StartResponse{
-		Success: true,
-		Message: "agent started",
-		Command: s.procMgr.GetFinalCommand(),
+		Success:           true,
+		Message:           "agent started",
+		Command:           s.procMgr.GetFinalCommand(),
+		ProcessGeneration: processGeneration,
 	})
 }
 
@@ -459,7 +467,11 @@ type AgentConfigureRequest struct {
 	ContinueArgs    optionalArgs      `json:"continue_args"`
 	Env             map[string]string `json:"env,omitempty"`
 	ReplaceEnv      bool              `json:"replace_env,omitempty"`
-	ApprovalPolicy  string            `json:"approval_policy,omitempty"` // "untrusted", "on-failure", "on-request", or "never"
+	// ApprovalPolicy is accepted and ignored. It was never consulted by any
+	// code path; the field remains so an older backend configuring a newer
+	// agentctl still succeeds. Permission auto-approval travels on
+	// CreateInstanceRequest.AutoApprovePermissions.
+	ApprovalPolicy string `json:"approval_policy,omitempty"`
 }
 
 type optionalArgs struct {
@@ -498,9 +510,9 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 
 	var configureErr error
 	if req.ReplaceEnv {
-		configureErr = s.procMgr.ConfigureWithEnvironment(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ApprovalPolicy, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present)
+		configureErr = s.procMgr.ConfigureWithEnvironment(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present)
 	} else {
-		configureErr = s.procMgr.Configure(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ApprovalPolicy, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present)
+		configureErr = s.procMgr.Configure(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present)
 	}
 	if configureErr != nil {
 		s.logger.Error("failed to configure agent", zap.Error(configureErr), zap.String("command", req.Command))
@@ -511,7 +523,7 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		return
 	}
 
-	s.logger.Info("agent configured", zap.String("command", req.Command), zap.String("approval_policy", req.ApprovalPolicy))
+	s.logger.Info("agent configured", zap.String("command", req.Command))
 	c.JSON(http.StatusOK, AgentConfigureResponse{
 		Success: true,
 		Message: "agent configured",

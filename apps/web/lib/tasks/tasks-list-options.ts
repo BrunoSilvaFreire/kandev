@@ -17,7 +17,7 @@ export const TASKS_LIST_SORT_OPTIONS = [
 ] as const;
 
 export const TASKS_LIST_GROUP_OPTIONS = [
-  { value: "state" },
+  { value: "workflow_step" },
   { value: "workflow" },
   { value: "repository" },
   { value: "repositoryGroup" },
@@ -28,7 +28,7 @@ export type TasksListSort = (typeof TASKS_LIST_SORT_OPTIONS)[number]["value"];
 export type TasksListGroup = (typeof TASKS_LIST_GROUP_OPTIONS)[number]["value"];
 
 export const DEFAULT_TASKS_LIST_SORT: TasksListSort = "updated_desc";
-export const DEFAULT_TASKS_LIST_GROUP: TasksListGroup = "state";
+export const DEFAULT_TASKS_LIST_GROUP: TasksListGroup = "workflow_step";
 
 // i18n-exempt: internal client-only option namespace, never rendered as copy.
 export const TASK_LIST_FACET_PREFIX = "facet:";
@@ -49,7 +49,7 @@ export const SORT_OPTION_LABEL_KEYS: Record<TasksListSort, string> = {
 };
 
 export const GROUP_OPTION_LABEL_KEYS: Record<TasksListGroup, string> = {
-  state: "tasks:groupByState",
+  workflow_step: "tasks:groupByWorkflowStep",
   workflow: "tasks:groupByWorkflow",
   repository: "tasks:groupByRepository",
   repositoryGroup: "tasks:groupByRepositoryGroup",

@@ -1,0 +1,218 @@
+I want to make a broader quality-of-life pass across Kandev, focused on reducing friction in everyday navigation, session handling, Quick Chats, repository organization, filtering, grouping, and general workspace ergonomics.
+
+The most important architectural constraint is that these improvements should be implemented as **shared platform concepts and reusable primitives wherever possible**, rather than as isolated features duplicated across individual pages. Before adding new components, review the existing abstractions for sessions, conversations, tasks, tabs, filters, grouping, navigation, context menus, and detail pages. Reuse or generalize them when appropriate.
+
+The goal is not to overbuild. Prefer extending an existing shared abstraction over introducing parallel systems that solve nearly the same problem.
+
+### Session and conversation lifecycle
+
+Clearly separate the concepts of **closing a tab/view** and **deleting the underlying conversation**.
+
+Currently, closing a session from either a task or Quick Chat can prompt for deletion, which is not what I want. Closing should simply remove that session from the current tab/view state without modifying or deleting its persisted conversation.
+
+Tabs should support context-menu actions such as:
+
+- Close
+- Close Others
+- Close Tabs to the Right, if appropriate to the existing tab model
+
+Deleting the underlying conversation should be a separate explicit destructive action available from the relevant conversation/session context menu.
+
+Only destructive operations should require destructive confirmation.
+
+This distinction should be implemented in the shared session/tab model so Task sessions and Quick Chat sessions behave consistently.
+
+### Improved new-chat flow
+
+The **Utility Agent** should be the default agent profile whenever a new Quick Chat is created, unless the user explicitly selects another profile.
+
+The new-chat UI should also include an optional initial-prompt text area using the same shared conversation composer/input component used elsewhere in Kandev.
+
+If an initial prompt is provided, creating the Quick Chat should:
+
+1. Create the session.
+2. Start the selected agent.
+3. Automatically submit the initial prompt as soon as the session is ready.
+
+This should support a fire-and-forget workflow where I can describe something and immediately move on instead of:
+
+1. Clicking Start Chat.
+2. Waiting for initialization.
+3. Opening the new conversation.
+4. Manually typing and submitting the first prompt.
+
+Starting an empty Quick Chat must still be supported.
+
+Avoid creating a special-purpose prompt implementation just for this flow. Reuse the normal conversation composer and session-starting infrastructure.
+
+### Make Quick Chats a first-class browsable surface
+
+Quick Chats should no longer exist only as a transient side-panel experience.
+
+Keep the existing Quick Chat model/button for rapidly creating conversations, but introduce a dedicated **Quick Chats** entry in the left navigation.
+
+Place it:
+
+**below Usage and above New Task.**
+
+Opening Quick Chats should show a page where I can browse and manage previous Quick Chats, similarly to how Tasks can be browsed.
+
+A Quick Chat should also be openable into a full-page detail experience similar to the Task page.
+
+It does not necessarily need to literally become a Task or reuse every Task concept, but the page should reuse the shared detail-page/session infrastructure wherever possible so that capabilities are consistent between the two surfaces.
+
+This is particularly important because Quick Chats can already produce richer artifacts such as plans. I have seen Quick Chats generate plans with CTAs such as **Open Plan**, but that interaction currently fails or has nowhere meaningful to navigate because the conversation exists only inside the Quick Chat panel.
+
+A Quick Chat detail page should therefore be capable of displaying and navigating the same kinds of conversation artifacts that make sense outside a Task, including:
+
+- Plans
+- Documents
+- Agent output
+- Session history
+- Relevant generated artifacts
+- Actions/CTAs embedded in agent output
+
+If an artifact is genuinely Task-specific, handle that distinction explicitly rather than allowing the UI to expose a CTA that cannot work.
+
+The important product model should be:
+
+**Quick Chat is a lightweight conversation entity, not merely a temporary panel.**
+
+The side panel is simply one fast way to interact with it.
+
+### Repository Groups
+
+Introduce **Repository Groups** as a first-class workspace concept.
+
+A workspace may contain many repositories that logically belong to larger projects or organizations. For example, my personal workspace contains repositories that belong to broader groups such as:
+
+- Cityscape
+- Minecraft
+- Ambush
+- Kandev
+
+Users should be able to:
+
+- Create repository groups.
+- Rename them.
+- Assign and remove repositories.
+- Reorder or otherwise manage them where useful.
+- Filter using repository groups.
+- Group views using repository groups.
+
+Repository Group should become a shared data dimension anywhere repository information is relevant.
+
+This should include at least:
+
+- Kanban / Pipeline
+- Threads
+- List views
+- Task navigation
+- Left-side repository/task navigation
+- Relevant search and filtering surfaces
+
+The goal is to let me focus on an entire project family without repeatedly selecting each repository individually.
+
+Do not implement repository groups as local metadata independently inside each view. Introduce one canonical workspace-level concept and expose it through shared filtering/grouping infrastructure.
+
+### Shared Quick Filters
+
+Improve filtering across **every relevant Home view**.
+
+We already have useful filters such as:
+
+- Workflow
+- Repository
+- Priority
+- Status
+- Other view-specific dimensions
+
+However, they are currently too hidden inside the Filters menu.
+
+Keep the complete Filters interface, but introduce the concept of **Quick Filters**.
+
+Any supported filter should be configurable to appear persistently in the view header for fast access.
+
+For example, I may want Repository Group, Repository, Workflow, and Status always visible while leaving less common filters inside the expanded Filters menu.
+
+Users should be able to configure which filters appear as Quick Filters.
+
+These preferences should persist appropriately.
+
+Repository Group should be available as both a normal filter and a Quick Filter anywhere it applies.
+
+Most importantly, Quick Filters should be implemented through a shared filtering model rather than individually recreating filter controls for Kanban, Threads, List, etc.
+
+### Shared configurable grouping
+
+Introduce a **shared grouping model** for every Home view where grouping is meaningful.
+
+Users should be able to group visible items by supported dimensions such as:
+
+- Repository Group
+- Repository
+- Workflow
+- Status
+- Priority
+- Other suitable view-specific fields
+
+Filtering and grouping should remain independent concepts:
+
+- **Filtering** determines which records are visible.
+- **Grouping** determines how those records are visually organized.
+
+The active grouping should be clearly visible and easy to change or remove.
+
+Views may render groups differently depending on their presentation—for example, Kanban versus a flat list—but the grouping configuration and underlying semantics should come from the same shared platform model.
+
+Persist grouping preferences where appropriate.
+
+### Shared UX platform direction
+
+Treat this work as an opportunity to consolidate Kandev's UI architecture around reusable concepts.
+
+In particular, investigate whether these can become shared platform primitives:
+
+- Conversation/session entity model
+- Session lifecycle and persistence
+- Tab lifecycle
+- Conversation context menus
+- Conversation detail pages
+- Conversation composer
+- Artifact rendering and navigation
+- Filter definitions
+- Quick Filter configuration
+- Grouping definitions
+- Repository Group metadata
+- View preference persistence
+- Shared list/browse infrastructure
+
+Tasks and Quick Chats should reuse these primitives where their behavior overlaps.
+
+For example, do not build one conversation viewer for Task sessions and another unrelated viewer for Quick Chats if they fundamentally display the same agent conversation.
+
+Similarly, do not implement Repository Group filtering independently in four pages. Add Repository Group to the common filter model and allow those views to consume it.
+
+Before introducing a new abstraction, inspect what already exists and extend it if possible. Some of this functionality may already partially exist under another name.
+
+### Expected outcome
+
+The intended end state is that Kandev feels substantially faster and more predictable to operate day-to-day.
+
+I should be able to:
+
+- Close sessions without worrying that they will be deleted.
+- Explicitly delete conversations only when I actually intend to.
+- Launch a Quick Chat with an initial prompt in one action.
+- Keep using the lightweight Quick Chat panel when I want something fast.
+- Browse all Quick Chats from a dedicated navigation page.
+- Open a Quick Chat into a full detail view when the conversation becomes substantial.
+- Open plans and other artifacts generated from Quick Chats without hitting broken Task-only interactions.
+- Organize large workspaces using Repository Groups.
+- Filter any Home view using immediately accessible Quick Filters.
+- Group those same views using consistent shared grouping concepts.
+- Move between Tasks and Quick Chats without encountering completely different UX patterns for concepts that are fundamentally the same.
+
+Approach this as a **cohesive shared-platform UX improvement**, not a collection of unrelated feature requests.
+
+Where an existing Kandev abstraction already solves part of the problem, generalize and reuse it. Prefer less code, fewer parallel concepts, and a more coherent product model over implementing each requested behavior independently.

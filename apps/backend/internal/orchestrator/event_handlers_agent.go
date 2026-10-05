@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -567,6 +568,14 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 			zap.String("session_state", string(session.State)))
 		return
 	}
+	s.clearDynamicStartupStreakForBootReady(ctx, data, session)
+	if err := s.persistProviderRestoredResumeNotice(ctx, session, data); err != nil {
+		s.logger.Warn("failed to create provider-restored resume notice",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("attempt_id", data.AttemptID),
+			zap.Error(err))
+	}
 	markerSnapshot, markerSnapshotKnown := s.interruptedMarkerSnapshotForResumeAttempt(data.SessionID, data.AttemptID)
 	// Every boot-ready callback is a recovery callback for marker purposes. A
 	// missing/finished attempt, empty attempt ID, or failed task snapshot leaves
@@ -574,8 +583,11 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 	// clearTaskInterruptedMarker.
 	// Ordinary sessions without a marker take the same no-op path; only an
 	// immutable marker captured for this attempt can clear the warning.
-	recoveryResolvedAt := s.markRecoveryResolved(
-		ctx, data.SessionID, session, markerSnapshot, markerSnapshotKnown,
+	recoveryResolvedAt := s.markRecoveryResolvedForAttempt(
+		ctx, data.SessionID, session,
+		data.AttemptID,
+		s.resumeAttemptStore().recoveryErrorStamp(data.SessionID, data.AttemptID),
+		markerSnapshot, markerSnapshotKnown,
 	)
 
 	// Idempotent: if the session is already WAITING_FOR_INPUT (e.g. revived
@@ -624,6 +636,88 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 	lock.Unlock()
 	guardLocked = false
 	s.drainQueuedMessageForPromptableSession(ctx, data.SessionID)
+}
+
+func (s *Service) persistProviderRestoredResumeNotice(
+	ctx context.Context,
+	session *models.TaskSession,
+	data watcher.AgentEventData,
+) error {
+	if session == nil || session.ID != data.SessionID || session.TaskID != data.TaskID || data.AttemptID == "" ||
+		data.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored ||
+		!s.resumeAttemptOwnsNotice(data.SessionID, data.AgentExecutionID, data.AttemptID) {
+		return nil
+	}
+	if s.messageCreator == nil {
+		return fmt.Errorf("provider-restored resume message creator is unavailable")
+	}
+
+	metadata := map[string]interface{}{
+		"variant":                   "resume_settings_provider_restored",
+		"settings_policy":           string(streams.SessionSettingsPolicyProviderRestored),
+		"attempt_id":                data.AttemptID,
+		"skipped_settings":          []string{"mode", "model"},
+		"skipped_selection_sources": []string{"agent_profile", "runtime_config", "workflow_overrides", "provider_config_options"},
+		"effective_model_known":     false,
+		"effective_mode_known":      false,
+	}
+	if snapshot, ok := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState]); ok && snapshot.SettingsAttemptID == data.AttemptID {
+		if modelID := models.SafeAgentErrorSelector(snapshot.CurrentModelID); modelID != "" {
+			metadata["effective_model_known"] = true
+			metadata["effective_model_id"] = modelID
+			for _, model := range snapshot.Models {
+				if model.ModelID == modelID {
+					if modelName := safeProviderModelLabel(model.Name); modelName != "" {
+						metadata["effective_model_name"] = modelName
+					}
+					break
+				}
+			}
+		}
+		if modeID := boundedProviderSelectorID(snapshot.CurrentModeID); modeID != "" {
+			metadata["effective_mode_known"] = true
+			metadata["effective_mode_id"] = modeID
+		}
+	}
+	if stamp := s.resumeAttemptStore().recoveryErrorStamp(data.SessionID, data.AttemptID); stamp != "" {
+		metadata["resolved_error_stamp"] = stamp
+	}
+
+	messageID := uuid.NewSHA1(
+		uuid.NameSpaceOID,
+		[]byte("resume-settings-provider-restored:"+data.SessionID+":"+data.AttemptID),
+	).String()
+	return s.messageCreator.CreateSessionMessageIdempotent(
+		ctx,
+		messageID,
+		data.TaskID,
+		"Session resumed with the provider's current settings. Saved mode and model selections were kept for future launches.",
+		data.SessionID,
+		string(v1.MessageTypeStatus),
+		s.getActiveTurnID(data.SessionID),
+		metadata,
+		false,
+	)
+}
+
+func boundedProviderSelectorID(value string) string {
+	if value == "" || len(value) > 256 || strings.TrimSpace(value) != value || strings.ContainsAny(value, "\r\n\t") {
+		return ""
+	}
+	return value
+}
+
+func safeProviderModelLabel(value string) string {
+	if value == "" || len(value) > 256 || !utf8.ValidString(value) ||
+		strings.TrimSpace(value) != value || routingerr.SanitizeFullUnbounded(value) != value {
+		return ""
+	}
+	for _, char := range value {
+		if char < 0x20 || char == 0x7f {
+			return ""
+		}
+	}
+	return value
 }
 
 func (s *Service) drainQueuedBeforeWorkflowTransition(
@@ -926,6 +1020,14 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	// returns, by which point completeTurnForSession below has already
 	// removed it from activeTurns. See markReadyTurn's doc comment.
 	s.markReadyTurn(data.SessionID, data.AgentExecutionID, data.PromptGeneration, turnAtEventFire)
+	if err := s.settleManagedInputTurn(
+		ctx, data.TaskID, data.SessionID, turnAtEventFire, data.AgentExecutionID,
+		messagequeue.ManagedInputStateCompleted, "",
+	); err != nil {
+		s.logger.Warn("failed to settle completed managed input",
+			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID),
+			zap.String("turn_id", turnAtEventFire), zap.Error(err))
+	}
 
 	// Complete the current turn
 	s.reconcileCompletedCIAutoFixTurn(ctx, data.TaskID, data.SessionID, turnAtEventFire)
@@ -1122,8 +1224,9 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 				releaseReservation()
 				return
 			}
-			return
 		}
+		// A delivered (or empty) reservation is acknowledged; a reservation
+		// left in place is re-reserved and re-delivered at every turn end.
 		if err := s.messageQueue.AcknowledgeQueuedForSession(
 			context.WithoutCancel(ctx), identity, queuedMsg,
 		); err != nil &&
@@ -1173,6 +1276,14 @@ func queuedMessagePromptContent(queuedMsg *messagequeue.QueuedMessage) string {
 		content = AppendEntityReferenceContext(content, references)
 	}
 	return appendStepHandoffToPrompt(content, stepHandoffFromQueuedMetadata(queuedMsg.Metadata))
+}
+
+func isQueuedWorkflowAutoStart(queuedMsg *messagequeue.QueuedMessage) bool {
+	if queuedMsg == nil || queuedMsg.QueuedBy != messagequeue.QueuedByWorkflow {
+		return false
+	}
+	autoStart, _ := queuedMsg.Metadata[metaKeyWorkflowAutoStart].(bool)
+	return autoStart
 }
 
 func (s *Service) queuedMessageHasDispatchInput(ctx context.Context, queuedMsg *messagequeue.QueuedMessage) (bool, error) {
@@ -1282,6 +1393,16 @@ func (s *Service) recordQueuedUserMessage(
 	attachments []v1.MessageAttachment,
 	sourceIDs ...string,
 ) error {
+	return s.recordQueuedUserMessageWithPromptContent(ctx, queuedMsg, attachments, nil, sourceIDs...)
+}
+
+func (s *Service) recordQueuedUserMessageWithPromptContent(
+	ctx context.Context,
+	queuedMsg *messagequeue.QueuedMessage,
+	attachments []v1.MessageAttachment,
+	preparedPromptContent *string,
+	sourceIDs ...string,
+) error {
 	alreadyRecorded, _ := queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool)
 	if alreadyRecorded {
 		return nil
@@ -1305,6 +1426,9 @@ func (s *Service) recordQueuedUserMessage(
 	}
 	references := entityrefs.NormalizePersisted(queuedMsg.Metadata[messagequeue.MetadataEntityReferences])
 	promptContent := queuedMessagePromptContent(queuedMsg)
+	if preparedPromptContent != nil {
+		promptContent = *preparedPromptContent
+	}
 	meta := NewUserMessageMeta().
 		WithPlanMode(queuedMsg.PlanMode).
 		WithAttachments(attachments).
@@ -1529,12 +1653,15 @@ func (s *Service) executeQueuedMessageWithReservation(
 ) {
 	promptCtx := context.Background() // Use a fresh context for async execution
 	reservedSessionID := queuedMsg.SessionID
+	allowFollowupDrain := true
 	if reservation == nil {
 		reservation = s.queuedDispatchReservationForEntry(reservedSessionID, queuedMsg.ID)
 	}
 	defer func() {
 		s.clearQueuedDispatchInFlightIfCurrent(reservedSessionID, reservation)
-		s.drainQueuedDispatchIfPending(reservedSessionID)
+		if allowFollowupDrain {
+			s.drainQueuedDispatchIfPending(reservedSessionID)
+		}
 		if s.onQueuedMessageExecutionComplete != nil {
 			s.onQueuedMessageExecutionComplete()
 		}
@@ -1566,6 +1693,31 @@ func (s *Service) executeQueuedMessageWithReservation(
 			)
 			return
 		}
+	}
+	if _, managed := managedInputIDFromQueueMessage(queuedMsg); managed && queuedMsg.IsDeliveryAttempted() {
+		var identity messagequeue.QueueSessionIdentity
+		if reservation != nil {
+			identity = reservation.identity
+		}
+		var identityErr error
+		if identity.SessionIncarnationID == "" && s.messageQueue != nil {
+			identity, identityErr = s.messageQueue.ResolveSessionIdentity(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID)
+		}
+		if identityErr != nil || identity.SessionIncarnationID == "" {
+			allowFollowupDrain = false
+			s.logger.Warn("managed input has a prior dispatch attempt but its queue identity cannot be resolved",
+				zap.String("task_id", queuedMsg.TaskID), zap.String("session_id", queuedMsg.SessionID),
+				zap.String("queue_id", queuedMsg.ID), zap.Error(identityErr))
+			return
+		}
+		reconciled, reconcileErr := s.reconcileAttemptedManagedInput(promptCtx, identity, queuedMsg)
+		if reconcileErr != nil || !reconciled {
+			allowFollowupDrain = false
+			s.logger.Warn("managed input dispatch attempt could not be reconciled; retaining it without replay",
+				zap.String("task_id", queuedMsg.TaskID), zap.String("session_id", queuedMsg.SessionID),
+				zap.String("queue_id", queuedMsg.ID), zap.Error(reconcileErr))
+		}
+		return
 	}
 
 	if s.isSessionResetInProgress(queuedMsg.SessionID) {
@@ -1601,6 +1753,17 @@ func (s *Service) executeQueuedMessageWithReservation(
 		return
 	}
 	promptContent := queuedMessagePromptContent(queuedMsg)
+	var promptReferenceContext string
+	var preparedPromptContent *string
+	if isQueuedWorkflowAutoStart(queuedMsg) {
+		// Resolve workflow aliases at the drain boundary, before persistence.
+		// Recovery must carry this exact server-generated context because the
+		// shared saved definition can change while PromptAgent is in flight.
+		promptContent, promptReferenceContext = s.expandPromptReferencesWithContext(
+			promptCtx, promptContent, false,
+		)
+		preparedPromptContent = &promptContent
+	}
 	userMessageRecorded := false
 	deliveryAttempted := false
 	if queuedMsg.IsDurablePlanComment() {
@@ -1623,29 +1786,72 @@ func (s *Service) executeQueuedMessageWithReservation(
 	}
 	afterClaim := s.queuedMessageAfterClaim(
 		promptCtx, dispatchIdentity, queuedMsg, attachments, lifecyclePrompt, &userMessageRecorded,
+		preparedPromptContent,
 	)
 	afterDispatch := s.queuedMessageAfterDispatch(promptCtx, queuedMsg, lifecyclePrompt)
 	var beforeDispatch func() error
-	if queuedMsg.IsDurablePlanComment() {
+	managedInputID, managedInput := managedInputIDFromQueueMessage(queuedMsg)
+	if managedInput {
+		afterDispatch = nil
+	}
+	managedInputRecorded := false
+	if managedInput {
+		beforeDispatch = func() error {
+			if s.messageQueue == nil || dispatchIdentity.SessionIncarnationID == "" {
+				return errors.New("managed input dispatch requires an exact queue identity")
+			}
+			if err := s.messageQueue.MarkDeliveryAttemptedForSession(
+				promptCtx, dispatchIdentity, []messagequeue.QueuedMessage{*queuedMsg},
+			); err != nil {
+				return err
+			}
+			deliveryAttempted = true
+			queuedMsg.Metadata[messagequeue.MetadataDeliveryAttempted] = true
+			markQueuedUserMessageRecorded(queuedMsg)
+			return nil
+		}
+	} else if queuedMsg.IsDurablePlanComment() {
 		beforeDispatch = s.planCommentDeliveryBoundary(
 			promptCtx, dispatchIdentity, queuedMsg, &deliveryAttempted,
 		)
 	}
+	options := promptTaskOptions{
+		claimEntryID:         claimEntryID,
+		lifecyclePrompt:      lifecyclePrompt,
+		afterClaim:           afterClaim,
+		afterDispatch:        afterDispatch,
+		beforeDispatch:       beforeDispatch,
+		disableDispatchRetry: queuedMsg.IsDurablePlanComment() || managedInput,
+		configModeOverride:   workflowQueuedConfigModeOverride(queuedMsg),
+		onAccepted: func(turnID string) {
+			s.bindQueuedCIAutoFixAttempt(promptCtx, queuedMsg, turnID)
+			if !managedInput {
+				return
+			}
+			identity := dispatchIdentity
+			if identity.SessionIncarnationID == "" && s.messageQueue != nil {
+				identity, _ = s.messageQueue.ResolveSessionIdentity(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID)
+			}
+			var recordErr error
+			managedInputRecorded, recordErr = s.recordManagedInputAcceptance(promptCtx, identity, queuedMsg, turnID)
+			if recordErr != nil {
+				s.logger.Error("failed to record accepted managed input execution",
+					zap.String("task_id", queuedMsg.TaskID), zap.String("session_id", queuedMsg.SessionID),
+					zap.String("input_id", managedInputID), zap.String("turn_id", turnID), zap.Error(recordErr))
+			} else if managedInputRecorded {
+				s.publishQueueStatusEventForIdentity(promptCtx, identity)
+			}
+		},
+	}
+	if preparedPromptContent != nil {
+		options.promptAlreadyComposed = true
+		options.fallbackUsesEffectivePrompt = true
+		options.promptReferenceContext = promptReferenceContext
+	}
 	_, err := s.promptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
 		promptContent, queuedMsg.Model, queuedMsg.PlanMode, attachments, false,
 		launchOriginAutomatic,
-		promptTaskOptions{
-			claimEntryID:         claimEntryID,
-			lifecyclePrompt:      lifecyclePrompt,
-			afterClaim:           afterClaim,
-			afterDispatch:        afterDispatch,
-			beforeDispatch:       beforeDispatch,
-			disableDispatchRetry: queuedMsg.IsDurablePlanComment(),
-			configModeOverride:   workflowQueuedConfigModeOverride(queuedMsg),
-			onAccepted: func(turnID string) {
-				s.bindQueuedCIAutoFixAttempt(promptCtx, queuedMsg, turnID)
-			},
-		})
+		options)
 	if err != nil {
 		s.reconcileQueuedCIAutoFixDispatchFailure(promptCtx, queuedMsg)
 		if initialCreatePromptPassthroughQueued(queuedMsg.Metadata) {
@@ -1658,6 +1864,25 @@ func (s *Service) executeQueuedMessageWithReservation(
 				0,
 			)
 		}
+	}
+	if managedInput && deliveryAttempted {
+		identity := dispatchIdentity
+		if identity.SessionIncarnationID == "" && s.messageQueue != nil {
+			identity, _ = s.messageQueue.ResolveSessionIdentity(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID)
+		}
+		if !managedInputRecorded {
+			reconciled, reconcileErr := s.reconcileAttemptedManagedInput(promptCtx, identity, queuedMsg)
+			if reconcileErr != nil || !reconciled {
+				allowFollowupDrain = false
+				s.logger.Error("accepted managed input could not be reconciled; retaining its attempted queue entry",
+					zap.String("task_id", queuedMsg.TaskID), zap.String("session_id", queuedMsg.SessionID),
+					zap.String("input_id", managedInputID), zap.Error(reconcileErr))
+			}
+			return
+		}
+		// The receipt transition atomically removed this managed row from the
+		// shared FIFO. Ordinary acknowledgement could race a successor input.
+		return
 	}
 	s.finishQueuedMessageExecution(
 		promptCtx, callerSessionID, reservedSessionID, queuedMsg, reservation,
@@ -1680,6 +1905,7 @@ func (s *Service) queuedMessageAfterClaim(
 	attachments []v1.MessageAttachment,
 	lifecyclePrompt bool,
 	userMessageRecorded *bool,
+	preparedPromptContent *string,
 ) func() error {
 	alreadyRecorded, _ := queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool)
 	if userMessageRecorded != nil {
@@ -1696,7 +1922,9 @@ func (s *Service) queuedMessageAfterClaim(
 			return nil
 		}
 		if !alreadyRecorded {
-			if err := s.recordQueuedUserMessage(ctx, queuedMsg, attachments); err != nil {
+			if err := s.recordQueuedUserMessageWithPromptContent(
+				ctx, queuedMsg, attachments, preparedPromptContent,
+			); err != nil {
 				if lifecyclePrompt || queuedMsg.IsDurablePlanComment() {
 					return err
 				}
@@ -2349,6 +2577,7 @@ func (s *Service) finishAgentCompleted(
 	guard *lockedCancelInFlightGuard,
 ) {
 	completionFollowUp := models.IsCompletionFollowUpSession(session.Metadata)
+	s.clearDynamicUnclassifiedStreakForEvent(ctx, data, false)
 	// A successful, still-live completion clears retry state and scheduler
 	// ownership only after the guarded terminal/rotation checks above.
 	s.resetTransientRetry(data.SessionID)
@@ -2533,12 +2762,21 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 	// reap its ephemeral worktree out from under the in-flight retry.
 	// handleTransientFailure returns false (falling through) for non-transient
 	// errors, office tasks, or an exhausted budget.
+	continuation, _ := s.transientRetries.Load(data.SessionID)
 	if data.SessionID != "" && s.handleTransientFailure(ctx, data) {
 		return nil
 	}
+	if entry, ok := continuation.(*transientRetryEntry); ok && entry.mode == recoveryModeContinue {
+		return s.settleContinuationFailureLocked(ctx, data, entry)
+	}
 	s.retireInitialCreatePromptPassthroughForEvent(ctx, data)
-	if data.SessionID != "" && s.routeDynamicAgentFailure(ctx, data, classifyKanbanFailure(data)) {
-		return nil
+	if data.SessionID != "" {
+		routeResult := s.routeDynamicAgentFailureWithEvidence(
+			ctx, data, classifyKanbanFailure(data), nil, true,
+		)
+		if routeResult.handled && !routeResult.manualRecovery {
+			return nil
+		}
 	}
 
 	// All paths below are terminal for this execution (resume recovery included).
@@ -2903,6 +3141,21 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 	// this same turn instead of lazily opening a second empty turn — otherwise
 	// both turns would emit a spurious empty-turn notice.
 	failedTurnID := s.markTurnErrorTerminated(ctx, data.SessionID)
+	if failedTurnID != "" && data.AgentExecutionID != "" {
+		state := messagequeue.ManagedInputStateUncertain
+		outcome := "execution_failed_effects_unknown"
+		if data.EvidenceKnown && !data.OutputObserved && !data.EffectObserved {
+			state = messagequeue.ManagedInputStateFailed
+			outcome = "execution_failed_without_observed_effects"
+		}
+		if err := s.settleManagedInputTurn(
+			ctx, data.TaskID, data.SessionID, failedTurnID, data.AgentExecutionID, state, outcome,
+		); err != nil {
+			s.logger.Warn("failed to settle failed managed input",
+				zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID),
+				zap.String("turn_id", failedTurnID), zap.Error(err))
+		}
+	}
 
 	// Complete the current turn.
 	if !completionFollowUp {
@@ -2991,6 +3244,9 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 		RemediationURL:   providerRemediationURL(data),
 		Code:             data.FailureCode,
 		Details:          details,
+		StartupReason:    data.StartupFailureReason,
+		StartupAttempts:  data.StartupFailureAttempts,
+		StartupNPMCode:   data.StartupFailureNPMCode,
 		StampValue:       agentFailureStamp(data),
 	}
 	if err := s.repo.SetSessionMetadataKey(ctx, data.SessionID, models.SessionMetaKeyLastAgentError, lastErr); err != nil {
@@ -3019,7 +3275,7 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 			eventData["attempt_id"] = lastErr.AttemptID
 		}
 		if len(lastErr.Causes) > 0 {
-			eventData["causes"] = append([]models.AgentErrorCause(nil), lastErr.Causes...)
+			eventData["causes"] = models.NormalizeAgentErrorCauses(lastErr.Causes)
 		}
 		if lastErr.RemediationURL != "" {
 			eventData["remediation_url"] = lastErr.RemediationURL
@@ -3231,6 +3487,24 @@ func (s *Service) markRecoveryResolved(
 	markerSnapshot interruptedMarkerSnapshot,
 	markerSnapshotKnown bool,
 ) *time.Time {
+	errorStamp := ""
+	if lastError, found := models.LoadLastAgentError(session.Metadata); found && !lastError.IsDismissed() {
+		errorStamp = lastError.Stamp()
+	}
+	return s.markRecoveryResolvedForAttempt(
+		ctx, sessionID, session, "", errorStamp, markerSnapshot, markerSnapshotKnown,
+	)
+}
+
+func (s *Service) markRecoveryResolvedForAttempt(
+	ctx context.Context,
+	sessionID string,
+	session *models.TaskSession,
+	attemptID string,
+	errorStamp string,
+	markerSnapshot interruptedMarkerSnapshot,
+	markerSnapshotKnown bool,
+) *time.Time {
 	resolvedAt := time.Now().UTC()
 	resolvedAtValue := resolvedAt.Format(time.RFC3339Nano)
 	if err := s.repo.SetSessionMetadataKey(
@@ -3248,8 +3522,14 @@ func (s *Service) markRecoveryResolved(
 		session.Metadata = make(map[string]interface{})
 	}
 	session.Metadata[models.SessionMetaKeyRecoveryResolvedAt] = resolvedAtValue
+	resolutionRecorded := errorStamp == ""
+	if errorStamp != "" {
+		resolutionRecorded = s.recordRecoveryResolutionForAttempt(
+			ctx, sessionID, session, attemptID, errorStamp, resolvedAt,
+		)
+	}
 	if session.TaskID != "" {
-		s.dismissRecoveredAgentError(ctx, session.TaskID, session, resolvedAt)
+		s.dismissRecoveredAgentErrorForAttempt(ctx, session.TaskID, session, errorStamp, resolutionRecorded, resolvedAt)
 		// Boot-ready is the provider-confirmed recovery boundary. Keeping this
 		// out of the STARTING/RUNNING state funnel leaves the durable warning in
 		// place when a launch later fails or is cancelled.
@@ -3264,6 +3544,83 @@ func (s *Service) markRecoveryResolved(
 		s.clearRecoveryMetadataAfterBoot(ctx, sessionID, session)
 	}
 	return &resolvedAt
+}
+
+func (s *Service) recordRecoveryResolutionForAttempt(
+	ctx context.Context,
+	sessionID string,
+	session *models.TaskSession,
+	attemptID string,
+	errorStamp string,
+	resolvedAt time.Time,
+) bool {
+	if attemptID == "" {
+		s.logger.Warn("cannot persist stamp-specific recovery resolution without an owned attempt",
+			zap.String("session_id", sessionID))
+		return false
+	}
+	recorder, supported := s.repo.(interface {
+		RecordSessionRecoveryResolution(context.Context, string, models.SessionRecoveryResolution) (bool, error)
+	})
+	if !supported {
+		s.logger.Warn("repository cannot persist stamp-specific recovery resolution",
+			zap.String("session_id", sessionID))
+		return false
+	}
+	stored, err := recorder.RecordSessionRecoveryResolution(ctx, sessionID, models.SessionRecoveryResolution{
+		ErrorStamp: errorStamp,
+		AttemptID:  attemptID,
+		ResolvedAt: resolvedAt,
+	})
+	if err != nil {
+		s.logger.Warn("failed to persist stamp-specific recovery resolution",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return false
+	}
+	if stored {
+		s.reloadRecoveryResolutionMetadata(ctx, sessionID, session)
+	}
+	return stored
+}
+
+func (s *Service) reloadRecoveryResolutionMetadata(
+	ctx context.Context,
+	sessionID string,
+	session *models.TaskSession,
+) {
+	latest, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to reload stamp-specific recovery resolution",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return
+	}
+	if latest == nil {
+		return
+	}
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	if resolutions, exists := latest.Metadata[models.SessionMetaKeyRecoveryResolutions]; exists {
+		session.Metadata[models.SessionMetaKeyRecoveryResolutions] = resolutions
+	} else {
+		delete(session.Metadata, models.SessionMetaKeyRecoveryResolutions)
+	}
+}
+
+func (s *Service) dismissRecoveredAgentErrorForAttempt(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	errorStamp string,
+	resolutionRecorded bool,
+	resolvedAt time.Time,
+) {
+	if !resolutionRecorded || errorStamp == "" {
+		return
+	}
+	if lastError, found := models.LoadLastAgentError(session.Metadata); found && lastError.MatchesStamp(errorStamp) {
+		s.dismissRecoveredAgentError(ctx, taskID, session, resolvedAt)
+	}
 }
 
 func (s *Service) clearRecoveryMetadataAfterBoot(
@@ -3359,9 +3716,8 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	if resumeCorrupted {
 		statusMsg = "This agent session can't be resumed — its saved reasoning state is corrupted. Start a fresh session to continue."
 	} else if routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) == routingerr.DecisionShortRetry {
-		// Reached after the transient retry budget is exhausted — show friendly
-		// provider-neutral copy instead of dumping raw adapter evidence.
-		statusMsg = transientFailureExhaustedMessage(classified)
+		// Classification alone does not establish that any retry was started.
+		statusMsg = transientFailureManualMessage(classified)
 	}
 	hasResumeToken := s.wasResumeAttempt(ctx, data.SessionID)
 	meta := map[string]interface{}{
@@ -3375,9 +3731,49 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		"is_auth_error":    authErr,
 		"resume_corrupted": resumeCorrupted,
 	}
-	managedRuntimeNpmFailure := data.FailureCode == string(routingerr.CodeManagedRuntimeNpmResolution)
-	if managedRuntimeNpmFailure {
-		meta["failure_kind"] = string(routingerr.CodeManagedRuntimeNpmResolution)
+	if causes := models.NormalizeAgentErrorCauses(data.Causes); len(causes) > 0 {
+		meta["causes"] = causes
+	}
+	if data.AttemptID != "" {
+		meta["attempt_id"] = data.AttemptID
+	}
+	if data.AgentExecutionID != "" {
+		meta["execution_id"] = data.AgentExecutionID
+	}
+	if data.Phase != "" {
+		meta["phase"] = data.Phase
+	}
+	managedRuntimeStartupFailure := isManagedRuntimeStartupFailureCode(data.FailureCode)
+	if data.RecoveryDisposition != "" {
+		meta["failure_kind"] = failureKindProviderInterrupted
+		meta["recovery_disposition"] = data.RecoveryDisposition
+	}
+	if data.RecoveryMode == recoveryModeContinue {
+		meta["failure_kind"] = failureKindProviderInterrupted
+		meta["recovery_mode"] = data.RecoveryMode
+		meta["attempts_started"] = data.RecoveryAttemptsStarted
+		meta["recovery_disposition"] = data.RecoveryDisposition
+	}
+	if !resumeCorrupted && routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) == routingerr.DecisionShortRetry {
+		meta["failure_kind"] = failureKindProviderInterrupted
+	}
+	if meta["failure_kind"] == failureKindProviderInterrupted &&
+		(data.RecoveryDisposition == "" || data.RecoveryDisposition == recoveryDispositionManual) &&
+		(data.RecoveryMode == recoveryModeContinue || (classified.Code == routingerr.CodeAgentTransportLost &&
+			(data.OutputObserved || data.EffectObserved || !data.EvidenceKnown))) {
+		meta["recovery_reason"] = s.continuationRefusalReason(ctx, data)
+	}
+	if managedRuntimeStartupFailure {
+		meta["failure_kind"] = data.FailureCode
+		if data.StartupFailureNPMCode != "" {
+			meta["startup_npm_code"] = data.StartupFailureNPMCode
+		}
+	}
+	if data.StartupFailureReason != "" {
+		meta["startup_reason"] = data.StartupFailureReason
+	}
+	if data.StartupFailureAttempts > 0 {
+		meta["startup_attempts"] = data.StartupFailureAttempts
 	}
 	// The validated remediation URL is carried independently of quota
 	// classification so the generic recoverable card can still show the link.
@@ -3386,7 +3782,7 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	}
 	applyProviderQuotaMetadata(meta, data)
 	// Quota classification sets error_output from its own provider diagnostic;
-	// every other class (bootstrap, managed-runtime-npm, and generic post-start
+	// every other class (bootstrap, managed-runtime, and generic post-start
 	// recoverable failures) surfaces its sanitized failure detail in the same
 	// collapsed disclosure.
 	applyRecoverableFailureDetail(meta, data)
@@ -3398,7 +3794,7 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		}
 	}
 
-	if managedRuntimeNpmFailure {
+	if managedRuntimeStartupFailure {
 		meta["actions"] = []map[string]interface{}{
 			wsRecoveryAction(
 				data.TaskID,
@@ -3427,7 +3823,7 @@ func (s *Service) persistRecoveryStatusMessage(
 	// A captured failed-turn ID keeps the recovery entry on the turn that
 	// failed; when none was captured (e.g. a bootstrap failure with no active
 	// turn) fall back to the lazy active-turn resolution.
-	if turnID == "" {
+	if turnID == "" && data.RecoveryMode != recoveryModeContinue {
 		turnID = s.getActiveTurnID(data.SessionID)
 	}
 	messageID := uuid.NewSHA1(
@@ -3543,22 +3939,42 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 			taskID, sessionID, agentExecutionID, failureData.AttemptID, models.LaunchErrorPhaseBootstrap,
 		)
 		operation := bootstrapFailure.Operation
-		if operation == "" && fromResume {
-			operation = models.AgentErrorCauseOperationResume
+		if operation == "" {
+			operation = models.AgentErrorCauseOperationStart
+			if fromResume {
+				operation = models.AgentErrorCauseOperationResume
+			}
 		}
-		if operation == models.AgentErrorCauseOperationResume ||
-			operation == models.AgentErrorCauseOperationRestoreWorkspace {
-			failureData.Causes = models.NormalizeAgentErrorCauses([]models.AgentErrorCause{{
-				Operation: operation,
-				Code:      bootstrapFailure.SafeCode(),
-				Detail:    bootstrapFailure.SafeDetail(),
-			}})
+		if cause, ok := bootstrapFailure.SafeAgentErrorCause(operation); ok {
+			failureData.Causes = models.NormalizeAgentErrorCauses([]models.AgentErrorCause{cause})
 		}
 	}
-	if classified := classifyManagedRuntimeNpmStartFailure(err); classified != nil {
-		failureData.ErrorMessage = "managed npm runtime failed to prepare"
-		failureData.FailureCode = string(routingerr.CodeManagedRuntimeNpmResolution)
+	var structuredStartupFailure *routingerr.ManagedRuntimeStartupError
+	if errors.As(err, &structuredStartupFailure) && structuredStartupFailure != nil {
+		failureData.StartupFailureReason = structuredStartupFailure.Reason
+		failureData.StartupFailureAttempts = structuredStartupFailure.Attempts
+		failureData.StartupFailureNPMCode = structuredStartupFailure.NPMCode
+		failureData.FailureDetails = structuredStartupFailure.Details
+	}
+	if classified := classifyManagedRuntimeStartupFailure(err); classified != nil {
+		failureData.ErrorMessage = managedRuntimeStartupFailureMessage(classified)
+		failureData.FailureCode = string(classified.Code)
 		failureData.FailureDetails = classified.RawExcerpt
+	}
+	authFailure := isAuthError(err.Error())
+	if structuredStartupFailure != nil && structuredStartupFailure.Cause != nil && isAuthError(structuredStartupFailure.Cause.Error()) {
+		authFailure = true
+	}
+	if bootstrapFailure != nil && bootstrapFailure.SafeCode() == models.AgentErrorCauseCodeAuthenticationRequired {
+		authFailure = true
+	}
+	if authFailure && structuredStartupFailure != nil {
+		failureData.FailureCode = string(routingerr.CodeAuthRequired)
+		if structuredStartupFailure.Cause != nil {
+			failureData.ErrorMessage = routingerr.Sanitize(extractReadableAuthError(structuredStartupFailure.Cause.Error()))
+		} else if structuredStartupFailure.Details != "" {
+			failureData.ErrorMessage = routingerr.Sanitize(extractReadableAuthError(structuredStartupFailure.Details))
+		}
 	}
 	var unlockGuard func()
 	var releaseGuard func()
@@ -3613,19 +4029,18 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 		}
 		s.preserveWorkflowStartPromptAfterFailure(ctx, taskID, sessionID, agentExecutionID)
 	}
-	if failureData.FailureCode == string(routingerr.CodeManagedRuntimeNpmResolution) {
-		s.logger.Info("managed npm runtime startup failure is recoverable",
+	if isManagedRuntimeStartupFailureCode(failureData.FailureCode) && !authFailure {
+		s.logger.Info("managed runtime startup failure is recoverable",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("agent_execution_id", agentExecutionID))
 		dispatch = s.handleRecoverableFailureLockedState(ctx, failureData, lifecycle.StopReasonAgentBootstrapFailed)
 		return true
 	}
-
-	authFailure := isAuthError(err.Error())
-	if bootstrapFailure != nil && bootstrapFailure.SafeCode() == models.AgentErrorCauseCodeAuthenticationRequired {
-		authFailure = true
+	if s.handleDynamicAgentStartupFailure(ctx, err, &failureData, taskID, sessionID, agentExecutionID, &dispatch) {
+		return true
 	}
+
 	if !authFailure {
 		if fromResume {
 			s.logger.Info("suppressing toast for resume bootstrap failure",
@@ -3643,13 +4058,92 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 	return true
 }
 
-func classifyManagedRuntimeNpmStartFailure(err error) *routingerr.Error {
+func (s *Service) handleDynamicAgentStartupFailure(
+	ctx context.Context,
+	err error,
+	failureData *watcher.AgentEventData,
+	taskID, sessionID, agentExecutionID string,
+	dispatch *func(context.Context),
+) bool {
+	var startupFailure *routingerr.AgentStartupFailure
+	if !errors.As(err, &startupFailure) || startupFailure == nil {
+		return false
+	}
+	attempt, ok := dynamicStartupAttemptFromContext(ctx)
+	if !ok {
+		return false
+	}
+	failureData.OwnerKind = queueStatusScopeTask
+	failureData.DynamicRouteAttempt = true
+	failureData.EvidenceKnown = true
+	classified := classifyTrustedAgentStartupFailure(startupFailure)
+	var session *models.TaskSession
+	var sessionErr error
+	if s.repo == nil {
+		sessionErr = errors.New("task session repository is not configured")
+	} else {
+		session, sessionErr = s.repo.GetTaskSession(ctx, sessionID)
+	}
+	if sessionErr != nil || !startupAttemptOwnsSession(session, agentExecutionID, attempt) ||
+		classified.Code != routingerr.CodeAgentRuntime {
+		return false
+	}
+	evidence := s.unclassifiedStartupEvidence(ctx, *failureData, session, attempt, startupFailure)
+	if !evidence.TaskScope || !evidence.CurrentAttempt {
+		return false
+	}
+	routeResult := s.routeDynamicAgentFailureWithEvidence(ctx, *failureData, classified, &evidence, true)
+	if !routeResult.handled {
+		return false
+	}
+	if routeResult.manualRecovery {
+		s.retireExecutionActivityAndPublish(context.WithoutCancel(ctx), taskID, sessionID, agentExecutionID)
+		errMsg := failureData.ErrorMessage
+		if errMsg == "" {
+			errMsg = defaultAgentFailedMessage
+		}
+		s.finalizeAutomationRun(ctx, taskID, false, errMsg)
+		*dispatch = s.handleRecoverableFailureLockedState(ctx, *failureData, lifecycle.StopReasonAgentBootstrapFailed)
+	}
+	return true
+}
+
+func startupAttemptOwnsSession(session *models.TaskSession, executionID string, attempt dynamicStartupAttempt) bool {
+	return session != nil && session.AgentExecutionID == executionID && session.RouteGeneration == attempt.Generation &&
+		session.AgentProfileID == attempt.LogicalProfileID && session.ExecutionProfileID == attempt.ExecutionProfileID
+}
+
+func classifyTrustedAgentStartupFailure(startup *routingerr.AgentStartupFailure) *routingerr.Error {
+	if startup == nil {
+		return nil
+	}
+	classified := routingerr.Classify(routingerr.Input{
+		Phase: startup.Phase, ProviderID: startup.ProviderID,
+		StructuredErr: startup.Cause, Stderr: startup.Diagnostic,
+	})
+	if classified.Code == routingerr.CodeUnknownProvider && classified.Class == routingerr.ClassUnclassified &&
+		classified.ClassifierRule == "phase.prestart.unknown" &&
+		(startup.Phase == routingerr.PhaseProcessStart || startup.Phase == routingerr.PhaseSessionInit) {
+		// Only the lifecycle's typed process/session startup wrapper supplies
+		// this provenance; generic launch and preparation errors keep their
+		// existing unknown-provider classification.
+		startupError := cloneRoutingErrorWithCode(classified, routingerr.CodeAgentRuntime)
+		startupError.FallbackAllowed = false
+		startupError.AutoRetryable = false
+		return startupError
+	}
+	return classified
+}
+
+func classifyManagedRuntimeStartupFailure(err error) *routingerr.Error {
 	if err == nil {
 		return nil
 	}
 	var structured *routingerr.ManagedRuntimeStartupError
 	if errors.As(err, &structured) {
-		if structured.Code != routingerr.CodeManagedRuntimeNpmResolution {
+		if structured.Code != routingerr.CodeManagedRuntimeNpmResolution &&
+			structured.Code != routingerr.CodeManagedRuntimeNpmPolicy &&
+			structured.Code != routingerr.CodeManagedRuntimeStartup {
 			return nil
 		}
 		return &routingerr.Error{
@@ -3660,6 +4154,22 @@ func classifyManagedRuntimeNpmStartFailure(err error) *routingerr.Error {
 		}
 	}
 	return nil
+}
+
+func isManagedRuntimeStartupFailureCode(code string) bool {
+	return code == string(routingerr.CodeManagedRuntimeNpmResolution) ||
+		code == string(routingerr.CodeManagedRuntimeNpmPolicy) ||
+		code == string(routingerr.CodeManagedRuntimeStartup)
+}
+
+func managedRuntimeStartupFailureMessage(classified *routingerr.Error) string {
+	if classified == nil || classified.Code != routingerr.CodeManagedRuntimeStartup {
+		return "managed npm runtime failed to prepare"
+	}
+	if strings.Contains(classified.RawExcerpt, "reason=cleanup_failed") {
+		return "managed runtime process could not be stopped"
+	}
+	return "managed runtime startup failed"
 }
 
 // actionMetaKey* are the shared keys of the frontend ActionMessage button
@@ -3705,13 +4215,17 @@ func wsRecoveryAction(taskID, sessionID, recoverAction, label, icon, tooltip, te
 // Start fresh becomes the primary action and Resume is kept but flagged as
 // likely-to-fail, since the agent's persisted state is poisoned.
 func buildRecoveryActions(taskID, sessionID string, hasResumeToken, isAuthError, resumeCorrupted bool) []map[string]interface{} {
-	resumeTooltip := "Re-launch with resume flag — keeps all previous messages and context"
+	resumeTooltip := "Resuming keeps your previous messages and context."
+	resumeTooltipKey := "sessionRecoveryResumeDescription"
 	if resumeCorrupted {
-		resumeTooltip = "Resume will likely fail again — this session's saved state is corrupted. Prefer Start fresh."
+		resumeTooltip = "Resuming will likely fail again because this session's saved state is corrupted. Start a fresh session instead."
+		resumeTooltipKey = "sessionRecoveryCorruptedDescription"
 	}
 	resume := func() map[string]interface{} {
-		return wsRecoveryAction(taskID, sessionID, "resume",
+		action := wsRecoveryAction(taskID, sessionID, "resume",
 			"Resume session", "refresh", resumeTooltip, recoveryResumeButtonTestID)
+		action["tooltip_key"] = resumeTooltipKey
+		return action
 	}
 
 	freshLabel, freshTestID := "Start fresh session", recoveryFreshButtonTestID
@@ -3719,7 +4233,8 @@ func buildRecoveryActions(taskID, sessionID string, hasResumeToken, isAuthError,
 		freshLabel, freshTestID = "Restart session", recoveryRestartButtonTestID
 	}
 	fresh := wsRecoveryAction(taskID, sessionID, "fresh_start", freshLabel, "player-play",
-		"New agent process on the same workspace — no previous conversation context", freshTestID)
+		"Starting fresh uses the same workspace without previous conversation context.", freshTestID)
+	fresh["tooltip_key"] = "sessionRecoveryFreshDescription"
 
 	actions := []map[string]interface{}{}
 	if resumeCorrupted {
@@ -3865,9 +4380,9 @@ func (s *Service) handleAgentStoppedLocked(ctx context.Context, data watcher.Age
 	// not the event handler. This handler only manages session-level cleanup.
 }
 
-// cleanupAgentExecution stops the agentctl instance and releases its port after
-// the agent reaches a terminal state (completed/failed). This runs in a goroutine
-// so it doesn't block the event handler.
+// cleanupAgentExecution tears down the task host after the agent reaches a
+// terminal state unless an active LSP lease still owns that execution. This
+// runs in a goroutine so it doesn't block the event handler.
 func (s *Service) cleanupAgentExecution(executionID, taskID, sessionID string) {
 	s.cleanupAgentExecutionWithReason(context.Background(), executionID, taskID, sessionID, "agent completed")
 }

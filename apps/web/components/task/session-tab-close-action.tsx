@@ -6,23 +6,29 @@ import { useTranslation } from "react-i18next";
 type SessionTabCloseActionProps = {
   sessionId: string | undefined;
   isDeleting: boolean;
+  closeBehavior?: "delete_session" | "hide_panel";
   onClose: () => void;
 };
 
 export function SessionTabCloseAction({
   sessionId,
   isDeleting,
+  closeBehavior,
   onClose,
 }: SessionTabCloseActionProps) {
   const { t } = useTranslation();
   if (!sessionId) return null;
+
+  let ariaLabel = t("common:close");
+  if (closeBehavior === "hide_panel") ariaLabel = t("settings:hidePanel");
+  else if (closeBehavior === "delete_session") ariaLabel = t("common:deleteSession");
 
   return (
     <button
       type="button"
       className="session-tab-close-action dv-default-tab-action inline-flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded p-0 text-muted-foreground"
       data-testid={`session-tab-close-${sessionId}`}
-      aria-label={t("common:close")}
+      aria-label={ariaLabel}
       aria-busy={isDeleting}
       disabled={isDeleting}
       onPointerDown={(event) => {

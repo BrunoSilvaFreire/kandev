@@ -216,8 +216,44 @@ func (a *Adapter) sendPrompt(
 		// settles reached enqueueACPUpdate, but our worker processes them
 		// asynchronously. Drain it before returning the error so a diagnostic
 		// agent_message_chunk cannot be overtaken by the terminal failure event.
-		a.syncNotifQueue()
-		return normalizePromptErrorAfterCancel(traceCtx, err)
+		notificationsDrained := a.syncNotifQueue()
+		if a.dialect.continuationError != nil && a.dialect.continuationError(err) {
+			if snapshot := a.continuationSafetySnapshot(turn); snapshot != nil {
+				a.cancelAsyncTurnComplete(sessionID)
+				a.sendUpdate(AgentEvent{Type: streams.EventTypeError, SessionID: sessionID,
+					PromptGeneration: promptGeneration, Error: "peer disconnected before response", ContinuationSafety: snapshot,
+					PromptFailureDisposition: a.promptFailureDisposition(
+						conn, sessionID, turn, promptGeneration, notificationsDrained,
+					),
+				})
+				return nil
+			}
+		}
+		normalizedErr := normalizePromptErrorAfterCancel(traceCtx, err)
+		if a.agentID == codexAgentID &&
+			!errors.Is(normalizedErr, errPromptAbandonedAfterCancel) &&
+			isGenericCodexPromptError(err) {
+			if providerError, ok := turn.codexUsageLimitFailure(); ok {
+				return &providerPromptError{ProviderError: *providerError, cause: normalizedErr}
+			}
+		}
+		if providerError, ok := a.retainableACPApplicationError(normalizedErr); ok {
+			if disposition := a.promptFailureDisposition(
+				conn, sessionID, turn, promptGeneration, notificationsDrained,
+			); disposition != "" {
+				a.cancelAsyncTurnComplete(sessionID)
+				a.sendUpdate(AgentEvent{
+					Type:                     streams.EventTypeError,
+					SessionID:                sessionID,
+					PromptGeneration:         promptGeneration,
+					Error:                    providerError.Message,
+					ProviderError:            providerError,
+					PromptFailureDisposition: disposition,
+				})
+				return nil
+			}
+		}
+		return normalizedErr
 	}
 
 	// Drain queued ACP notifications before running the post-prompt sweeps and
@@ -233,10 +269,11 @@ func (a *Adapter) sendPrompt(
 	//   - The complete event emitted to updatesCh outruns the final text chunk,
 	//     so the downstream buffer flush yields empty and the turn persists as
 	//     had_output=false even when the agent did produce text.
-	a.syncNotifQueue()
+	notificationsDrained := a.syncNotifQueue()
 
 	// Cancel any tool calls still in-flight (e.g. a denied permission leaves the
 	// tool_call without a terminal status update from the agent).
+	continuationSafety := a.continuationSafetySnapshot(turn)
 	a.cancelPromptEndToolCalls(sessionID)
 
 	// Mark any tracked Monitors as ended. They live longer than a typical tool
@@ -259,10 +296,14 @@ func (a *Adapter) sendPrompt(
 			zap.Uint64("prompt_generation", promptGeneration))
 		a.cancelAsyncTurnComplete(sessionID)
 		a.sendUpdate(AgentEvent{
-			Type:             streams.EventTypeError,
-			SessionID:        sessionID,
-			PromptGeneration: promptGeneration,
-			Error:            safeMessage,
+			Type:               streams.EventTypeError,
+			SessionID:          sessionID,
+			PromptGeneration:   promptGeneration,
+			Error:              safeMessage,
+			ContinuationSafety: continuationSafety,
+			PromptFailureDisposition: a.promptFailureDisposition(
+				conn, sessionID, turn, promptGeneration, notificationsDrained,
+			),
 			ProviderError: &streams.ProviderError{
 				Source:     streams.ProviderErrorSourceCursorACP,
 				ProviderID: acpcompat.CursorAgentID,
@@ -284,6 +325,9 @@ func (a *Adapter) sendPrompt(
 			SessionID:        sessionID,
 			PromptGeneration: promptGeneration,
 			Error:            safeMessage,
+			PromptFailureDisposition: a.promptFailureDisposition(
+				conn, sessionID, turn, promptGeneration, notificationsDrained,
+			),
 			ProviderError: &streams.ProviderError{
 				Source:     streams.ProviderErrorSourceCodexACP,
 				ProviderID: codexAgentID,
@@ -373,6 +417,12 @@ func normalizePromptErrorAfterCancel(promptCtx context.Context, err error) error
 		return errPromptAbandonedAfterCancel
 	}
 	return err
+}
+
+func isGenericCodexPromptError(err error) bool {
+	var requestErr *acp.RequestError
+	return errors.As(err, &requestErr) && requestErr != nil &&
+		requestErr.Code == -32603 && requestErr.Message == "Internal error"
 }
 
 func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.MessageAttachment) []acp.ContentBlock {

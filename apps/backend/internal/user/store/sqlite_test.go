@@ -20,6 +20,28 @@ type settingsScanner struct {
 	revision int64
 }
 
+// @covers AC-UI-LIST-STEP-GROUPING-001.5
+func TestTasksListGroupLegacySettingsRoundTrip(t *testing.T) {
+	settings, err := scanUserSettings(settingsScanner{raw: `{"tasks_list_group":"state","tasks_list_sort":"title_asc"}`, revision: 7}, DefaultUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.TasksListGroup != "workflow_step" || settings.Revision != 7 || settings.TasksListSort != "title_asc" {
+		t.Fatalf("legacy settings = (%q, %d, %q)", settings.TasksListGroup, settings.Revision, settings.TasksListSort)
+	}
+	raw, err := marshalUserSettingsPayload(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["tasks_list_group"] != "workflow_step" {
+		t.Fatalf("persisted group = %v", payload["tasks_list_group"])
+	}
+}
+
 // upsertUserSettingsForTest writes settings via UpsertUserSettingsPreservingTaskCreateLastUsed at the current stored revision.
 func upsertUserSettingsForTest(t *testing.T, repo *sqliteRepository, ctx context.Context, settings *models.UserSettings) {
 	t.Helper()
@@ -1452,6 +1474,7 @@ func TestSQLiteRepositorySidebarViewStateRoundTrip(t *testing.T) {
 		ExecutorProfileID: "exec-1",
 	}
 	settings.JiraSavedViews = json.RawMessage(`[{"id":"view-1"}]`)
+	settings.JiraDefaultViewID = "view-1"
 	settings.GitLabSavedPresets = json.RawMessage(`[{"id":"preset-1"}]`)
 	settings.SidebarDraft = &models.SidebarViewDraft{
 		BaseViewID: "view-1",
@@ -1486,6 +1509,9 @@ func TestSQLiteRepositorySidebarViewStateRoundTrip(t *testing.T) {
 	}
 	if string(got.JiraSavedViews) != `[{"id":"view-1"}]` {
 		t.Fatalf("expected Jira saved views to round-trip, got %s", string(got.JiraSavedViews))
+	}
+	if got.JiraDefaultViewID != "view-1" {
+		t.Fatalf("expected Jira default view ID to round-trip, got %q", got.JiraDefaultViewID)
 	}
 	if string(got.GitLabSavedPresets) != `[{"id":"preset-1"}]` {
 		t.Fatalf("expected GitLab presets to round-trip, got %s", string(got.GitLabSavedPresets))

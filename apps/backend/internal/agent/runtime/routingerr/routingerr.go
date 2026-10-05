@@ -50,6 +50,8 @@ const (
 	CodePermissionDeniedByUser      Code = "permission_denied_by_user"
 	CodeNpxCacheCorrupted           Code = "npx_cache_corrupted"
 	CodeManagedRuntimeNpmResolution Code = "managed_runtime_npm_resolution"
+	CodeManagedRuntimeNpmPolicy     Code = "managed_runtime_npm_policy"
+	CodeManagedRuntimeStartup       Code = "managed_runtime_startup"
 	CodeResumeCorrupted             Code = "resume_corrupted"
 	CodeAgentTransportLost          Code = "agent_transport_lost"
 )
@@ -152,14 +154,16 @@ func (e *Error) ShouldShortRetry() bool {
 
 // Input is the raw signal bundle adapters pass to Classify.
 type Input struct {
-	Phase         Phase
-	ProviderID    string
-	ExitCode      *int
-	StructuredErr error
-	HTTPStatus    int
-	ResetHint     *time.Time
-	Stderr        string
-	Stdout        string
+	Phase                     Phase
+	ProviderID                string
+	ExitCode                  *int
+	StructuredErr             error
+	HTTPStatus                int
+	ResetHint                 *time.Time
+	OccurredAt                time.Time // observation time for this provider diagnostic
+	Stderr                    string
+	Stdout                    string
+	ManagedRuntimePackageSpec string // trusted exact package from the managed runtime command
 }
 
 const exitCodeBinaryMissing = 127
@@ -172,12 +176,40 @@ const statusOverloaded = 529
 // Classify always returns a non-nil *Error, even for an unmatched or empty
 // input; callers may dereference the result without a nil check.
 func Classify(in Input) *Error {
+	e := classify(in)
+	if e.ResetHint == nil && (e.Code == CodeQuotaLimited || e.Code == CodeRateLimited) {
+		// Providers such as codex state the retry time only in the human
+		// notice, not in a structured field. Deriving it here lets every
+		// consumer (short retry, circuit breaker) honor it uniformly.
+		observedAt := in.OccurredAt
+		if observedAt.IsZero() {
+			observedAt = time.Now()
+		}
+		text := in.Stderr + "\n" + in.Stdout
+		hint := parseResetHintAt(text, observedAt)
+		if hint == nil && e.ClassifierRule == "claude.stderr.session_limit.v1" {
+			hint = parseResetClockHintAt(text, observedAt)
+		}
+		if hint != nil {
+			e.ResetHint = hint
+		}
+	}
+	return e
+}
+
+func classify(in Input) *Error {
 	rawText := in.Stderr + "\n" + in.Stdout
 	excerpt := Sanitize(rawText)
 	if e := classifyInjection(in, excerpt); e != nil {
 		return e
 	}
 	if e := classifyStructured(in, excerpt); e != nil {
+		e.ResetHint = in.ResetHint
+		return applyInvariants(e)
+	}
+	if e := classifyManagedRuntimeNpmPolicy(in, rawText); e != nil {
+		e.Phase = in.Phase
+		e.ExitCode = in.ExitCode
 		e.ResetHint = in.ResetHint
 		return applyInvariants(e)
 	}
@@ -339,7 +371,7 @@ func applyInvariants(e *Error) *Error {
 	case CodeNpxCacheCorrupted:
 		e.AutoRetryable = true
 		e.FallbackAllowed = true
-	case CodeManagedRuntimeNpmResolution:
+	case CodeManagedRuntimeNpmResolution, CodeManagedRuntimeNpmPolicy, CodeManagedRuntimeStartup:
 		e.UserAction = true
 		e.AutoRetryable = false
 		e.FallbackAllowed = false

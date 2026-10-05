@@ -12,16 +12,21 @@ import {
 } from "@/components/task/chat/chat-input-area";
 import { ClarificationPanelSection } from "@/components/task/chat/clarification-panel-section";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
-import { routePanelMouseDown } from "@/components/task/chat/route-panel-mouse-down";
+import {
+  routePanelClick,
+  routePanelMouseDown,
+} from "@/components/task/chat/route-panel-mouse-down";
 import { useQuickChatInitialPrompt } from "./use-quick-chat-initial-prompt";
+import { useQuickChatInitialPromptRecovery } from "./use-quick-chat-initial-prompt-recovery";
 import { QuickChatCancelCommands } from "./quick-chat-cancel-commands";
 import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
+import type { QuickChatInitialPrompt } from "@/lib/state/slices/ui/types";
 
 type QuickChatContentProps = {
   sessionId: string;
   minimalToolbar?: boolean;
   placeholderOverride?: string;
-  initialPrompt?: string;
+  initialPrompt?: QuickChatInitialPrompt;
   onInitialPromptAttempted?: () => void;
 };
 
@@ -59,28 +64,28 @@ export const QuickChatContent = memo(function QuickChatContent({
   const { chatInputRef, panelState, isSending, handleSubmit, handleCancelTurn } = state;
   const { taskId, pendingClarification, pendingClarificationGroup } = panelState;
   const lateAnswer = useLateClarificationMessage(pendingClarificationGroup?.[0]);
+  const { restoreRejectedPrompt, clearAcceptedPrompt } = useQuickChatInitialPromptRecovery(
+    sessionId,
+    chatInputRef,
+  );
 
   useEffect(() => {
     const timer = setTimeout(() => chatInputRef.current?.focusInput(), 50);
     return () => clearTimeout(timer);
   }, [chatInputRef]);
 
-  const restoreRejectedPrompt = useCallback(
-    (rejectedSessionId: string, prompt: string) => {
-      const input = chatInputRef.current;
-      if (rejectedSessionId === sessionId && input && !input.getValue())
-        input.insertText(prompt, 0, 0);
-    },
-    [chatInputRef, sessionId],
-  );
-
   useQuickChatInitialPrompt({
     sessionId,
     taskId,
     prompt: initialPrompt,
-    blocked: panelState.planCommentMigration?.isBlocking ?? false,
+    blocked:
+      !panelState.session ||
+      panelState.inputMode === "unavailable" ||
+      (panelState.inputMode === "queue" && (!panelState.isQueueReady || panelState.isLoading)) ||
+      (panelState.planCommentMigration?.isBlocking ?? false),
     submit: handleSubmit,
     onAttempted: onInitialPromptAttempted,
+    onAccepted: clearAcceptedPrompt,
     onRejected: restoreRejectedPrompt,
   });
 
@@ -89,13 +94,13 @@ export const QuickChatContent = memo(function QuickChatContent({
     (event: React.MouseEvent<HTMLDivElement>) => routePanelMouseDown(event, shortcutScopeRef),
     [],
   );
-
   return (
     <div
       ref={shortcutScopeRef}
       data-testid="quick-chat-content"
       tabIndex={-1}
       onMouseDown={handleShortcutScopeMouseDown}
+      onClick={(event) => routePanelClick(event, shortcutScopeRef)}
       className="flex flex-col flex-1 min-h-0 outline-none"
     >
       <QuickChatCancelCommands

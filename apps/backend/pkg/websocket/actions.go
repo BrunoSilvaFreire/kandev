@@ -108,9 +108,11 @@ const (
 	// Plugin-backed canvas lifecycle notifications. These are owner-scoped
 	// workspace/task events and contain no application content or capabilities.
 	ActionCanvasCreated                   = "canvas.created"
+	ActionCanvasUpdated                   = "canvas.updated"
 	ActionCanvasReleaseActivated          = "canvas.release.activated"
 	ActionCanvasReleasePermissionRequired = "canvas.release.permission_required"
 	ActionCanvasPromoted                  = "canvas.promoted"
+	ActionCanvasWorkspaceDataEnabled      = "canvas.workspace_data_enabled"
 	ActionCanvasArchived                  = "canvas.archived"
 	ActionCanvasRestored                  = "canvas.restored"
 	ActionCanvasRemoved                   = "canvas.removed"
@@ -121,6 +123,7 @@ const (
 
 	// Unified session launch
 	ActionSessionLaunch         = "session.launch"
+	ActionSessionFork           = "session.fork"
 	ActionSessionEnsure         = "session.ensure"
 	ActionSessionRecover        = "session.recover"
 	ActionSessionResetContext   = "session.reset_context"
@@ -289,6 +292,7 @@ const (
 	ActionSessionSetMode                = "session.set_mode"
 	ActionSessionTodosUpdated           = "session.todos_updated"
 	ActionSessionPromptUsage            = "session.prompt_usage"
+	ActionSessionUsageUpdated           = "session.usage_updated"
 	ActionSessionPollModeChanged        = "session.poll_mode_changed"
 	ActionSessionRouteChanging          = "session.route_changing"
 	ActionSessionRouteChanged           = "session.route_changed"
@@ -388,6 +392,13 @@ const (
 	ActionSessionProcessOutput = "session.process.output"
 	ActionSessionProcessStatus = "session.process.status"
 
+	// Background work actions
+	ActionSessionBackgroundWorkList    = "session.background_work.list"
+	ActionSessionBackgroundWorkGet     = "session.background_work.get"
+	ActionSessionBackgroundWorkAction  = "session.background_work.action"
+	ActionSessionBackgroundWorkUsage   = "session.background_work.usage"
+	ActionSessionBackgroundWorkUpdated = "session.background_work.updated"
+	ActionSessionBackgroundWorkOutput  = "session.background_work.output"
 	// Git worktree actions
 	ActionWorktreePull                           = "worktree.pull"                             // Pull from remote
 	ActionWorktreePush                           = "worktree.push"                             // Push to remote
@@ -538,6 +549,9 @@ const (
 	ActionMCPDeleteAgentProfile    = "mcp.delete_agent_profile"
 	ActionMCPGetMcpConfig          = "mcp.get_mcp_config"
 	ActionMCPUpdateMcpConfig       = "mcp.update_mcp_config"
+	ActionPromptsChanged           = "prompts.changed"
+	ActionMCPCreateSharedPrompt    = "mcp.create_shared_prompt"
+	ActionMCPUpdateSharedPrompt    = "mcp.update_shared_prompt"
 	ActionMCPListSharedPrompts     = "mcp.list_shared_prompts"
 	ActionMCPGetSharedPrompt       = "mcp.get_shared_prompt"
 	ActionMCPSearchSettings        = "mcp.search_settings"

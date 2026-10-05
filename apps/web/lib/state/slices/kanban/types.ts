@@ -4,6 +4,8 @@ import type {
   ReorderedTaskPosition,
   TaskPendingAction,
   TaskOrigin,
+  TaskCoverage,
+  TaskWorkflowCoverage,
   TaskPriority,
   TaskState as TaskStatus,
   WorkflowProfileSessionEndPolicy,
@@ -50,6 +52,9 @@ export type TaskDependencyRef = {
 };
 
 export type KanbanState = {
+  taskCoverage?: TaskCoverage;
+  /** Ordered membership; tasks is the canonical compatibility projection. */
+  taskIds?: string[];
   workflowId: string | null;
   steps: Array<{
     id: string;
@@ -66,6 +71,7 @@ export type KanbanState = {
     session_target?: WorkflowSessionTarget | null;
     profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
     profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+    disable_unclassified_fallback?: boolean;
     complete_task_on_enter?: boolean;
     cancel_triggers_turn_complete?: boolean;
     /** Maximum concurrent tasks allowed in this step. 0 or undefined means unlimited. */
@@ -214,11 +220,15 @@ export type KanbanState = {
 };
 
 export type WorkflowSnapshotData = {
+  taskIds?: string[];
+  taskCoverage?: TaskCoverage;
   workflowId: string;
   workflowName: string;
   steps: KanbanState["steps"];
   tasks: KanbanState["tasks"];
   isPlaceholder?: boolean;
+  /** A known-empty failed fetch is retryable after a task-page remount. */
+  fetchFailed?: boolean;
 };
 
 export type KanbanMultiState = {
@@ -262,6 +272,7 @@ export type SidebarArchivedTasksState = {
 };
 
 export type WorkflowsState = {
+  taskWorkflowCoverage?: TaskWorkflowCoverage;
   items: Array<{
     id: string;
     workspaceId: string;
@@ -332,6 +343,8 @@ export type KanbanSliceState = {
   kanban: KanbanState;
   kanbanMulti: KanbanMultiState;
   sidebarArchivedTasks: SidebarArchivedTasksState;
+  /** Fresh status projections for bounded sidebar pages, keyed by workspace then task. */
+  sidebarStatusSummaryByWorkspaceId: Record<string, Record<string, TaskStatusSummary>>;
   workflows: WorkflowsState;
   workspaceContextGeneration: number;
   workspaceContextRead: WorkspaceContextReadState;
@@ -362,7 +375,7 @@ export type KanbanSliceActions = {
   ) => void;
   requestWorkspaceContextRefresh: (resetRetryCycle?: boolean) => void;
   setActiveWorkflow: (workflowId: string | null) => void;
-  setWorkflows: (workflows: WorkflowsState["items"]) => void;
+  setWorkflows: (workflows: WorkflowsState["items"], coverage?: TaskWorkflowCoverage) => void;
   reorderWorkflowItems: (workflowIds: string[]) => void;
   setActiveTask: (taskId: string) => void;
   /** Automatic task selection that must not invalidate a user navigation revision. */

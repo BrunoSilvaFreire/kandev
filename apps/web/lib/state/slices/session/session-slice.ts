@@ -3,19 +3,20 @@ import { payloadRetentionMarker } from "@/lib/utils/tool-payload-retention";
 import type { StateCreator } from "zustand";
 import { original } from "immer";
 import type { Message, TaskSession } from "@/lib/types/http";
-import type { QueueMeta, QueueOperationToken, SessionSlice, SessionSliceState } from "./types";
+import type {
+  QueueMeta,
+  QueueOperationToken,
+  SessionSlice,
+  SessionSliceState,
+  TaskSessionHydrationEpoch,
+} from "./types";
 import { buildTurnActions, isSettledSessionState, parseTurnTimestamp } from "./turn-actions";
 import {
   buildTaskSessionProjectionActions,
   mergeOrphanPendingActionProjection,
 } from "./task-session-projection-actions";
 import { reconcileMessages } from "./message-signature";
-import {
-  buildPromptMessageActions,
-  fanOutTranscriptPrompts,
-  removePromptMessage,
-  updatePromptMessage,
-} from "./prompt-message-actions";
+import { resolveRunningNotices } from "./running-notice-activity";
 import { purgeSessionRuntimeState } from "@/lib/state/slices/session-runtime/session-runtime-slice";
 import { mergeTaskSession } from "./session-merge";
 import { syncEnvironmentMapping, syncPrepareProgress } from "./session-environment-sync";
@@ -74,6 +75,7 @@ function applyMessageMeta(
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mergeMessageFields(target: Record<string, unknown>, source: Record<string, any>) {
+  const noticeResolved = (target.metadata as Message["metadata"])?.running_notice_resolved === true;
   for (const key of Object.keys(source)) {
     if (
       key === "metadata" &&
@@ -84,6 +86,12 @@ function mergeMessageFields(target: Record<string, unknown>, source: Record<stri
     if (source[key] !== undefined) {
       target[key] = source[key];
     }
+  }
+  if (noticeResolved && target.metadata) {
+    target.metadata = {
+      ...(target.metadata as Message["metadata"]),
+      running_notice_resolved: true,
+    };
   }
 }
 
@@ -111,8 +119,10 @@ function removeMessageByID(messages: Message[], messageId: string) {
 function mergeTaskSessionSnapshot(
   existing: TaskSession | undefined,
   incoming: TaskSession,
-  currentActivityEpoch: number,
-  requestActivityEpoch: number | undefined,
+  epochs: {
+    current: { activity: number; readCursor: number };
+    request?: { activity: number; readCursor: number };
+  },
 ): TaskSession {
   const snapshot = {
     ...incoming,
@@ -124,17 +134,42 @@ function mergeTaskSessionSnapshot(
 
   const merged = mergeTaskSession(existing, snapshot);
   const activityChangedDuringRequest =
-    requestActivityEpoch === undefined
-      ? currentActivityEpoch > 0
-      : currentActivityEpoch > requestActivityEpoch;
-  if (!activityChangedDuringRequest) return merged;
+    epochs.request === undefined
+      ? epochs.current.activity > 0
+      : epochs.current.activity > epochs.request.activity;
+  const readCursorChangedDuringRequest =
+    epochs.request === undefined
+      ? epochs.current.readCursor > 0
+      : epochs.current.readCursor > epochs.request.readCursor;
+  if (!activityChangedDuringRequest && !readCursorChangedDuringRequest) return merged;
 
   return {
     ...merged,
-    foreground_activity: existing.foreground_activity,
-    active_subagent_count: existing.active_subagent_count,
-    supports_steering: existing.supports_steering,
+    ...(activityChangedDuringRequest
+      ? {
+          foreground_activity: existing.foreground_activity,
+          active_subagent_count: existing.active_subagent_count,
+          supports_steering: existing.supports_steering,
+        }
+      : {}),
+    ...(readCursorChangedDuringRequest
+      ? { last_read_message_id: existing.last_read_message_id }
+      : {}),
   };
+}
+
+function mergeTaskSessionActionSnapshot(
+  existing: TaskSession | undefined,
+  incoming: TaskSession,
+  currentEpoch: TaskSessionHydrationEpoch,
+  requestEpoch?: TaskSessionHydrationEpoch,
+): TaskSession {
+  if (!existing) return incoming;
+  if (!requestEpoch) return mergeTaskSession(existing, incoming);
+  return mergeTaskSessionSnapshot(existing, incoming, {
+    current: currentEpoch,
+    request: requestEpoch,
+  });
 }
 
 function reconcileMcpAttachmentHistory(
@@ -196,12 +231,6 @@ function reconcileActiveTurnForIdleSession(draft: SessionSliceState, session: Ta
 
 export const defaultSessionState: SessionSliceState = {
   messages: { bySession: {}, metaBySession: {} },
-  messagePrompts: {
-    bySession: {},
-    metaBySession: {},
-    generationBySession: {},
-    refreshGenerationBySession: {},
-  },
   turns: {
     bySession: {},
     activeBySession: {},
@@ -209,7 +238,7 @@ export const defaultSessionState: SessionSliceState = {
     reconcileEpochBySession: {},
     settledBoundaryBySession: {},
   },
-  taskSessions: { items: {}, activityEpochBySession: {} },
+  taskSessions: { items: {}, activityEpochBySession: {}, readCursorEpochBySession: {} },
   taskSessionsByTask: {
     itemsByTaskId: {},
     loadingByTaskId: {},
@@ -269,12 +298,13 @@ function buildSetMessagesMetadata(set: ImmerSet) {
     });
 }
 
-/** Builds the transcript update action and keeps the prompt cache in sync. */
+/** Builds the transcript update action. */
 function buildUpdateMessage(set: ImmerSet) {
   return (message: Parameters<SessionSlice["updateMessage"]>[0]) =>
     set((draft) => {
       const messages = draft.messages.bySession[message.session_id];
       if (messages) {
+        resolveRunningNotices(messages, message);
         const index = messages.findIndex((entry) => entry.id === message.id);
         if (index !== -1) {
           const merged = { ...messages[index] };
@@ -285,7 +315,6 @@ function buildUpdateMessage(set: ImmerSet) {
           messages[index] = merged;
         }
       }
-      updatePromptMessage(draft, message);
     });
 }
 
@@ -308,6 +337,7 @@ function buildMessageActions(set: ImmerSet) {
       set((draft) => {
         const sessionId = message.session_id;
         if (!draft.messages.bySession[sessionId]) draft.messages.bySession[sessionId] = [];
+        resolveRunningNotices(draft.messages.bySession[sessionId], message);
         const existingIndex = draft.messages.bySession[sessionId].findIndex(
           (entry) => entry.id === message.id,
         );
@@ -322,7 +352,6 @@ function buildMessageActions(set: ImmerSet) {
             message as unknown as Record<string, unknown>,
           );
         }
-        fanOutTranscriptPrompts(draft, [message]);
       }),
     updateMessage: buildUpdateMessage(set),
     updateMessages: (messages: Parameters<SessionSlice["updateMessages"]>[0]) =>
@@ -333,11 +362,11 @@ function buildMessageActions(set: ImmerSet) {
             sessionMessages = draft.messages.bySession[message.session_id] = [];
           }
           if (sessionMessages) {
+            resolveRunningNotices(sessionMessages, message);
             const hasMessage = sessionMessages.some((entry) => entry.id === message.id);
             if (hasMessage) mergeMessageAtIndex(sessionMessages, message);
             else if (isTransientRetryNotice(message)) sessionMessages.push(message);
           }
-          updatePromptMessage(draft, message);
         }
       }),
     removeMessage: (
@@ -347,7 +376,6 @@ function buildMessageActions(set: ImmerSet) {
       set((draft) => {
         const messages = draft.messages.bySession[sessionId];
         if (messages) draft.messages.bySession[sessionId] = removeMessageByID(messages, messageId);
-        removePromptMessage(draft, sessionId, messageId);
       }),
     mergeMessages: (
       sessionId: string,
@@ -367,7 +395,6 @@ function buildMessageActions(set: ImmerSet) {
         }
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
-        fanOutTranscriptPrompts(draft, messages);
       }),
     prependMessages: (
       sessionId: string,
@@ -383,7 +410,6 @@ function buildMessageActions(set: ImmerSet) {
         ];
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
-        fanOutTranscriptPrompts(draft, messages);
       }),
     setMessagesMetadata: buildSetMessagesMetadata(set),
     setMessagesLoading: buildSetMessagesLoading(set),
@@ -637,6 +663,9 @@ function buildRemoveTaskSessionAction(set: ImmerSet) {
       if (draft.taskSessions.activityEpochBySession) {
         delete draft.taskSessions.activityEpochBySession[sessionId];
       }
+      if (draft.taskSessions.readCursorEpochBySession) {
+        delete draft.taskSessions.readCursorEpochBySession[sessionId];
+      }
       const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[taskId];
       if (sessionsByTask) {
         draft.taskSessionsByTask.itemsByTaskId[taskId] = sessionsByTask.filter(
@@ -650,10 +679,6 @@ function buildRemoveTaskSessionAction(set: ImmerSet) {
       // Drop the conversation history owned by this session.
       delete draft.messages.bySession[sessionId];
       delete draft.messages.metaBySession[sessionId];
-      delete draft.messagePrompts.bySession[sessionId];
-      delete draft.messagePrompts.metaBySession[sessionId];
-      const generations = (draft.messagePrompts.generationBySession ??= {});
-      generations[sessionId] = (generations[sessionId] ?? 0) + 1;
       delete draft.turns.bySession[sessionId];
       delete draft.turns.activeBySession[sessionId];
       delete draft.turns.loadedBySession[sessionId];
@@ -688,18 +713,24 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
     setTaskSessionsForTask: (
       taskId: string,
       sessions: Parameters<SessionSlice["setTaskSessionsForTask"]>[1],
-      activityEpochsAtRequestStart: Parameters<SessionSlice["setTaskSessionsForTask"]>[2],
+      hydrationEpochsAtRequestStart: Parameters<SessionSlice["setTaskSessionsForTask"]>[2],
     ) =>
       set((draft) => {
         const merged = sessions.map((session) => {
           const existing = draft.taskSessions.items[session.id];
+          const requestEpoch = hydrationEpochsAtRequestStart[session.id];
           resetQueueStateForReincarnation(draft, existing, session);
-          const snapshot = mergeTaskSessionSnapshot(
-            existing,
-            session,
-            draft.taskSessions.activityEpochBySession?.[session.id] ?? 0,
-            activityEpochsAtRequestStart[session.id],
-          );
+          const snapshot = mergeTaskSessionSnapshot(existing, session, {
+            current: {
+              activity: draft.taskSessions.activityEpochBySession?.[session.id] ?? 0,
+              readCursor: draft.taskSessions.readCursorEpochBySession?.[session.id] ?? 0,
+            },
+            request: requestEpoch,
+          });
+          if (snapshot.last_read_message_id !== existing?.last_read_message_id) {
+            const epochs = (draft.taskSessions.readCursorEpochBySession ??= {});
+            epochs[session.id] = (epochs[session.id] ?? 0) + 1;
+          }
           return mergeOrphanPendingActionProjection(
             draft.pendingActionProjectionsBySessionId,
             snapshot,
@@ -741,6 +772,10 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
           draft.pendingActionProjectionsBySessionId,
           existing ? mergeTaskSession(existing, session) : session,
         );
+        if (merged.last_read_message_id !== existing?.last_read_message_id) {
+          const epochs = (draft.taskSessions.readCursorEpochBySession ??= {});
+          epochs[session.id] = (epochs[session.id] ?? 0) + 1;
+        }
         draft.taskSessions.items[session.id] = merged;
         const list = draft.taskSessionsByTask.itemsByTaskId[taskId];
         if (list) {
@@ -759,14 +794,30 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
 /** Create the basic task-session set, read-cursor, removal, and loading actions. */
 function buildTaskSessionActions(set: ImmerSet) {
   return {
-    setTaskSession: (session: Parameters<SessionSlice["setTaskSession"]>[0]) =>
+    setTaskSession: (
+      session: Parameters<SessionSlice["setTaskSession"]>[0],
+      hydrationEpochAtRequestStart?: TaskSessionHydrationEpoch,
+    ) =>
       set((draft) => {
         const existingSession = draft.taskSessions.items[session.id];
         resetQueueStateForReincarnation(draft, existingSession, session);
+        const mergedSnapshot = mergeTaskSessionActionSnapshot(
+          existingSession,
+          session,
+          {
+            activity: draft.taskSessions.activityEpochBySession?.[session.id] ?? 0,
+            readCursor: draft.taskSessions.readCursorEpochBySession?.[session.id] ?? 0,
+          },
+          hydrationEpochAtRequestStart,
+        );
         const mergedSession = mergeOrphanPendingActionProjection(
           draft.pendingActionProjectionsBySessionId,
-          existingSession ? mergeTaskSession(existingSession, session) : session,
+          mergedSnapshot,
         );
+        if (mergedSession.last_read_message_id !== existingSession?.last_read_message_id) {
+          const epochs = (draft.taskSessions.readCursorEpochBySession ??= {});
+          epochs[session.id] = (epochs[session.id] ?? 0) + 1;
+        }
         draft.taskSessions.items[session.id] = mergedSession;
         const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[session.task_id];
         if (sessionsByTask) {
@@ -781,6 +832,10 @@ function buildTaskSessionActions(set: ImmerSet) {
       set((draft) => {
         const session = draft.taskSessions.items[sessionId];
         if (!session) return;
+        if (session.last_read_message_id !== lastReadMessageId) {
+          const epochs = (draft.taskSessions.readCursorEpochBySession ??= {});
+          epochs[sessionId] = (epochs[sessionId] ?? 0) + 1;
+        }
         session.last_read_message_id = lastReadMessageId;
         const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[session.task_id];
         if (sessionsByTask) {
@@ -961,7 +1016,6 @@ export const createSessionSlice: StateCreator<
 > = (set, get) => ({
   ...defaultSessionState,
   ...buildMessageActions(set),
-  ...buildPromptMessageActions(set),
   ...buildTurnActions(set),
   ...buildTaskSessionActions(set),
   ...buildTaskSessionReconciliationActions(set),
@@ -989,6 +1043,10 @@ export const createSessionSlice: StateCreator<
   setActiveModel: (sessionId, modelId) =>
     set((draft) => {
       draft.activeModel.bySessionId[sessionId] = modelId;
+    }),
+  clearActiveModel: (sessionId) =>
+    set((draft) => {
+      delete draft.activeModel.bySessionId[sessionId];
     }),
   ...buildTaskPlanActions(set, get),
   ...buildWalkthroughActions(set, get),

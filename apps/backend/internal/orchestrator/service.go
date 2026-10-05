@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"strings"
 	"sync"
@@ -49,18 +50,24 @@ func isNoActiveTurnError(err error) bool {
 
 // Common errors
 var (
-	ErrServiceAlreadyRunning = errors.New("service is already running")
-	ErrServiceNotRunning     = errors.New("service is not running")
-	ErrRouteActionActiveTurn = errors.New("route actions require a settled turn")
+	ErrServiceAlreadyRunning            = errors.New("service is already running")
+	ErrServiceNotRunning                = errors.New("service is not running")
+	ErrRouteActionActiveTurn            = errors.New("route actions require a settled turn")
+	ErrIdleSuspensionProvenanceRequired = errors.New("session is not suspended by the workspace idle policy")
 )
 
 const maxStartupTransferReconcileAttempts = 30
 
 // ServiceConfig holds orchestrator service configuration
 type ServiceConfig struct {
-	Scheduler  scheduler.SchedulerConfig
-	QueueSize  int
-	QueueGroup string
+	ProviderInterruptionContinuation bool
+	Scheduler                        scheduler.SchedulerConfig
+	QueueSize                        int
+	QueueGroup                       string
+	// CodexAppServerEnabled controls native-only lifecycle actions such as
+	// conversation forks. It is restart-required, matching agentctl transport
+	// composition and the feature's runtime flag.
+	CodexAppServerEnabled bool
 	// SessionCapacity is the effective instance-wide limit for automatic
 	// session launches. Zero disables the ceiling.
 	SessionCapacity               int
@@ -135,7 +142,11 @@ type MessageCreator interface {
 	UpsertAgentPlanMessage(ctx context.Context, taskID, sourceToolCallID, agentSessionID, content, turnID string) error
 	CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error
 	CreateSessionMessageIdempotent(ctx context.Context, messageID, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error
-	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error)
+	// CreateLifecycleSessionMessage persists a session message inside a new,
+	// already-completed lifecycle-only turn. The turn is never active, so a
+	// later prompt cannot adopt it.
+	CreateLifecycleSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType string, metadata map[string]interface{}) error
+	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, decision *models.PermissionDecision) (string, error)
 	UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error
 	ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
 	FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
@@ -248,6 +259,12 @@ type TaskEventPublisher interface {
 	// changed — including a generating↔background flip that leaves the coarse
 	// state unchanged.
 	PublishTaskActivityIfChanged(ctx context.Context, taskID string)
+}
+
+// BackgroundWorkObserver records background workload observations and output stream chunks.
+type BackgroundWorkObserver interface {
+	RecordBackgroundWorkloadObservation(ctx context.Context, obs streams.WorkloadRunObservation, taskID, sessionID string) error
+	AppendBackgroundWorkloadOutput(ctx context.Context, chunk streams.WorkloadOutputChunk, sessionID string) error
 }
 
 // FeederPullReconciler wakes task-service feeder pulls after a manual move's
@@ -389,7 +406,6 @@ type repoStore interface {
 	ListTaskWorkspaceFolders(ctx context.Context, taskID string) ([]*models.TaskWorkspaceFolder, error)
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
-	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskEnvironmentRepo, error)
 	ListSessionsWithBranches(ctx context.Context) ([]models.SessionBranchInfo, error)
@@ -410,6 +426,7 @@ type repoStore interface {
 
 // sessionExecutorStore is the minimal repository interface needed by the orchestrator service.
 type sessionExecutorStore interface {
+	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
 	// Session
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
 	// HasUserPromptHistory reads the durable prompt sequence without scanning
@@ -417,8 +434,8 @@ type sessionExecutorStore interface {
 	// task description is still eligible as the initial prompt.
 	HasUserPromptHistory(ctx context.Context, sessionID string) (bool, error)
 	// ClaimInitialPromptFallback atomically reserves the first prompt slot for
-	// an empty workflow-step task-description fallback.
-	ClaimInitialPromptFallback(ctx context.Context, sessionID string) (bool, error)
+	// an empty workflow-step task-description fallback in the expected incarnation.
+	ClaimInitialPromptFallback(ctx context.Context, sessionID, incarnationID string) (bool, error)
 	GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
@@ -452,6 +469,7 @@ type sessionExecutorStore interface {
 	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
 	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
+	ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error)
 	DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error
 	HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error)
 	UpdateResumeToken(ctx context.Context, sessionID, expectedExecID, resumeToken, lastMessageUUID string) error
@@ -693,6 +711,8 @@ type Service struct {
 	repo          sessionExecutorStore
 	promptTargets taskPullRequestTargetStore
 	agentManager  executor.AgentManagerClient
+	// ACP mode and model reports mutate one selector snapshot per session.
+	sessionSettingsSnapshotLocks [64]sync.Mutex
 
 	// Components
 	queue     *queue.TaskQueue
@@ -702,6 +722,7 @@ type Service struct {
 
 	// Message queue service for queueing messages while agent is running
 	messageQueue                   *messagequeue.Service
+	managedInputStorage            messagequeue.ManagedInputStorage
 	passthroughDispatchMu          sync.Mutex
 	passthroughDispatches          map[string]map[*passthroughDispatchToken]struct{}
 	initialCreatePromptMu          sync.Mutex
@@ -713,6 +734,10 @@ type Service struct {
 	// reclaiming the same marker while its detached launch is still running.
 	autoStartOnCreateMu       sync.Mutex
 	autoStartOnCreateInFlight map[string]struct{}
+
+	// prepareResultMu orders progress markers and completion snapshots for the
+	// same session before they update durable preparation metadata.
+	prepareResultMu sync.Mutex
 
 	// ceilingEntryAdmissionLocks serialize the durable workflow-entry binding,
 	// ceiling queue, and task-state reconciliation for one task. The lock is
@@ -764,8 +789,9 @@ type Service struct {
 
 	// Task event publisher for emitting task.updated events.
 	// Task service owns the rich payload; orchestrator delegates.
-	taskEvents  TaskEventPublisher
-	feederPulls FeederPullReconciler
+	taskEvents             TaskEventPublisher
+	feederPulls            FeederPullReconciler
+	backgroundWorkObserver BackgroundWorkObserver
 
 	// launchAttachmentClaimer binds staged descriptors before any launch intent
 	// can dispatch them to the runtime. Inline attachments need no claim.
@@ -891,7 +917,8 @@ type Service struct {
 	// raw state write. Nil-safe: when unset, terminal completion for an
 	// Office task is skipped rather than falling back to the raw write,
 	// which would bypass the gate.
-	officeTaskStatusUpdater OfficeTaskStatusUpdater
+	officeTaskStatusUpdater        OfficeTaskStatusUpdater
+	workspaceRecoveryErrorReporter workspaceRecoveryErrorReporter
 
 	// Resolves the agent family names written in configure_session rules onto
 	// canonical agent IDs. Nil-safe: when unset, rule matching falls back to an
@@ -1029,6 +1056,9 @@ type Service struct {
 
 	// GitHub service for PR auto-detection on push
 	githubService GitHubService
+	// prDiscoveryWait is nil in production and overridable by package tests so
+	// retry diagnostics can be exercised without real-time delays.
+	prDiscoveryWait func(context.Context, time.Duration) bool
 	// ciAutomationInFlight serializes each PR's evaluation and coalesces one
 	// follow-up request instead of dropping an event that arrives mid-run.
 	ciAutomationInFlight ciAutomationCoordinator
@@ -1150,6 +1180,16 @@ type Service struct {
 	// / stopIdleSessionReaper no-op. See idle_session_reaper.go.
 	idleReaper *idleSessionReaper
 
+	idleParkingMu         sync.Mutex
+	idleParkingCandidates map[idleParkingCandidateKey]time.Time
+	idleParkingFocusAt    map[string]time.Time
+	idleParkingInFlight   map[idleParkingCandidateKey]struct{}
+
+	// lspLeases pins an execution while a browser-independent language-server
+	// lease owns its task-host stream. The gateway is wired through this narrow
+	// interface to avoid importing its WebSocket package here.
+	lspLeases LSPLeaseLifecycle
+
 	// sessionCeiling is the instance-wide admission controller for agent
 	// session launches. Its initial effective capacity is resolved by the
 	// composition root and can be changed by the install Settings service.
@@ -1258,7 +1298,8 @@ type Service struct {
 	// runtime state. Without it, a completion/cancel path can check for active
 	// sibling sessions just before another handler marks one RUNNING, then
 	// clobber the task back to REVIEW while work is active.
-	taskRuntimeStateMu sync.Mutex
+	taskRuntimeStateMu   sync.Mutex
+	taskSchedulingClaims map[string]*taskSchedulingClaim
 
 	// taskSessionErrorLocks serialize session deletion with retained-error
 	// selection and publication for each task. Entries are reference-counted
@@ -1819,6 +1860,7 @@ func NewService(
 		return nil
 	})
 	exec.SetOnSessionStateTransition(s.transitionTaskSessionState)
+	exec.SetOnResumeFailureRollback(s.rollbackResumeFailureIfCurrentAttempt)
 	exec.SetOnBootstrapFailureTransition(s.transitionBootstrapFailure)
 	exec.SetOnBootstrapFailureMessageRepair(s.persistBootstrapFailureMessage)
 	exec.SetOnSessionStarting(func(
@@ -1867,6 +1909,7 @@ func NewService(
 		OnAgentReady:           s.handleAgentReady,
 		OnAgentCompleted:       s.handleAgentCompleted,
 		OnAgentFailed:          s.handleAgentFailed,
+		OnAgentTurnFailed:      s.handleAgentTurnFailed,
 		OnAgentStalled:         s.handleAgentStalled,
 		OnAgentStopped:         s.handleAgentStopped,
 		OnAgentStreamEvent:     s.handleAgentStreamEvent,
@@ -2114,6 +2157,12 @@ func (s *Service) SetTurnService(turnService TurnService) {
 	s.turnService = turnService
 }
 
+// SetManagedInputStorage wires the durable receipt store that shares the
+// message queue's FIFO repository.
+func (s *Service) SetManagedInputStorage(storage messagequeue.ManagedInputStorage) {
+	s.managedInputStorage = storage
+}
+
 // SetTaskEventPublisher wires the publisher used for task.updated events.
 //
 // The task service is the canonical publisher: it loads session counts,
@@ -2132,6 +2181,12 @@ func (s *Service) SetTaskEventPublisher(publisher TaskEventPublisher) {
 // after an admitted manual move lifecycle has completed.
 func (s *Service) SetFeederPullReconciler(reconciler FeederPullReconciler) {
 	s.feederPulls = reconciler
+}
+
+// SetBackgroundWorkObserver wires the task-service observer used to record
+// background workload and stream output observations.
+func (s *Service) SetBackgroundWorkObserver(observer BackgroundWorkObserver) {
+	s.backgroundWorkObserver = observer
 }
 
 // SetSessionAccessChecker installs the per-user workspace scoping check used by
@@ -3074,6 +3129,24 @@ func (s *Service) acquireSessionLifecycleLock(sessionID string) func() {
 	return lock.Unlock
 }
 
+func (s *Service) sessionSettingsSnapshotLock(sessionID string) *sync.Mutex {
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(sessionID))
+	return &s.sessionSettingsSnapshotLocks[hash.Sum32()%uint32(len(s.sessionSettingsSnapshotLocks))]
+}
+
+func (s *Service) tryAcquireSessionLifecycleLock(sessionID string) (func(), bool) {
+	if sessionID == "" {
+		return nil, false
+	}
+	value, _ := s.sessionLifecycleLocks.LoadOrStore(sessionID, &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	if !lock.TryLock() {
+		return nil, false
+	}
+	return lock.Unlock, true
+}
+
 // acquireTurnCompletionLock serializes on_turn_complete processing for a
 // single session — see turnCompletionLocks' field comment for the race it
 // closes. A caller with no session ID (defensive callers pass "" rather than
@@ -3533,6 +3606,7 @@ func (s *Service) reconcileDurablePlanCommentDeliveriesOnStartup(ctx context.Con
 }
 
 func (s *Service) reconcileExecutorSessionsOnStartup(ctx context.Context) {
+	s.retireInterruptedNoticesOnStartup(ctx)
 	runningExecutors, err := s.repo.ListExecutorsRunning(ctx)
 	if err != nil {
 		s.logger.Warn("failed to list executors running on startup", zap.Error(err))
@@ -4134,7 +4208,7 @@ func (s *Service) NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID 
 		go func(profileID string) {
 			_, launchErr := s.startCreatedSessionWithComposedPrompt(
 				context.WithoutCancel(ctx), taskID, sessionID, profileID,
-				"", "", true, false, false, false, nil, nil,
+				"", "", "", true, false, false, false, nil, nil,
 			)
 			if launchErr != nil && !errors.Is(launchErr, ErrAgentPromptInProgress) {
 				s.logger.Warn("failed to start session for durable queued prompt",

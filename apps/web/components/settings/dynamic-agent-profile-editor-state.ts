@@ -146,6 +146,11 @@ export function dynamicProfilePayload(input: DynamicProfilePayloadInput) {
             },
             on_exhausted: candidate.policies.hard.onExhausted,
           },
+          unclassified: {
+            enabled: candidate.policies.unclassified.enabled,
+            consecutive_failure_threshold:
+              candidate.policies.unclassified.consecutiveFailureThreshold,
+          },
         },
       })),
     },

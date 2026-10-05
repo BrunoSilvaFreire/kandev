@@ -6,6 +6,7 @@ const sampleEnvVar = { key: "ANTHROPIC_BASE_URL", value: "https://api.example" }
 const SAMPLE_ID = "p1";
 const SAMPLE_PREFIX = "greywall --";
 const WORKSPACE_ID = "workspace-1";
+const dynamicProfileId = "dynamic-profile";
 
 const snakeCaseWirePayload = {
   id: SAMPLE_ID,
@@ -19,6 +20,10 @@ const snakeCaseWirePayload = {
   cli_flags: [{ flag: "--verbose", description: "v", enabled: true }],
   env_vars: [sampleEnvVar],
   cli_passthrough: false,
+  cursor_mcp_auth_enabled: false,
+  cursor_plugins_mcp_enabled: false,
+  mcp_selection_mode: "inherit",
+  mcp_selected_servers: [],
   enabled: false,
   workspace_id: WORKSPACE_ID,
   user_modified: true,
@@ -42,6 +47,10 @@ const expectedCamelCaseProfile = {
   envVars: [sampleEnvVar],
   tags: [],
   cliPassthrough: false,
+  cursorMcpAuthEnabled: false,
+  cursorPluginsMcpEnabled: false,
+  mcpSelectionMode: "inherit",
+  mcpSelectedServers: [],
   enabled: false,
   providerSupported: false,
   workspaceId: WORKSPACE_ID,
@@ -67,6 +76,7 @@ describe("normalizeAgentProfile", () => {
     expect(result.agentDisplayName).toBe("");
     // Legacy payloads without the flag are treated as enabled.
     expect(result.enabled).toBe(true);
+    expect(result.cursorMcpAuthEnabled).toBe(true);
   });
 
   it("preserves the office workspace scope when it is present", () => {
@@ -84,6 +94,42 @@ describe("normalizeAgentProfile", () => {
     });
     expect(result.agentId).toBe("codex");
     expect(result.cliPassthrough).toBe(true);
+  });
+
+  it("preserves the Cursor MCP auth preference through the wire round trip", () => {
+    const result = normalizeAgentProfile({
+      id: SAMPLE_ID,
+      name: "default",
+      cursor_mcp_auth_enabled: false,
+    });
+
+    expect(result.cursorMcpAuthEnabled).toBe(false);
+    expect(toAgentProfilePayload(result).cursor_mcp_auth_enabled).toBe(false);
+  });
+
+  it("preserves MCP selection mode and server IDs through the wire round trip", () => {
+    const result = normalizeAgentProfile({
+      id: SAMPLE_ID,
+      name: "default",
+      mcp_selection_mode: "selected",
+      mcp_selected_servers: ["plugin-atlassian-jira", "filesystem"],
+    });
+
+    expect((result as { mcpSelectionMode?: string }).mcpSelectionMode).toBe("selected");
+    expect((result as { mcpSelectedServers?: string[] }).mcpSelectedServers).toEqual([
+      "plugin-atlassian-jira",
+      "filesystem",
+    ]);
+    const payload = toAgentProfilePayload(result) as Record<string, unknown>;
+    expect(payload.mcp_selection_mode).toBe("selected");
+    expect(payload.mcp_selected_servers).toEqual(["plugin-atlassian-jira", "filesystem"]);
+  });
+
+  it("defaults legacy profiles to inherited MCP selection with no selected IDs", () => {
+    const result = normalizeAgentProfile({ id: SAMPLE_ID, name: "default" });
+
+    expect((result as { mcpSelectionMode?: string }).mcpSelectionMode).toBe("inherit");
+    expect((result as { mcpSelectedServers?: string[] }).mcpSelectedServers).toEqual([]);
   });
 
   it("maps command_prefix to commandPrefix", () => {
@@ -178,7 +224,7 @@ describe("normalizeAgentProfile", () => {
 
   it("normalizes a dynamic profile document and preserves candidate order", () => {
     const result = normalizeAgentProfile({
-      id: "dynamic-profile",
+      id: dynamicProfileId,
       kind: "dynamic",
       dynamic: {
         version: 4,
@@ -199,6 +245,7 @@ describe("normalizeAgentProfile", () => {
                 wait_for_reset: { enabled: false, max_wait_seconds: 0 },
                 on_exhausted: "stop",
               },
+              unclassified: { enabled: false, consecutive_failure_threshold: 0 },
             },
           },
         ],
@@ -207,6 +254,8 @@ describe("normalizeAgentProfile", () => {
     expect(result.kind).toBe("dynamic");
     expect(result.dynamic).toEqual({
       version: 4,
+      preferredTags: [],
+      avoidedTags: [],
       candidates: [
         {
           position: 0,
@@ -224,6 +273,43 @@ describe("normalizeAgentProfile", () => {
               waitForReset: { enabled: false, maxWaitSeconds: 0 },
               onExhausted: "stop",
             },
+            unclassified: { enabled: false, consecutiveFailureThreshold: 0 },
+          },
+        },
+      ],
+    });
+  });
+
+  it("preserves the API-configured unclassified policy through read and save", () => {
+    const profile = normalizeAgentProfile({
+      id: dynamicProfileId,
+      kind: "dynamic",
+      dynamic: {
+        version: 1,
+        candidates: [
+          {
+            position: 0,
+            execution_profile_id: "primary",
+            enabled: true,
+            policies: {
+              version: 1,
+              transient: { on_exhausted: "skip" },
+              hard: { on_exhausted: "skip" },
+              unclassified: { enabled: true, consecutive_failure_threshold: 4 },
+            },
+          },
+        ],
+      },
+    });
+
+    expect(profile.dynamic?.candidates[0]?.policies).toMatchObject({
+      unclassified: { enabled: true, consecutiveFailureThreshold: 4 },
+    });
+    expect(toAgentProfilePayload(profile).dynamic).toMatchObject({
+      candidates: [
+        {
+          policies: {
+            unclassified: { enabled: true, consecutive_failure_threshold: 4 },
           },
         },
       ],
@@ -232,7 +318,7 @@ describe("normalizeAgentProfile", () => {
 
   it("normalizes legacy dynamic rules into both error classes", () => {
     const result = normalizeAgentProfile({
-      id: "dynamic-profile",
+      id: dynamicProfileId,
       kind: "dynamic",
       dynamic: {
         version: 1,
@@ -315,7 +401,7 @@ describe("toAgentProfilePayload", () => {
 describe("toAgentProfilePayload dynamic candidates", () => {
   it("serializes dynamic candidates with opaque profile IDs", () => {
     const payload = toAgentProfilePayload({
-      id: toAgentProfileId("dynamic-profile"),
+      id: toAgentProfileId(dynamicProfileId),
       kind: "dynamic",
       dynamic: {
         version: 2,
@@ -338,6 +424,7 @@ describe("toAgentProfilePayload dynamic candidates", () => {
                 waitForReset: { enabled: false, maxWaitSeconds: 0 },
                 onExhausted: "skip",
               },
+              unclassified: { enabled: false, consecutiveFailureThreshold: 0 },
             },
           },
         ],
@@ -345,6 +432,8 @@ describe("toAgentProfilePayload dynamic candidates", () => {
     });
     expect(payload.dynamic).toEqual({
       version: 2,
+      preferred_tags: [],
+      avoided_tags: [],
       candidates: [
         {
           position: 0,
@@ -362,6 +451,7 @@ describe("toAgentProfilePayload dynamic candidates", () => {
               wait_for_reset: { enabled: false, max_wait_seconds: 0 },
               on_exhausted: "skip",
             },
+            unclassified: { enabled: false, consecutive_failure_threshold: 0 },
           },
         },
       ],

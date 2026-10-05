@@ -658,6 +658,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"sidebar_task_colors":                      sidebarTaskColors,
 		"task_create_last_used":                    settings.TaskCreateLastUsed,
 		"jira_saved_views":                         settings.JiraSavedViews,
+		"jira_default_view_id":                     settings.JiraDefaultViewID,
 		"jira_task_presets":                        settings.JiraTaskPresets,
 		"github_saved_presets":                     settings.GitHubSavedPresets,
 		"github_default_query_presets":             settings.GitHubDefaultQueryPresets,
@@ -672,6 +673,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"terminal_font_size":                       settings.TerminalFontSize,
 		"changes_panel_layout":                     settings.ChangesPanelLayout,
 		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
+		"agent_tab_close_behavior":                 models.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
 		"sidebar_hover_enabled":                    settings.SidebarHoverEnabled,
@@ -761,6 +763,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		TerminalLinkBehavior:              "new_tab",
 		ChangesPanelLayout:                defaultChangesPanelLayout,
 		LastSeenDisplay:                   models.LastSeenDisplayAbsolute,
+		AgentTabCloseBehavior:             models.AgentTabCloseBehaviorHidePanel,
 		SidebarViews:                      DefaultSidebarViews(),
 		SidebarActiveViewID:               DefaultSidebarViewID,
 		ThreadViews:                       DefaultThreadViews(),
@@ -856,6 +859,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		SidebarTaskColors                 json.RawMessage                         `json:"sidebar_task_colors"`
 		TaskCreateLastUsed                models.TaskCreateLastUsed               `json:"task_create_last_used"`
 		JiraSavedViews                    json.RawMessage                         `json:"jira_saved_views"`
+		JiraDefaultViewID                 string                                  `json:"jira_default_view_id"`
 		JiraTaskPresets                   json.RawMessage                         `json:"jira_task_presets"`
 		GitHubSavedPresets                json.RawMessage                         `json:"github_saved_presets"`
 		GitHubDefaultQueryPresets         json.RawMessage                         `json:"github_default_query_presets"`
@@ -870,6 +874,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		TerminalFontSize                  int                                     `json:"terminal_font_size"`
 		ChangesPanelLayout                string                                  `json:"changes_panel_layout"`
 		LastSeenDisplay                   json.RawMessage                         `json:"last_seen_display"`
+		AgentTabCloseBehavior             json.RawMessage                         `json:"agent_tab_close_behavior"`
 		SystemMetricsDisplay              models.SystemMetricsDisplaySettings     `json:"system_metrics_display"`
 		AppStatusBarEnabled               *bool                                   `json:"app_status_bar_enabled"`
 		SidebarHoverEnabled               *bool                                   `json:"sidebar_hover_enabled"`
@@ -1026,6 +1031,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.SidebarTaskColors = decodeSidebarTaskColors(payload.SidebarTaskColors)
 	settings.TaskCreateLastUsed = payload.TaskCreateLastUsed
 	settings.JiraSavedViews = payload.JiraSavedViews
+	settings.JiraDefaultViewID = payload.JiraDefaultViewID
 	settings.JiraTaskPresets = payload.JiraTaskPresets
 	settings.GitHubSavedPresets = payload.GitHubSavedPresets
 	settings.GitHubDefaultQueryPresets = payload.GitHubDefaultQueryPresets
@@ -1070,6 +1076,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.ChangesPanelLayout = defaultChangesPanelLayout
 	}
 	settings.LastSeenDisplay = normalizeLastSeenDisplayStored(payload.LastSeenDisplay)
+	settings.AgentTabCloseBehavior = normalizeAgentTabCloseBehaviorStored(payload.AgentTabCloseBehavior)
 	settings.KanbanHiddenStepIDs = decodeKanbanHiddenStepIDs(payload.KanbanHiddenStepIDs)
 	settings.WorkflowIDsWithAutoHideEmptySteps = decodeStringIDs(payload.WorkflowIDsWithAutoHideEmptySteps)
 	settings.KanbanSort = models.NormalizeKanbanSort(payload.KanbanSort)
@@ -1124,6 +1131,17 @@ func normalizeLastSeenDisplayStored(raw json.RawMessage) string {
 		return models.LastSeenDisplayAbsolute
 	}
 	return models.NormalizeLastSeenDisplay(value)
+}
+
+func normalizeAgentTabCloseBehaviorStored(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return models.AgentTabCloseBehaviorHidePanel
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return models.AgentTabCloseBehaviorHidePanel
+	}
+	return models.NormalizeAgentTabCloseBehavior(value)
 }
 
 // decodeKanbanHiddenStepIDs parses the persisted per-workflow hidden-step-id

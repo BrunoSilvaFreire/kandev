@@ -1,7 +1,8 @@
 ---
-status: draft
+status: current
 system: workspaces
 created: 2026-08-27
+updated: 2026-10-03
 owners:
   - kandev
 requirements:
@@ -72,9 +73,19 @@ configuration key. If the marker is absent, the backend uses server policy.
 
 ## Desktop folder selection
 
-The desktop bridge adds one origin-checked command. The command opens a native
-directory panel at the current user's home and returns one selected canonical
-directory or a cancellation result.
+The desktop bridge keeps one origin-checked folder-selection command. The
+command opens a native directory panel and returns a selected path,
+cancellation, or a failure. It does not block the Tauri IPC worker while the
+panel is open. The frontend still waits for the result and disables the picker
+trigger to avoid opening a second panel.
+
+The shell checks `Projects`, `Developer`, `src`, `Code`, `workspace`,
+`Development`, and `repos` under the desktop user's Home, in that order. It
+uses the first existing directory that is not a symlink as the initial panel
+location. If none exists, it omits `set_directory` and lets the operating
+system choose its default location. The user can navigate to Home from the
+panel. This avoids forcing the panel to list Home at open on machines without
+a local workspace directory.
 
 The command does not list directories, read files, or accept a caller-provided
 path. The Tauri WebView sends the returned path to the desktop root API. The
@@ -152,9 +163,19 @@ The SQLite migration distinguishes an existing database from a new database.
 For an existing database, it records this state only when configured and saved
 roots are both empty. A new database starts in the normal unconfigured state.
 
-The UI then shows Continue Home Discovery. If the user selects this action, the
-native picker opens at Home. Saved repositories remain available during this
-migration.
+The UI then shows Continue Home Discovery. This button calls a dedicated
+backend confirmation action without opening a picker or sending a path from
+the client. The backend checks that desktop Home confirmation is still
+pending, resolves its own current user's Home, and adds that canonical path
+through the existing discovery-root service. The action returns the saved
+root after its first scan. If the pending state is gone and Home is not saved,
+the action rejects the stale request; it does not add Home. If Home is already
+saved, a repeated request returns that root without starting a second scan.
+Saved repositories remain available throughout migration.
+
+This backend action is separate from ordinary folder selection. Sending
+`"~"` to `AddDesktopDiscoveryRoot` is invalid: that service treats it as a
+literal relative directory name, not as the current user's Home.
 
 ## Discovery flow
 
@@ -219,6 +240,100 @@ hidden. It starts no new scan until both conditions are true again.
 No interval runs when the activation count is zero. A manual Refresh action
 bypasses the freshness test but still shares an active scan.
 
+### Shared coordinator response ordering
+
+`RepositoryDiscoveryCoordinator` in
+`apps/web/hooks/domains/workspace/use-repository-discovery.ts` implements
+AC-WORKSPACES-LOCAL-REPOSITORIES-003.13 within each workspace entry. Cached
+snapshot reads and refresh scans retain separate single-flight pending handles,
+but share one publication owner. Starting a new transport operation takes
+ownership across both kinds. Joining an existing same-kind handle does not
+take ownership again for unchanged roots or start a replacement request. Request start
+order, rather than completion order or scan timestamps, determines eligibility.
+
+Register ownership and the pending handle before notifying subscribers. Only
+the current owner of a still-registered entry can publish a normalized response
+or error. A successful empty response is authoritative. A current failure keeps
+the last accepted response and publishes its error; an obsolete success cannot
+erase that error or supply an unaccepted fallback. Each operation clears only
+its own pending handle. Busy state is derived from actual pending work by kind;
+refresh state also preserves the accepted response's `refreshing` metadata.
+Obsolete cleanup cannot overwrite current data, metadata, or error, and cannot
+clear a newer operation's busy state. Settlement must publish coherent state
+before subscriber callbacks can start another operation.
+
+Snapshot follow-up freshness work belongs only to an accepted successful
+snapshot. Recheck ownership and entry identity after publication, because a
+subscriber can synchronously start a newer operation or dispose the coordinator.
+Follow-up also requires a visible document and an active lease. Preserve the
+existing stale/refreshing decision, failed-root freshness suppression, and
+explicit manual recovery. An obsolete snapshot cannot schedule a scan from
+shared state; a failed snapshot does not initiate new automatic work.
+
+Releasing the last lease retains the entry and permits an already active
+operation to populate its cache, but starts no automatic follow-up. `dispose()`
+removes entries and visibility listening. Late settlement from a removed entry
+cannot publish, notify, schedule work, or affect a replacement entry with the
+same workspace ID. Public `load()` and `refresh()` return the currently
+registered entry's accepted response after their joined operation settles, or
+`null` when that entry has been removed, without recreating it.
+
+Ordinary `load()` and `refresh()` keep their existing coalescing contract.
+Workspace Repositories, root controls, Office, Automations, Create Task, and
+Add Workspace Sources share this coordinator. Successful root changes use
+the separate synchronization boundary below. No timers, trailing retries,
+backend cache keys, cancellation protocol, or store shapes are added.
+Desktop and phone reuse their existing presentation and interaction patterns.
+
+### Successful root mutation synchronization
+
+This section implements AC-WORKSPACES-LOCAL-REPOSITORIES-003.14. Desktop root
+records and mutation endpoints are install-wide; browser coordinator entries
+remain keyed by workspace ID. The guarantee applies to every subscriber and
+hook consumer of the initiating workspace entry in this coordinator, not all
+entries, browser tabs, or connected clients. Other workspace entries retain
+their existing independent reads and normal activation/freshness behavior.
+There is no new cross-workspace or backend broadcast mechanism.
+
+Add a narrow `synchronizeAfterRootMutation(workspaceId, kind)` coordinator
+method, exposed as `synchronizeAfterRootMutation(kind)` by the discovery hook,
+where `kind` is `"load"` or `"refresh"`. Invoke it only after a root mutation's
+transport succeeds. In one synchronous boundary, revoke the entry's prior
+publication owner, detach both pending handles, and start the chosen new
+operation using the existing request machinery. Reserve its new handle and
+owner before the first notification; subscriber reentry can then join the
+new same-kind operation or start a newer distinct operation under AC-003.13.
+Do not notify between invalidation and reserving the fresh operation. Do not
+clear the last accepted response optimistically or infer results from paths.
+
+Detached transports still settle and their callers still await them. They
+cannot publish responses/errors, clear replacement handles, recreate busy
+state, notify consumers as accepted work, or initiate snapshot follow-up.
+Ignore settlement that owns neither a current handle nor publication. Current
+pending handles and accepted `refreshing` metadata determine busy state;
+detached work does not keep a successful new result busy until the old read
+returns. Entry identity still fences disposal and same-ID recreation. New
+load/refresh await returns retain the registered accepted-response convention.
+A later distinct read can take authority normally. A second successful
+mutation fences the preceding synchronization as well as ordinary reads.
+
+`useDiscoveryRootActions` requests `"load"` after Add, Home confirmation, and
+Reconnect; Remove requests `"refresh"`. Its manual Refresh continues through
+ordinary `refresh()` and does not invalidate. Preserve mutation serialization,
+Home admission refs, finally cleanup, and existing error reporting. Rejection
+or picker cancellation does not invoke this boundary; a current synchronization
+failure preserves the accepted response with the current discovery error.
+Visibility, leases, freshness, and failed-root policies still govern automatic
+follow-up of accepted snapshots.
+
+The settings root-action file is a reexport of this hook. Two direct successful
+Add Home call sites also replace their post-action `load()` with this boundary:
+`components/task-create-dialog-repo-chips.tsx` and
+`components/task/add-workspace-sources/saved-repository-source-row.tsx`.
+They keep their existing action and UI admission semantics. No root mutation
+client or backend signature changes are required. Backend mutations already
+invalidate their discovery cache; the fresh transport reads that authority.
+
 ## User interface
 
 Create Task, Add Workspace Sources, Automations, Office project setup, and
@@ -228,8 +343,11 @@ Desktop with no effective root shows saved repositories and one action named
 Choose folders to discover repositories. The action explains that the user can
 select Home or a narrower folder.
 
-If migration needs Home confirmation, the surface also shows Continue Home
-Discovery. Cancellation leaves the current choices unchanged.
+If migration needs Home confirmation, the surface also shows a direct
+Continue Home Discovery button. It has a disabled, busy state while the
+backend saves the root and scans. The separate Choose folders action still
+opens the picker. On a narrow viewport, both actions remain separate and
+reachable in the existing scroll region.
 
 An inaccessible saved root shows Reconnect and Remove actions. Reconnect opens
 the native picker again. It does not retry the denied path in the background.
@@ -379,6 +497,15 @@ repository trust](../../../decisions/2026-08-28-explicit-submodule-repository-tr
 - Rust tests cover origin checks, cancellation, directory-only selection, and
   the absence of generic filesystem commands.
 - Frontend tests cover all repository-selection consumers through one shared hook.
+- Deterministic deferred coordinator tests cover both overlap directions,
+  failures, empty results, same-kind sharing, workspace isolation, reentrant
+  subscriptions, lease release, and disposal. Real shared-hook/Office-consumer
+  integration covers exposed choices and flags with only transport mocked.
+- Root-mutation regressions cover each successful action with pending same-kind
+  and opposite-kind reads, both settlement orders and failure directions,
+  authoritative empty state, fresh pending flags, ordinary sharing, sequential
+  mutations, reentry, workspace isolation, release, and disposal. Real discovery
+  and root-action hooks plus a real shared Office consumer mock only transport.
 - Web E2E uses a stubbed native-picker adapter for selection, cancellation,
   cache, denial, reconnect, removal, and migration states.
 - Browser E2E covers server Home discovery at desktop and phone widths. It also
@@ -390,6 +517,8 @@ repository trust](../../../decisions/2026-08-28-explicit-submodule-repository-tr
 
 ## Implementation plans
 
+- [Repository Discovery Root Mutations](../../../plans/repository-discovery-root-mutations/plan.md)
+- [Repository Discovery Ordering](../../../plans/repository-discovery-ordering/plan.md)
 - [Repository Discovery Failure Recovery](../../../plans/repository-discovery-failure-recovery/plan.md)
 
 ## Decisions

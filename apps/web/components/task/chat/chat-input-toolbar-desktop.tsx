@@ -149,6 +149,7 @@ function DesktopRightSection(props: {
   canCancelAgent?: boolean;
   hasContent: boolean;
   onImplementPlan?: (fresh: boolean) => void;
+  planActionDisabledReason?: string;
   isDisabled: boolean;
   submitDisabledReason?: string;
   isSending: boolean;
@@ -168,7 +169,11 @@ function DesktopRightSection(props: {
         taskId={props.showUsageInspector ? props.taskId : undefined}
       />
       {props.planModeEnabled && !props.isAgentBusy && props.onImplementPlan && (
-        <ImplementPlanButton onClick={props.onImplementPlan} />
+        <ImplementPlanButton
+          onClick={props.onImplementPlan}
+          disabled={Boolean(props.planActionDisabledReason)}
+          disabledReason={props.planActionDisabledReason}
+        />
       )}
       {!props.hideAgentControls && (
         <ChatInputPluginActions
@@ -279,6 +284,7 @@ export function DesktopChatInputToolbar(props: DesktopToolbarProps) {
         canCancelAgent={props.canCancelAgent}
         hasContent={props.hasContent ?? false}
         onImplementPlan={props.onImplementPlan}
+        planActionDisabledReason={props.planActionDisabledReason}
         isDisabled={props.isDisabled}
         submitDisabledReason={props.submitDisabledReason}
         isSending={props.isSending}

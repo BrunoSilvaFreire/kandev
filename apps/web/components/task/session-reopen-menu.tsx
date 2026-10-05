@@ -15,6 +15,7 @@ import { clearEnvSessionClosed } from "@/lib/dockview-closed-sessions";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { AgentLogo } from "@/components/agent-logo";
 import { markSessionTabUserActivationIntent } from "@/components/task/session-tab-activation-intent";
+import { clearHiddenSessionPanel } from "./dockview-hidden-session-panels";
 import { useSessionPendingInput } from "@/hooks/use-task-pending-input";
 import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
@@ -115,6 +116,7 @@ export function SessionReopenMenuItems({
       // action no-ops naturally. We just create the chat panel.
       markSessionTabUserActivationIntent(sessionId);
       clearEnvSessionClosed(useDockviewStore.getState().currentLayoutEnvId, sessionId);
+      clearHiddenSessionPanel(api, sessionId);
       addSessionPanel(api, groupId ?? centerGroupId, sessionId, label);
     },
     [api, centerGroupId],

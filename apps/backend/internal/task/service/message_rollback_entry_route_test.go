@@ -29,8 +29,17 @@ func TestRestoreTaskMessageRollbackFreezesTaggedEntryRoute(t *testing.T) {
 	selector := &recordingEntrySelector{profile: "profile-frozen"}
 	svc.SetWorkflowEntryProfileSelector(selector)
 
+	current, err := repo.GetTask(ctx, "task-123")
+	require.NoError(t, err)
 	_, updated, err := svc.RestoreTaskMessageRollback(
-		ctx, "task-123", sessionID, models.TaskSessionStateRunning, v1.TaskStateReview, "restored-step",
+		ctx,
+		"task-123",
+		sessionID,
+		models.TaskSessionStateRunning,
+		current.State,
+		current.WorkflowStepID,
+		v1.TaskStateReview,
+		"restored-step",
 	)
 	require.NoError(t, err)
 	require.True(t, updated)
@@ -62,8 +71,17 @@ func TestRestoreTaskMessageRollbackFailsClosedWhenTaggedSelectionUnavailable(t *
 		"restored-step": {ID: "restored-step", WorkflowID: "wf-123", AllowedTags: []string{"review"}},
 	}})
 
+	current, err := repo.GetTask(ctx, "task-123")
+	require.NoError(t, err)
 	_, updated, err := svc.RestoreTaskMessageRollback(
-		ctx, "task-123", sessionID, models.TaskSessionStateRunning, v1.TaskStateReview, "restored-step",
+		ctx,
+		"task-123",
+		sessionID,
+		models.TaskSessionStateRunning,
+		current.State,
+		current.WorkflowStepID,
+		v1.TaskStateReview,
+		"restored-step",
 	)
 	require.ErrorIs(t, err, entryroute.ErrSelectorUnavailable)
 	require.False(t, updated)

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
@@ -60,13 +61,14 @@ type errorWrapper struct {
 
 // PendingPermission represents a permission request waiting for user response
 type PendingPermission struct {
-	ID         string
-	RequestID  string
-	Request    *adapter.PermissionRequest
-	Snapshot   streams.PendingAgentPermission
-	ResponseCh chan *adapter.PermissionResponse
-	CreatedAt  time.Time
-	State      string
+	ID                string
+	RequestID         string
+	Request           *adapter.PermissionRequest
+	Snapshot          streams.PendingAgentPermission
+	ResponseCh        chan *adapter.PermissionResponse
+	CreatedAt         time.Time
+	State             string
+	AutoApproveOption *adapter.PermissionOption
 }
 
 // PermissionOperationError carries a stable code across the agentctl stream.
@@ -107,8 +109,9 @@ const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
-	cfg    *config.InstanceConfig
-	logger *logger.Logger
+	cfg             *config.InstanceConfig
+	logger          *logger.Logger
+	managedGitTools installedManagedGitTools
 
 	// Process state
 	cmd                *exec.Cmd
@@ -125,10 +128,11 @@ type Manager struct {
 	exitErr            atomic.Value // error
 
 	// Stderr buffering for error context
-	stderrBuffer    []string
-	stderrMu        sync.RWMutex
-	stderrConsumer  adapter.StderrLineConsumer
-	stderrSanitizer adapter.StderrLineSanitizer
+	stderrBuffer          []string
+	stderrBufferTruncated bool
+	stderrMu              sync.RWMutex
+	stderrConsumer        adapter.StderrLineConsumer
+	stderrSanitizer       adapter.StderrLineSanitizer
 
 	// Workspace tracker for git status and file changes
 	workspaceTracker *WorkspaceTracker
@@ -226,8 +230,9 @@ type Manager struct {
 	shellMgr *shell.Manager
 
 	// Protocol adapter for agent communication
-	adapter    adapter.AgentAdapter
-	adapterCfg *adapter.Config
+	adapter                 adapter.AgentAdapter
+	adapterCfg              *adapter.Config
+	userInputRequestHandler adapter.UserInputRequestHandler
 
 	// Agent event notifications (protocol-agnostic)
 	updatesCh chan adapter.AgentEvent
@@ -286,6 +291,10 @@ type Manager struct {
 	lifetimeCtx           context.Context
 	lifetimeCancel        context.CancelFunc
 	mainReapPending       atomic.Bool
+	startupEvidenceMu     sync.Mutex
+	startupGeneration     uint64
+	startupEvidence       *types.ManagedStartupEvidence
+	startupEvidenceDone   chan struct{}
 	// stopChClosed guards close(stopCh), which is the only part of teardown
 	// that is not naturally idempotent. It is reset wherever stopCh itself is
 	// created so the flag always describes the current channel — a Start that
@@ -407,6 +416,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	m := &Manager{
 		cfg:                  cfg,
 		logger:               log.WithFields(zap.String("component", "process-manager")),
+		managedGitTools:      installedManagedGitToolsFromEnvironment(cfg.AgentEnv),
 		updatesCh:            make(chan adapter.AgentEvent, updatesChannelCapacity),
 		pendingPermissions:   make(map[string]*PendingPermission),
 		lifetimeCtx:          lifetimeCtx,
@@ -481,6 +491,12 @@ func (m *Manager) SetWorkspaceSourceRoots(roots []string) {
 			tracker.SetAllowedSourceRoots(canonical)
 		}
 	}
+}
+
+// SetUserInputRequestHandler configures protocol-native question routing before
+// the agent process starts. Adapters without question support ignore it.
+func (m *Manager) SetUserInputRequestHandler(handler adapter.UserInputRequestHandler) {
+	m.userInputRequestHandler = handler
 }
 
 func (m *Manager) currentWorkspaceSourceRoots() []string {
@@ -1279,16 +1295,23 @@ func (m *Manager) JoinRepoPath(subpath, path string) (string, error) {
 
 // Start starts the agent process
 func (m *Manager) Start(ctx context.Context) error {
+	_, err := m.StartWithGeneration(ctx)
+	return err
+}
+
+// StartWithGeneration starts the agent process and returns the generation
+// created by this call while startup remains serialized against replacement.
+func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 	release, err := m.admitStart()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer release()
 
 	if m.Status() == StatusRunning || m.Status() == StatusStarting {
-		return fmt.Errorf("agent is already running")
+		return 0, fmt.Errorf("agent is already running")
 	}
 
 	// A previous lifecycle may still be live: an agent that exited on its own
@@ -1307,39 +1330,47 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	if err := config.ValidateCommandArgs(m.cfg.AgentArgs); err != nil {
 		m.status.Store(StatusError)
-		return err
+		return 0, err
 	}
 
 	// Build adapter config and create protocol adapter
 	if err := m.buildAdapterConfig(); err != nil {
 		m.status.Store(StatusError)
-		return err
+		return 0, err
 	}
 
 	// One-shot adapters manage their own subprocess per prompt.
 	// Skip process creation — the adapter spawns processes in Prompt().
 	if oneShotAdapter, ok := m.adapter.(adapter.OneShotAdapter); ok && oneShotAdapter.IsOneShot() {
-		return m.startOneShot()
+		if err := m.startOneShot(); err != nil {
+			return 0, err
+		}
+		return m.ProcessGeneration(), nil
 	}
 
 	// Assemble final command (does not start the process yet)
 	if err := m.buildFinalCommand(); err != nil {
 		m.status.Store(StatusError)
-		return err
+		return 0, err
 	}
+	return m.startManagedProcess()
+}
 
+func (m *Manager) startManagedProcess() (uint64, error) {
 	// Set up stdin/stdout/stderr pipes (must happen before process starts)
 	if err := m.startProcessPipes(); err != nil {
 		m.status.Store(StatusError)
-		return err
+		return 0, err
 	}
 
+	m.ClearStderrBuffer()
 	// Start the subprocess now that pipes are connected
 	if err := m.cmd.Start(); err != nil {
 		_ = m.closeStderrPipe()
 		m.status.Store(StatusError)
-		return formatAgentStartError(err, m.cfg.AgentEnv)
+		return 0, formatAgentStartError(err, m.cfg.AgentEnv)
 	}
+	processGeneration := m.beginManagedStartupGeneration()
 	if err := m.closeStderrWriter(); err != nil {
 		m.logger.Debug("failed to close parent stderr pipe", zap.Error(err))
 	}
@@ -1348,7 +1379,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		reapErr := killAndWaitStartedCommand(m.cmd)
 		_ = m.closeStderrReader()
 		m.status.Store(StatusError)
-		return errors.Join(fmt.Errorf("failed to install agent process lifecycle: %w", err), reapErr)
+		return 0, errors.Join(fmt.Errorf("failed to install agent process lifecycle: %w", err), reapErr)
 	}
 	m.processLifecycle = processLifecycle
 
@@ -1371,15 +1402,15 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 		_ = m.closeStderrReader()
 		m.status.Store(StatusError)
-		return errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
+		return 0, errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
 	}
 
 	// Start stderr reader and exit waiter. Keep the completion channel local to
 	// this process generation so a delayed reader cannot signal a replacement.
-	stderrDone := make(chan struct{})
+	stderrDone := make(chan stderrReadResult, 1)
 	m.wg.Add(2)
 	go m.readStderr(stderrDone)
-	go m.waitForExit(stderrDone)
+	go m.waitForExitGeneration(stderrDone, processGeneration)
 
 	// Forward adapter updates to our channel
 	m.wg.Add(1)
@@ -1398,7 +1429,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.status.Store(StatusRunning)
 	m.logger.Info("agent process started", zap.Int("pid", m.cmd.Process.Pid))
 
-	return nil
+	return processGeneration, nil
 }
 
 // startOneShot initialises a one-shot adapter without spawning a long-lived subprocess.
@@ -1435,29 +1466,22 @@ func (m *Manager) startOneShot() error {
 // buildAdapterConfig constructs the adapter configuration and initialises the
 // protocol adapter, including merging any adapter-provided environment variables.
 func (m *Manager) buildAdapterConfig() error {
-	mcpServers := make([]adapter.McpServerConfig, len(m.cfg.McpServers))
-	for i, mcp := range m.cfg.McpServers {
-		mcpServers[i] = adapter.McpServerConfig{
-			Name:    mcp.Name,
-			URL:     mcp.URL,
-			Type:    mcp.Type,
-			Command: mcp.Command,
-			Args:    mcp.Args,
-			Env:     mcp.Env,
-			Headers: mcp.Headers,
-		}
+	mcpServers, err := m.adapterMCPServers()
+	if err != nil {
+		return fmt.Errorf("resolve MCP servers for agent session: %w", err)
 	}
 	m.adapterCfg = &adapter.Config{
-		WorkDir:                   m.cfg.WorkDir,
-		AutoApprove:               m.cfg.AutoApprovePermissions,
-		McpServers:                mcpServers,
-		AgentID:                   m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
-		AssumeMcpSse:              m.cfg.AssumeMcpSse,
-		AssumeMcpHttp:             m.cfg.AssumeMcpHttp,
-		RequiresProcessKill:       m.cfg.RequiresProcessKill,
-		NotificationQueueCapacity: m.cfg.NotificationQueueCapacity,
-		PromptCancelJoinTimeout:   m.cfg.PromptCancelJoinTimeout,
-		ProviderGatewayAuth:       m.cfg.ProviderGatewayAuth,
+		WorkDir:                          m.cfg.WorkDir,
+		AutoApprove:                      m.adapterAutoApprove(),
+		McpServers:                       mcpServers,
+		AgentID:                          m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
+		AssumeMcpSse:                     m.cfg.AssumeMcpSse,
+		AssumeMcpHttp:                    m.cfg.AssumeMcpHttp,
+		RequiresProcessKill:              m.cfg.RequiresProcessKill,
+		NotificationQueueCapacity:        m.cfg.NotificationQueueCapacity,
+		PromptCancelJoinTimeout:          m.cfg.PromptCancelJoinTimeout,
+		ProviderInterruptionContinuation: m.cfg.ProviderInterruptionContinuation,
+		ProviderGatewayAuth:              m.cfg.ProviderGatewayAuth,
 	}
 
 	// Configure one-shot mode when a continue command is provided.
@@ -1520,7 +1544,23 @@ func (m *Manager) buildFinalCommand() error {
 	cmdArgs = append(cmdArgs, m.cfg.AgentArgs[1:]...)
 	cmdArgs = append(cmdArgs, extraArgs...)
 
-	m.finalCommand = strings.Join(append([]string{m.cfg.AgentArgs[0]}, cmdArgs...), " ")
+	finalArgs := append([]string{m.cfg.AgentArgs[0]}, cmdArgs...)
+	if err := managedruntime.PrepareNPMProjectPrefix(finalArgs); err != nil {
+		return errors.New("managed npm project prefix could not be prepared")
+	}
+	m.finalCommand = strings.Join(finalArgs, " ")
+	cmdArgs = finalArgs[1:]
+	if m.adapterCfg != nil && m.adapterCfg.OneShotConfig != nil {
+		oneShot := m.adapterCfg.OneShotConfig
+		oneShot.InitialArgs = append([]string(nil), oneShot.InitialArgs...)
+		oneShot.ContinueArgs = append([]string(nil), oneShot.ContinueArgs...)
+		if err := managedruntime.PrepareNPMProjectPrefix(oneShot.InitialArgs); err != nil {
+			return errors.New("managed npm project prefix could not be prepared")
+		}
+		if err := managedruntime.PrepareNPMProjectPrefix(oneShot.ContinueArgs); err != nil {
+			return errors.New("managed npm project prefix could not be prepared")
+		}
+	}
 
 	m.logger.Debug("final agent command",
 		zap.String("binary", m.cfg.AgentArgs[0]),
@@ -1731,6 +1771,13 @@ func (m *Manager) buildProcessRequest(req StartProcessRequest) (StartProcessRequ
 func (m *Manager) buildPipedProcessRequest(req PipedStartRequest) (PipedStartRequest, error) {
 	var err error
 	req.Env, err = mergeAgentEnvIntoShellConfigWithError(m.agentEnvSnapshot(), req.Env)
+	if err != nil {
+		return req, err
+	}
+	req.Args = append([]string(nil), req.Args...)
+	if err := managedruntime.PrepareNPMProjectPrefix(req.Args); err != nil {
+		return req, errors.New("managed npm project prefix could not be prepared")
+	}
 	return req, err
 }
 
@@ -1754,19 +1801,19 @@ func lookupEnvValue(env []string, key string) string {
 // Configure sets the agent command and optional environment variables.
 // This must be called before Start() if the instance was created without a command.
 // continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
-func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, approvalPolicy, continueCommand string, continueArgs []string, continueArgsPresent bool) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, approvalPolicy, continueCommand, continueArgs, continueArgsPresent, false)
+func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool) error {
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false)
 }
 
 // ConfigureWithEnvironment sets the agent command and replaces the complete
 // effective indexed Git configuration block supplied by env. Ordinary
 // instance variables that are absent from env remain available to the agent.
 // This must be called before Start() if the instance was created without a command.
-func (m *Manager) ConfigureWithEnvironment(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, approvalPolicy, continueCommand string, continueArgs []string, continueArgsPresent bool) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, approvalPolicy, continueCommand, continueArgs, continueArgsPresent, true)
+func (m *Manager) ConfigureWithEnvironment(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool) error {
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true)
 }
 
-func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, approvalPolicy, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool) error {
+func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool) error {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 
@@ -1794,18 +1841,13 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 
 	// Compose the environment before changing any other configuration so a
 	// malformed indexed Git block leaves the instance fully unchanged.
-	mergedEnv, err := composeConfiguredAgentEnvironment(m.cfg.AgentEnv, env, replaceEnv)
+	mergedEnv, err := composeConfiguredAgentEnvironmentWithManagedGitTools(m.cfg.AgentEnv, env, replaceEnv, m.managedGitTools)
 	if err != nil {
 		return fmt.Errorf("compose configured agent environment: %w", err)
 	}
 
 	m.cfg.AgentCommand = command
 	m.cfg.AgentArgs = args
-
-	// Set approval policy if provided
-	if approvalPolicy != "" {
-		m.cfg.ApprovalPolicy = approvalPolicy
-	}
 
 	// Store continue command for one-shot adapters
 	if continueArgsPresent {
@@ -1825,21 +1867,42 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	m.logger.Info("agent configured",
 		zap.String("command", command),
 		zap.Strings("args", args),
-		zap.String("approval_policy", m.cfg.ApprovalPolicy),
 		zap.String("continue_command", continueCommand),
 		zap.Int("env_count", len(env)))
 
 	return nil
 }
 
-func composeConfiguredAgentEnvironment(current []string, overlay map[string]string, replaceIndexed bool) ([]string, error) {
+type installedManagedGitTools struct {
+	helperPath string
+	shimDir    string
+	bashEnv    string
+}
+
+func installedManagedGitToolsFromEnvironment(env []string) installedManagedGitTools {
+	values := environmentMapFromSlice(env)
+	return installedManagedGitTools{
+		helperPath: values[githubauth.CredentialHelperPathEnv],
+		shimDir:    values[githubauth.CredentialCLIShimDirEnv],
+		bashEnv:    values[githubauth.CredentialCLIBashEnvEnv],
+	}
+}
+
+func composeConfiguredAgentEnvironmentWithManagedGitTools(current []string, overlay map[string]string, replaceIndexed bool, tools installedManagedGitTools) ([]string, error) {
 	base := environmentMapFromSlice(current)
+	managed := base[githubauth.CredentialBrokerURLEnv] != "" || base[githubauth.CredentialLeaseEnv] != ""
+	config.DeactivateManagedGitTools(
+		base,
+		base[githubauth.CredentialCLIShimDirEnv],
+		base[githubauth.CredentialCLIBashEnvEnv],
+	)
 	removeObsoleteManagedCredentialEnvironment(base)
 	filtered, err := gitconfigenv.Filter(base, func(index int, entries []gitconfigenv.Entry) bool {
-		return !githubauth.IsHostGitHubCredentialHelperEntry(entries[index].Key, entries[index].Value)
+		return !githubauth.IsHostGitHubCredentialHelperEntry(entries[index].Key, entries[index].Value) &&
+			!githubauth.IsManagedGitCredentialConfigEntry(index, entries, managed)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("remove generated host GitHub helper: %w", err)
+		return nil, fmt.Errorf("remove generated Git credential helpers: %w", err)
 	}
 	if replaceIndexed {
 		// A complete environment owns the entire indexed block, including an
@@ -1857,6 +1920,7 @@ func composeConfiguredAgentEnvironment(current []string, overlay map[string]stri
 	if err != nil {
 		return nil, err
 	}
+	activateManagedGitToolsForCurrentAuthorization(merged, tools)
 	keys := make([]string, 0, len(merged))
 	for key := range merged {
 		keys = append(keys, key)
@@ -1867,6 +1931,27 @@ func composeConfiguredAgentEnvironment(current []string, overlay map[string]stri
 		result = append(result, key+"="+merged[key])
 	}
 	return result, nil
+}
+
+func activateManagedGitToolsForCurrentAuthorization(env map[string]string, tools installedManagedGitTools) {
+	if env[githubauth.CredentialBrokerURLEnv] == "" || env[githubauth.CredentialLeaseEnv] == "" {
+		return
+	}
+	if env[githubauth.CredentialHelperPathEnv] == "" {
+		env[githubauth.CredentialHelperPathEnv] = tools.helperPath
+	}
+	shimDir := tools.shimDir
+	if shimDir == "" {
+		shimDir = env[githubauth.CredentialCLIShimDirEnv]
+	}
+	bashEnv := tools.bashEnv
+	if bashEnv == "" {
+		bashEnv = env[githubauth.CredentialCLIBashEnvEnv]
+	}
+	// Incoming snapshots can already carry managed PATH and BASH_ENV entries.
+	// Unwrap those owned entries before rebuilding the active environment.
+	config.DeactivateManagedGitTools(env, shimDir, bashEnv)
+	config.ActivateManagedGitTools(env, shimDir, bashEnv)
 }
 
 func removeObsoleteManagedCredentialEnvironment(env map[string]string) {
@@ -1934,6 +2019,9 @@ func (m *Manager) createAdapter() error {
 
 	// Set the permission handler
 	m.adapter.SetPermissionHandler(m.handlePermissionRequest)
+	if setter, ok := m.adapter.(adapter.UserInputRequestHandlerSetter); ok {
+		setter.SetUserInputRequestHandler(m.userInputRequestHandler)
+	}
 
 	return nil
 }
@@ -2028,6 +2116,17 @@ func (m *Manager) GetAdapter() adapter.AgentAdapter {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.adapter
+}
+
+// GetAdapterForGeneration validates and captures the adapter while startup is
+// serialized, so a stale request cannot select a replacement process adapter.
+func (m *Manager) GetAdapterForGeneration(generation uint64) (adapter.AgentAdapter, bool) {
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
+	if generation != 0 && generation != m.ProcessGeneration() {
+		return nil, false
+	}
+	return m.GetAdapter(), true
 }
 
 // GetSessionID returns the current session ID from the adapter.
@@ -2558,13 +2657,19 @@ func waitForProcessGroupExit(ctx context.Context, pid int) bool {
 	}
 }
 
+type stderrReadResult struct {
+	readErr   error
+	sawOutput bool
+}
+
 // readStderr reads and logs stderr from the agent.
-func (m *Manager) readStderr(stderrDone chan<- struct{}) {
+func (m *Manager) readStderr(stderrDone chan<- stderrReadResult) {
 	defer m.wg.Done()
-	defer close(stderrDone)
 
 	scanner := bufio.NewScanner(m.stderr)
+	result := stderrReadResult{}
 	for scanner.Scan() {
+		result.sawOutput = true
 		rawLine := stripANSI(scanner.Text())
 		if m.stderrConsumer != nil {
 			// Protocol-specific consumers inspect the line in memory. Their
@@ -2573,12 +2678,12 @@ func (m *Manager) readStderr(stderrDone chan<- struct{}) {
 			m.stderrConsumer.ConsumeStderrLine(rawLine)
 		}
 
-		line, keep := rawLine, true
-		if m.stderrSanitizer != nil {
-			line, keep = m.stderrSanitizer.SanitizeStderrLine(rawLine)
-		}
+		line, keep := safeManagedNpmStderrLine(rawLine)
 		if !keep {
-			line, keep = safeManagedNpmStderrLine(rawLine)
+			line, keep = rawLine, true
+			if m.stderrSanitizer != nil {
+				line, keep = m.stderrSanitizer.SanitizeStderrLine(rawLine)
+			}
 		}
 		if !keep || line == "" {
 			continue
@@ -2589,22 +2694,27 @@ func (m *Manager) readStderr(stderrDone chan<- struct{}) {
 		m.appendStderr(line)
 	}
 
-	if err := scanner.Err(); err != nil {
-		m.logger.Debug("stderr reader error", zap.Error(err))
+	result.readErr = scanner.Err()
+	if result.readErr != nil {
+		m.logger.Debug("stderr reader error", zap.Error(result.readErr))
 	}
+	stderrDone <- result
+	close(stderrDone)
 }
 
-func (m *Manager) waitForStderrDrain(stderrDone <-chan struct{}) {
+func (m *Manager) waitForStderrDrain(stderrDone <-chan stderrReadResult) (complete bool, sawOutput bool) {
 	if stderrDone == nil {
-		return
+		return false, false
 	}
 	timer := time.NewTimer(processStderrDrainTimeout)
 	defer timer.Stop()
 	select {
-	case <-stderrDone:
+	case result, ok := <-stderrDone:
+		return ok && result.readErr == nil, !ok || result.sawOutput
 	case <-timer.C:
 		m.logger.Warn("timed out waiting for agent stderr to drain")
 		_ = m.closeStderrReader()
+		return false, true
 	}
 }
 
@@ -2627,6 +2737,7 @@ func (m *Manager) appendStderr(line string) {
 	if len(m.stderrBuffer) >= defaultStderrBufferSize {
 		// Ring buffer: drop oldest line
 		m.stderrBuffer = m.stderrBuffer[1:]
+		m.stderrBufferTruncated = true
 	}
 	m.stderrBuffer = append(m.stderrBuffer, cleanLine)
 }
@@ -2641,15 +2752,28 @@ func (m *Manager) GetRecentStderr() []string {
 	return result
 }
 
+func (m *Manager) managedStartupStderrSnapshot() ([]string, bool) {
+	m.stderrMu.RLock()
+	defer m.stderrMu.RUnlock()
+	result := make([]string, len(m.stderrBuffer))
+	copy(result, m.stderrBuffer)
+	return result, !m.stderrBufferTruncated
+}
+
 // ClearStderrBuffer clears the stderr buffer (e.g., after successful operation)
 func (m *Manager) ClearStderrBuffer() {
 	m.stderrMu.Lock()
 	defer m.stderrMu.Unlock()
 	m.stderrBuffer = nil
+	m.stderrBufferTruncated = false
 }
 
 // waitForExit waits for the process to exit
-func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
+func (m *Manager) waitForExit(stderrDone <-chan stderrReadResult) {
+	m.waitForExitGeneration(stderrDone, m.ProcessGeneration())
+}
+
+func (m *Manager) waitForExitGeneration(stderrDone <-chan stderrReadResult, generation uint64) {
 	defer m.wg.Done()
 	defer close(m.doneCh)
 
@@ -2659,9 +2783,12 @@ func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 	err := m.cmd.Wait()
 	// Wait has observed process exit; now bound the reader drain in case a child
 	// process inherited the stderr writer and kept the pipe open.
-	m.waitForStderrDrain(stderrDone)
+	stderrComplete, stderrPresent := m.waitForStderrDrain(stderrDone)
 	_ = m.closeStderrReader()
 	intentionalStop := m.Status() == StatusStopping
+	recentStderr, stderrRetainedComplete := m.managedStartupStderrSnapshot()
+	evidence := newManagedStartupEvidence(generation, err, intentionalStop, stderrComplete, stderrRetainedComplete, stderrPresent, recentStderr)
+	m.recordManagedStartupEvidence(evidence)
 
 	switch {
 	case intentionalStop:
@@ -2675,7 +2802,6 @@ func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 			m.exitCode.Store(int32(exitCode))
 		}
 		// Include recent stderr for better error diagnostics
-		recentStderr := m.GetRecentStderr()
 		m.logger.Error("agent process exited with error",
 			zap.Error(err),
 			zap.Int("exit_code", exitCode),
@@ -2697,8 +2823,10 @@ func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 			Type:  adapter.EventTypeError,
 			Error: errorMsg,
 			Data: map[string]any{
-				"exit_code":     exitCode,
-				"recent_stderr": recentStderr,
+				"exit_code":          exitCode,
+				"recent_stderr":      recentStderr,
+				"process_generation": generation,
+				"startup_evidence":   evidence,
 			},
 		})
 	default:
@@ -2759,23 +2887,44 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 		zap.String("tool_call_id", req.ToolCallID),
 		zap.Bool("auto_approve", m.cfg.AutoApprovePermissions))
 
-	// If auto-approve is enabled, immediately approve with the first "allow" option
-	if m.cfg.AutoApprovePermissions {
-		return m.autoApprovePermission(req)
+	if m.RequiresManagedToolPolicy() {
+		if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
+			return response, nil
+		}
+		toolName := ""
+		if req.ToolName != nil {
+			toolName = *req.ToolName
+		}
+		m.logger.Warn("managed agent tool policy denied a native permission request",
+			zap.String("reason", "native_tool_denied"),
+			zap.String("tool_name", toolName))
+		return &adapter.PermissionResponse{Cancelled: true}, nil
 	}
-	if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
-		return response, nil
+
+	// The backend must persist the selected option before it resolves the live
+	// request. Keep the provider waiting here until that durable claim succeeds.
+	var autoApproveOption *adapter.PermissionOption
+	if m.cfg.AutoApprovePermissions {
+		if decision, approved := m.autoApprovePermission(req); approved {
+			autoApproveOption = &decision.option
+		}
+	}
+	if autoApproveOption == nil {
+		if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
+			return response, nil
+		}
 	}
 
 	// Create pending permission with response channel
 	createdAt := time.Now().UTC()
 	pending := &PendingPermission{
-		ID:         pendingID,
-		RequestID:  uuid.NewString(),
-		Request:    req,
-		ResponseCh: make(chan *adapter.PermissionResponse, 1),
-		CreatedAt:  createdAt,
-		State:      streams.PermissionStatusPending,
+		ID:                pendingID,
+		RequestID:         uuid.NewString(),
+		Request:           req,
+		ResponseCh:        make(chan *adapter.PermissionResponse, 1),
+		CreatedAt:         createdAt,
+		State:             streams.PermissionStatusPending,
+		AutoApproveOption: autoApproveOption,
 	}
 	pending.Snapshot = m.permissionSnapshot(pending)
 
@@ -2838,36 +2987,38 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 	}
 }
 
-// autoApprovePermission automatically approves a permission request
-// by selecting the first "allow" option, or the first option if no allow option exists
-func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (*adapter.PermissionResponse, error) {
-	if len(req.Options) == 0 {
-		m.logger.Warn("no options available for auto-approve, cancelling")
-		return &adapter.PermissionResponse{Cancelled: true}, nil
-	}
+// autoApprovePermission answers a permission request by selecting the first
+// offered option whose kind is an allow. It reports false when no such option
+// exists, including for an empty option list, so the caller falls through to
+// the pending permission flow rather than answering with an option the provider
+// meant as a refusal.
+type autoApprovalDecision struct {
+	response *adapter.PermissionResponse
+	option   adapter.PermissionOption
+}
 
-	// Find the first "allow" option
+func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (autoApprovalDecision, bool) {
 	var selectedOption *adapter.PermissionOption
 	for i := range req.Options {
-		opt := &req.Options[i]
-		if opt.Kind == "allow_once" || opt.Kind == "allow_always" {
-			selectedOption = opt
+		if isAllowPermissionKind(req.Options[i].Kind) {
+			selectedOption = &req.Options[i]
 			break
 		}
 	}
-
-	// If no allow option, use the first option
 	if selectedOption == nil {
-		selectedOption = &req.Options[0]
+		m.logger.Info("auto-approve found no allow option, prompting instead",
+			zap.Int("option_count", len(req.Options)))
+		return autoApprovalDecision{}, false
 	}
 
 	m.logger.Info("auto-approving permission request",
 		zap.String("option_id", selectedOption.OptionID),
 		zap.String("kind", string(selectedOption.Kind)))
 
-	return &adapter.PermissionResponse{
-		OptionID: selectedOption.OptionID,
-	}, nil
+	return autoApprovalDecision{
+		response: &adapter.PermissionResponse{OptionID: selectedOption.OptionID},
+		option:   *selectedOption,
+	}, true
 }
 
 // sendPermissionNotification sends a permission request notification through the updates channel.
@@ -2882,7 +3033,10 @@ func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (*adapte
 // it must park instead: the wait ends either because a backend later
 // attaches (which starts draining the channel, satisfying the same select
 // sendUpdateBlocking already performs) or because the instance stops.
-func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
+// permissionRequestEvent builds the stream event describing a permission
+// request. Shared by the pending flow and by the auto-approved record so both
+// present the same redacted snapshot to the backend.
+func (m *Manager) permissionRequestEvent(pending *PendingPermission) adapter.AgentEvent {
 	options := make([]streams.PermissionOption, len(pending.Snapshot.Options))
 	for i, option := range pending.Snapshot.Options {
 		options[i] = streams.PermissionOption{
@@ -2902,6 +3056,17 @@ func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
 		ActionType:        pending.Snapshot.Action.Type,
 		ActionDetails:     permissionActionDetailsForEvent(pending.Snapshot.Action),
 	}
+	if pending.AutoApproveOption != nil {
+		event.AutoApprovedOptionID = pending.AutoApproveOption.OptionID
+		event.AutoApprovedOptionKind = string(pending.AutoApproveOption.Kind)
+		event.AutoApprovalSource = streams.PermissionDecisionSourceAutoApprove
+		event.AutoApprovalPending = true
+	}
+	return event
+}
+
+func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
+	event := m.permissionRequestEvent(pending)
 
 	m.logger.Info("sending permission notification via updates channel",
 		zap.String("pending_id", pending.ID),

@@ -14,6 +14,6 @@ type RepositoryPreparationError = lifecycle.RepositoryPreparationError
 // the provider failed to acknowledge the cancellation within its bound.
 var ErrCancelEscalated = lifecycle.ErrCancelEscalated
 
-// ErrVirtualProfile marks a profile family that is a routing owner rather than
-// a directly launchable profile.
+// ErrVirtualProfile marks a logical routing profile that has no concrete
+// execution profile (a routing owner rather than a directly launchable profile).
 var ErrVirtualProfile = lifecycle.ErrVirtualProfile

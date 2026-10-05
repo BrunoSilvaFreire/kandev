@@ -25,8 +25,6 @@ export const TERMINAL_DEFAULT_ID = "terminal-default";
 export const DEV_SERVER_PANEL_ID = "dev-server";
 export const SIDEBAR_LOCK = "no-drop-target" as const;
 
-export const PROMPT_HISTORY_PANEL_ID = "prompt-history";
-
 /** Task-wide per-agent usage/cost breakdown panel. */
 export const USAGE_PANEL_ID = "usage";
 
@@ -47,7 +45,6 @@ export const REUSABLE_PANEL_IDS = [
   "browser",
   "vscode",
   "todos",
-  PROMPT_HISTORY_PANEL_ID,
   USAGE_PANEL_ID,
   DOCUMENTS_PANEL_ID,
   TASK_HISTORY_PANEL_ID,
@@ -66,8 +63,8 @@ export const KNOWN_PANEL_IDS = new Set([
   "pr-detail",
   "mr-detail",
   "todos",
+  "background-work",
   DEV_SERVER_PANEL_ID,
-  PROMPT_HISTORY_PANEL_ID,
   USAGE_PANEL_ID,
   DOCUMENTS_PANEL_ID,
   TASK_HISTORY_PANEL_ID,
@@ -85,6 +82,7 @@ export const STRUCTURAL_COMPONENTS = new Set([
   "vscode",
   "pr-detail",
   "mr-detail",
+  "background-work",
   // Every plugin-contributed task panel shares this one generic component
   // name (see lib/state/layout-manager/plugin-panels.ts) — structural
   // regardless of which plugin registered it.
@@ -162,10 +160,10 @@ export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id"> & { titleKey
     titleKey: "task:panelMergeRequest",
   },
   todos: { component: "todos", title: "Todos", titleKey: "common:todos" },
-  [PROMPT_HISTORY_PANEL_ID]: {
-    component: PROMPT_HISTORY_PANEL_ID,
-    title: "Prompt History",
-    titleKey: "task:promptHistory",
+  "background-work": {
+    component: "background-work",
+    title: "Background Work",
+    titleKey: "task:panelBackgroundWork",
   },
   [USAGE_PANEL_ID]: {
     component: USAGE_PANEL_ID,

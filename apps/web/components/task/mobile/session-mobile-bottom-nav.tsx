@@ -26,7 +26,6 @@ import { registrationIsVisible } from "../plugin-task-panel";
 type SessionMobileBottomNavProps = {
   activePanel: MobileSessionPanel;
   onPanelChange: (panel: MobileSessionPanel) => void;
-  showPromptHistory?: boolean;
   showUsage?: boolean;
   showDocuments?: boolean;
   showTaskHistory?: boolean;
@@ -72,7 +71,6 @@ function hasMobilePluginPanels(
 function isMorePanelActive(activePanel: MobileSessionPanel): boolean {
   return (
     parsePluginPanelId(activePanel) !== undefined ||
-    activePanel === "prompt-history" ||
     activePanel === "usage" ||
     activePanel === "documents" ||
     activePanel === "task-history"
@@ -100,7 +98,6 @@ function buildMobileNavItems({
   showStatus,
   onOpenStatus,
   onOpenPluginPicker,
-  showPromptHistory,
   showUsage,
   showDocuments,
   showTaskHistory,
@@ -116,7 +113,6 @@ function buildMobileNavItems({
   showStatus: boolean;
   onOpenStatus: () => void;
   onOpenPluginPicker: () => void;
-  showPromptHistory: boolean;
   showUsage: boolean;
   showDocuments: boolean;
   showTaskHistory: boolean;
@@ -172,8 +168,7 @@ function buildMobileNavItems({
       label: t("task:terminal"),
       icon: <IconTerminal2 className="h-5 w-5" />,
     },
-    ...(showPromptHistory ||
-    showUsage ||
+    ...(showUsage ||
     showDocuments ||
     showTaskHistory ||
     hasTaskCanvases ||
@@ -196,7 +191,6 @@ function buildMobileNavItems({
 export function SessionMobileBottomNav({
   activePanel,
   onPanelChange,
-  showPromptHistory = false,
   showUsage = false,
   showDocuments = false,
   showTaskHistory = false,
@@ -227,7 +221,6 @@ export function SessionMobileBottomNav({
         showStatus,
         onOpenStatus,
         onOpenPluginPicker: () => setPluginPickerOpen(true),
-        showPromptHistory,
         showUsage,
         showDocuments,
         showTaskHistory,
@@ -245,7 +238,6 @@ export function SessionMobileBottomNav({
       connectionIssueSeverity,
       registryVersion,
       activePanel,
-      showPromptHistory,
       showUsage,
       showDocuments,
       showTaskHistory,
@@ -257,6 +249,7 @@ export function SessionMobileBottomNav({
 
   return (
     <nav
+      data-testid="session-mobile-bottom-nav"
       className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-around border-t border-border bg-background"
       style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
     >
@@ -272,7 +265,6 @@ export function SessionMobileBottomNav({
         open={pluginPickerOpen}
         onOpenChange={setPluginPickerOpen}
         onSelect={onPanelChange}
-        showPromptHistory={showPromptHistory}
         showUsage={showUsage}
         showDocuments={showDocuments}
         showTaskHistory={showTaskHistory}
