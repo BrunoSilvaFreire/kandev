@@ -26,6 +26,7 @@ const (
 type Candidate struct {
 	ProfileID string
 	Tags      []string
+	Model     string
 }
 
 // Decision is the result of one selection over a candidate set.
@@ -170,14 +171,14 @@ func (s *QuotaStrategy) rank(ctx context.Context, candidates []Candidate) []rank
 		wg.Add(1)
 		go func(i int, candidate Candidate) {
 			defer wg.Done()
-			results[i] = s.score(ctx, candidate.ProfileID)
+			results[i] = s.score(ctx, candidate.ProfileID, candidate.Model)
 		}(i, candidate)
 	}
 	wg.Wait()
 	return results
 }
 
-func (s *QuotaStrategy) score(ctx context.Context, profileID string) ranked {
+func (s *QuotaStrategy) score(ctx context.Context, profileID, model string) ranked {
 	result := ranked{profileID: profileID, state: QuotaUnknown}
 	if s.Provider == nil {
 		return result
@@ -187,7 +188,7 @@ func (s *QuotaStrategy) score(ctx context.Context, profileID string) ranked {
 		result.state = QuotaUnavailable
 		return result
 	}
-	remaining, known := agentusage.RemainingPct(usage)
+	remaining, known := agentusage.RemainingPct(usage, model)
 	if !known {
 		return result
 	}

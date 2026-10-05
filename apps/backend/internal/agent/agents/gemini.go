@@ -135,7 +135,7 @@ func (a *Gemini) InstallScript() string {
 	return "npm install -g " + geminiPackage
 }
 
-func (a *Gemini) BillingType() usage.BillingType { return defaultBillingType() }
+func (a *Gemini) BillingType() usage.BillingType { return geminiBillingType() }
 
 func (a *Gemini) PermissionSettings() map[string]PermissionSetting {
 	return emptyPermSettings

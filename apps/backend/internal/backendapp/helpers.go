@@ -78,6 +78,7 @@ import (
 	"github.com/kandev/kandev/internal/profiles"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
+	"github.com/kandev/kandev/internal/providerusage"
 	"github.com/kandev/kandev/internal/quickterminal"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/runtimeflags"
@@ -706,6 +707,8 @@ type routeParams struct {
 	agentSettingsController       *agentsettingscontroller.Controller
 	agentSettingsRepo             settingsstore.Repository
 	profileUsageProvider          agentsettingshandlers.ProfileUsageProvider
+	usageAdapter                  *usageProviderAdapter
+	providerUsageSvc              *providerusage.Service
 	agentList                     taskhandlers.AgentLister
 	agentRegistry                 *registry.Registry
 	userCtrl                      *usercontroller.Controller
@@ -792,6 +795,9 @@ func registerRoutes(p routeParams) {
 	// comments pre-claim, then consume them best-effort after delivery.
 	approvalSupport := taskservice.NewApprovalSupport(planService, handoffDocSvc, p.log)
 	clarificationResolver.SetApprovalSupport(approvalSupport, approvalSupport)
+	// Continuation-recovery bundles (D10) are system-authored; their decision
+	// is applied by the orchestrator instead of being delivered to an agent.
+	clarificationResolver.SetContinuationRecoverySupport(p.orchestratorSvc)
 	handoffSvc := taskservice.NewHandoffService(p.taskRepo, p.taskRepo, handoffDocSvc,
 		p.officeRepo, p.officeRepo, p.log)
 	p.taskSvc.SetAutoArchiveCoordinator(handoffSvc)
@@ -1411,6 +1417,11 @@ func registerSecondaryRoutes(
 	agentSettingsHandlers.SetProfileUsageProvider(p.profileUsageProvider)
 	p.log.Debug("Registered Agent Settings handlers (HTTP)")
 
+	if p.providerUsageSvc != nil {
+		providerusage.RegisterRoutes(p.router, p.providerUsageSvc, p.log)
+		p.log.Debug("Registered Provider Usage handlers (HTTP)")
+	}
+
 	// Login PTY: spawns agent login commands under a PTY on the kandev host
 	// (claude auth login, auggie login, ...). The manager is shared with Quick
 	// Terminal so descriptor lifecycle callbacks observe the same sessions.
@@ -1439,8 +1450,11 @@ func registerSecondaryRoutes(
 	prompthandlers.RegisterRoutes(p.router, p.promptCtrl, p.log)
 	p.log.Debug("Registered Prompts handlers (HTTP)")
 
-	utilityhandlers.RegisterRoutes(p.router, p.utilityCtrl, p.lifecycleMgr, p.hostUtilityMgr, p.services.User, p.log)
+	utilityHandlers := utilityhandlers.RegisterRoutes(p.router, p.utilityCtrl, p.lifecycleMgr, p.hostUtilityMgr, p.services.User, p.log)
 	p.log.Debug("Registered Utility Agents handlers (HTTP)")
+	if p.orchestratorSvc != nil && utilityHandlers != nil {
+		p.orchestratorSvc.SetSessionlessUtilityRunner(utilityHandlers.ExecuteSessionlessPrompt)
+	}
 
 	agentcapabilities.RegisterRoutes(p.router, p.hostUtilityMgr, p.log)
 	p.log.Debug("Registered Agent Capabilities handlers (HTTP)")

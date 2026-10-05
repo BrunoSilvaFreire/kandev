@@ -1,10 +1,16 @@
 ---
 spec: docs/specs/agents/requirements/tagged-quota-agent-selection.md
 created: 2026-09-22
-status: in_progress
+status: superseded
 ---
 
 # Implementation Plan: Tagged quota-aware workflow agent selection
+
+> **Superseded (2026-09-25):** schedule-time ranking is now owned by
+> [Dynamic Profile Scheduling](../../specs/agents/requirements/dynamic-profile-scheduling.md).
+> The workflow-step `allowed_tags` scheduler described here is retained only as
+> the compatibility bridge and is removed after the migration and parity gates
+> pass. See [the ownership ADR](../../decisions/2026-09-25-dynamic-profile-scheduling.md).
 
 Add free-form tags to concrete agent profiles, let a workflow step declare
 `allowed_tags`, and choose one eligible concrete profile at each workflow-step

@@ -14,7 +14,7 @@ function RowName({ row }: { row: UsageDisplayRow }) {
   const note = noteText(row, t);
   return (
     <td className="min-w-40 px-2 py-1">
-      <div className="truncate text-foreground">
+      <div className="truncate text-foreground" title={row.title ?? undefined}>
         {deletedSession ? t("task:usagePanelDeletedSession") : row.primary}
       </div>
       {row.secondary ? (

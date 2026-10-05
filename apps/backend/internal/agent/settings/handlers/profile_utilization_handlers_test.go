@@ -11,7 +11,12 @@ import (
 type fakeUsageProvider struct {
 	usage map[string]*agentusage.ProviderUsage
 	errs  map[string]error
+	// TODO: make calls an atomic.Int32 (or mutex-guard it); collectProfileUtilization calls GetUsage concurrently, so `go test -race` fails TestCollectProfileUtilizationStates.
 	calls int
+}
+
+func (f *fakeUsageProvider) ProfileModel(_ context.Context, id string) (string, error) {
+	return id, nil
 }
 
 func (f *fakeUsageProvider) GetUsage(_ context.Context, id string) (*agentusage.ProviderUsage, error) {
@@ -83,5 +88,15 @@ func TestCollectProfileUtilizationNilProviderIsUnknown(t *testing.T) {
 		if item.State != "unknown" {
 			t.Fatalf("item = %#v, want unknown", item)
 		}
+	}
+}
+
+func TestProfileUtilizationIgnoresOtherModelWindows(t *testing.T) {
+	h := &Handlers{profileUsage: &fakeUsageProvider{usage: map[string]*agentusage.ProviderUsage{
+		"flash": {Windows: []agentusage.UtilizationWindow{{Model: "pro", UtilizationPct: 100}, {Model: "flash", UtilizationPct: 25}}},
+	}}}
+	item := h.profileUtilizationItem(context.Background(), "flash")
+	if item.RemainingPct == nil || *item.RemainingPct != 75 {
+		t.Fatalf("item = %#v, want flash's 75%% remaining", item)
 	}
 }

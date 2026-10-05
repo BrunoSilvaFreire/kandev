@@ -62,6 +62,32 @@ Note: KanDev's Codex usage client (`apps/backend/internal/agent/usage/client_cod
 KanDev labels every OpenCode profile `billing_type: api_key` because `OpenCodeACP.BillingType()` uses the default;
 that label is **not** evidence of per-token billing — the real billing is whatever provider the model id routes to.
 
+### OpenCode Go quota
+
+To display OpenCode Go quota, open `opencode.ai/console` in a browser, then use
+**Usage > Set credential** on the OpenCode Go account (or the Quota credentials
+card on the OpenCode agent's settings page). The dialog explains how to copy the
+full `Cookie` request header from a console network request. It writes the
+global Kandev secret `opencode-console-cookie`; the Usage page then shows the
+three meters, the subscription state, and the prepaid balance. The session lasts
+about 30 days, so refresh the secret when the Usage page reports expired
+credentials. Kandev never logs or returns it.
+
+## JetBrains Junie
+
+`junie-acp` reads the JetBrains Junie account balance and license state from the
+CLI's own backend (`https://ingrazzio-cloud-prod.labs.jb.gg/auth/test`). The
+durable credential is a `JUNIE_API_KEY` generated at
+<https://junie.jetbrains.com/cli>, saved either through **Usage > Set
+credential** or the Quota credentials card on the Junie agent's settings page;
+it is stored as the global Kandev secret `junie-api-key`. Without a key, Kandev
+falls back to the login token in `~/.junie/secure_credentials.json`, but that
+token expires after about an hour and Junie only refreshes it in memory, so the
+Usage page reports expired credentials until the next interactive `junie` login.
+Kandev reads the file token only while it is unexpired, never reads the refresh
+token, and never writes the file. The account view shows the AIP credits and
+JUNP USD balances and the active license.
+
 ## Gemini CLI
 
 Installed `@google/gemini-cli` 0.60.0 globally so discovery finds `gemini`. `~/.gemini/settings.json` has
@@ -69,7 +95,10 @@ Installed `@google/gemini-cli` 0.60.0 globally so discovery finds `gemini`. `~/.
 `~/.gemini/oauth_creds.json`. Non-interactive `gemini -p ...` fails with "Invalid auth method selected", so KanDev ACP
 sessions would fail the same way. To fix (user action): run `gemini`, `/auth` → **Login with Google** (creates
 `oauth_creds.json`, switches `selectedType` to `oauth-personal`), then **Settings > Agents > Gemini > refresh**.
-KanDev reports Gemini `billing_type: api_key` by default regardless of auth mode.
+KanDev reports Gemini `billing_type: subscription` once `oauth_creds.json` carries a token, and reads that token
+**read-only** to fetch Code Assist quota (`v1internal:loadCodeAssist` / `retrieveUserQuota`). Kandev never refreshes or
+rewrites the token. Because it is currently absent, Gemini quota is not exercised live; if it expires, Gemini quota goes
+unknown until the next `/auth` login.
 
 ## Role profiles created for multi-provider work
 

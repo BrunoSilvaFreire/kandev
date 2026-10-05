@@ -41,6 +41,44 @@ func (s *UsageService) Register(profileID string, client ProviderUsageClient, ca
 	s.clients[profileID] = registration{client: client, cacheKey: cacheKey}
 }
 
+// SetRecorder installs a callback invoked after each real successful live
+// fetch, with the same cache key Register stored. It is the seam that lets a
+// consumer build measured history without a second provider poll.
+func (s *UsageService) SetRecorder(fn func(key string, usage *ProviderUsage)) {
+	s.cache.SetOnFetched(fn)
+}
+
+// CacheKeyFor returns the cache key registered for a profile, or false when
+// the profile has no registration (no live quota client).
+func (s *UsageService) CacheKeyFor(profileID string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	reg, ok := s.clients[profileID]
+	if !ok {
+		return "", false
+	}
+	return reg.cacheKey, true
+}
+
+// LastError returns the most recent fetch error recorded for a cache key, or
+// nil. Callers use it to distinguish "credentials expired" from "missing"
+// without a second provider probe.
+func (s *UsageService) LastError(cacheKey string) error {
+	return s.cache.LastError(cacheKey)
+}
+
+// Invalidate drops the cached value and error for a cache key, so the next
+// GetUsage re-fetches. Callers use it right after a credential is saved.
+func (s *UsageService) Invalidate(cacheKey string) {
+	s.cache.Invalidate(cacheKey)
+}
+
+// InvalidateAll drops every cached value and error, so the next lookups
+// re-fetch. Callers use it right after a credential is saved or refreshed.
+func (s *UsageService) InvalidateAll() {
+	s.cache.InvalidateAll()
+}
+
 // GetUsage returns fresh-or-cached utilization for the agent profile.
 // Returns nil, nil if the profile has no registered client.
 func (s *UsageService) GetUsage(ctx context.Context, profileID string) (*ProviderUsage, error) {

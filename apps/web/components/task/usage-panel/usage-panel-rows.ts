@@ -1,9 +1,11 @@
 import type { UsageGroup, UsageTotals } from "@/lib/api/domains/usage-api";
 import { rollUpGroups, type UsageRollupRow, type UsageView } from "@/lib/usage/breakdown";
-import { cacheStatus, estimatedExpiryAt, type CacheStatus } from "@/lib/usage/efficiency";
-import { newestMessageAtMs } from "@/lib/usage/newest-message";
-import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
-import type { Message } from "@/lib/types/http";
+import {
+  cacheStatus,
+  epochMillisFromWire,
+  estimatedExpiryAt,
+  type CacheStatus,
+} from "@/lib/usage/efficiency";
 import type { PromptUsageEntry } from "@/lib/state/slices/session-runtime/types";
 
 type ProfileLike = { id: string; name?: string };
@@ -13,6 +15,8 @@ export type UsageDisplayRow = {
   key: string;
   primary: string;
   secondary: string | null;
+  /** Short identity shown only as a hover tooltip, never as the row label. */
+  title: string | null;
   totals: UsageTotals;
   isSession: boolean;
   sessionId: string | null;
@@ -26,48 +30,49 @@ export type UsagePanelRowsArgs = {
   groups: UsageGroup[];
   sessions: SessionLike[] | undefined;
   profiles: ProfileLike[];
+  deletedProfile: string;
   lastPromptBySession: Record<string, PromptUsageEntry>;
-  messagesBySession: Record<string, Message[] | undefined>;
   now: number;
 };
 
-function toMillis(value: string | null): number | null {
-  if (value === null) return null;
-  const parsed = parseStrictRfc3339Timestamp(value);
-  return parsed === null ? null : Number(parsed / BigInt(1_000_000));
-}
-
-function maxMillis(first: number | null, second: number | null): number | null {
-  if (first === null) return second;
-  if (second === null) return first;
-  return Math.max(first, second);
-}
-
-function profileName(profiles: ProfileLike[], agentProfileId: string, unknown: string): string {
+function profileName(
+  profiles: ProfileLike[],
+  agentProfileId: string,
+  deletedProfile: string,
+  unknown: string,
+): string {
   if (agentProfileId === "") return unknown;
-  return profiles.find((profile) => profile.id === agentProfileId)?.name ?? agentProfileId;
+  const profile = profiles.find((candidate) => candidate.id === agentProfileId);
+  if (profile?.name) return profile.name;
+  return deletedProfile;
 }
 
 function shortId(id: string | null): string {
   return id ? id.slice(0, 8) : "";
 }
 
+/** Short identity for the tooltip when the row label is a fallback, not a name. */
+function identityTitle(profiles: ProfileLike[], agentProfileId: string): string | null {
+  if (agentProfileId === "") return null;
+  const profile = profiles.find((candidate) => candidate.id === agentProfileId);
+  return profile?.name ? null : shortId(agentProfileId);
+}
+
 /**
- * The session label the task/session tabs use, falling back to the agent
- * profile name plus a short id so a session without a name never renders a
- * bare UUID.
+ * The session label the task/session tabs use. It prefers the session name,
+ * then its agent profile, then a deleted-profile fallback, and never renders a
+ * UUID; the short id is kept for the hover tooltip only.
  */
 function sessionLabel(
   session: SessionLike | undefined,
   row: UsageRollupRow,
   profiles: ProfileLike[],
+  deletedProfile: string,
   unknown: string,
 ): string {
   if (session?.name) return session.name;
-  const profile = profileName(profiles, row.agentProfileId, "");
-  const short = shortId(row.sessionId);
-  if (profile !== "") return short !== "" ? `${profile} · ${short}` : profile;
-  return short !== "" ? short : unknown;
+  const profile = profileName(profiles, row.agentProfileId, deletedProfile, "");
+  return profile !== "" ? profile : unknown;
 }
 
 function joinDetail(parts: string[]): string | null {
@@ -79,21 +84,23 @@ function sessionCache(
   row: UsageRollupRow,
   args: UsagePanelRowsArgs,
 ): { cacheStatus: CacheStatus; expiresAt: number | null } {
-  const fromMessages = row.sessionId ? newestMessageAtMs(args.messagesBySession[row.sessionId] ?? []) : null;
-  const newestMessageAt = maxMillis(fromMessages, toMillis(row.totals.last_event_at));
+  // Cache warmth is keyed on the newest usage-ledger event, the only observable
+  // provider round-trip; messages are ignored.
+  const lastUsageEventAt = epochMillisFromWire(row.totals.last_event_at);
   const status = cacheStatus({
-    newestMessageAt,
+    lastUsageEventAt,
     eventCount: row.totals.event_count,
     now: args.now,
   });
-  return { cacheStatus: status, expiresAt: estimatedExpiryAt(newestMessageAt) };
+  return { cacheStatus: status, expiresAt: estimatedExpiryAt(lastUsageEventAt) };
 }
 
 function agentRow(row: UsageRollupRow, args: UsagePanelRowsArgs, unknown: string): UsageDisplayRow {
   return {
     key: row.key,
-    primary: profileName(args.profiles, row.agentProfileId, unknown),
+    primary: profileName(args.profiles, row.agentProfileId, args.deletedProfile, unknown),
     secondary: joinDetail([...row.agentTypes, ...row.models, ...row.providers]),
+    title: identityTitle(args.profiles, row.agentProfileId),
     totals: row.totals,
     isSession: false,
     sessionId: null,
@@ -108,6 +115,7 @@ function modelRow(row: UsageRollupRow, unknown: string): UsageDisplayRow {
     key: row.key,
     primary: row.model === "" ? unknown : row.model,
     secondary: row.provider === "" ? null : row.provider,
+    title: null,
     totals: row.totals,
     isSession: false,
     sessionId: null,
@@ -128,8 +136,9 @@ function sessionRow(
   const cache = sessionCache(row, args);
   return {
     key: row.key,
-    primary: sessionLabel(session, row, args.profiles, unknown),
+    primary: sessionLabel(session, row, args.profiles, args.deletedProfile, unknown),
     secondary: null,
+    title: session?.name ? null : shortId(row.sessionId) || null,
     totals: row.totals,
     isSession: true,
     sessionId: row.sessionId,
@@ -181,8 +190,9 @@ function emptySessionRow(
   const cache = sessionCache(row, args);
   return {
     key: `session:${session.id}`,
-    primary: sessionLabel(session, row, args.profiles, unknown),
+    primary: sessionLabel(session, row, args.profiles, args.deletedProfile, unknown),
     secondary: null,
+    title: session.name ? null : shortId(session.id) || null,
     totals,
     isSession: true,
     sessionId: session.id,
@@ -197,7 +207,10 @@ function emptySessionRow(
  * roll-ups; the session view additionally merges the task's store sessions so
  * a session with no ledger rows still appears ("No usage reported").
  */
-export function buildUsageDisplayRows(args: UsagePanelRowsArgs, unknown: string): UsageDisplayRow[] {
+export function buildUsageDisplayRows(
+  args: UsagePanelRowsArgs,
+  unknown: string,
+): UsageDisplayRow[] {
   const rolled = rollUpGroups(args.groups, args.view);
   const rows = rolled.map((row) => {
     if (args.view === "agent") return agentRow(row, args, unknown);

@@ -153,6 +153,13 @@ func parseCodexUsage(body []byte, now time.Time) (*ProviderUsage, error) {
 	}, nil
 }
 
+// CodexWindowLabel renders a Codex rate-limit window duration in seconds the
+// same way the live client does. It is exported so history backfill and live
+// points share one label series.
+func CodexWindowLabel(seconds int64) string {
+	return codexWindowLabel(seconds)
+}
+
 // codexWindowLabel renders a window duration like the Claude labels:
 // 18000 s → "5-hour", 604800 s → "7-day", 2592000 s → "30-day".
 func codexWindowLabel(seconds int64) string {

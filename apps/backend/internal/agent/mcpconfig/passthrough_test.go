@@ -479,11 +479,11 @@ func TestStrategiesDescribe(t *testing.T) {
 		strategy PassthroughMCPStrategy
 		want     string
 	}{
-		"claude":   {ClaudeStrategy{}, "an MCP config file passed via the --mcp-config flag"},
-		"codex":    {CodexStrategy{}, "repeated -c mcp_servers.* command-line overrides"},
-		"cursor":   {CursorStrategy{}, "a project-local .cursor/mcp.json file (merged into an existing one)"},
-		"pi":       {PiStrategy{}, "a project-local .pi/mcp.json file (merged into an existing one)"},
-		"opencode": {OpenCodeStrategy{}, "a temp MCP config file referenced by the OPENCODE_CONFIG env var"},
+		"claude":      {ClaudeStrategy{}, "an MCP config file passed via the --mcp-config flag"},
+		"codex":       {CodexStrategy{}, "repeated -c mcp_servers.* command-line overrides"},
+		"cursor":      {CursorStrategy{}, "a project-local .cursor/mcp.json file (merged into an existing one)"},
+		"pi":          {PiStrategy{}, "a project-local .pi/mcp.json file (merged into an existing one)"},
+		"opencode":    {OpenCodeStrategy{}, "a temp MCP config file referenced by the OPENCODE_CONFIG env var"},
 		"antigravity": {AntigravityStrategy{}, "a project-local .agents/mcp_config.json file (merged into an existing one)"},
 	}
 	for name, tc := range cases {

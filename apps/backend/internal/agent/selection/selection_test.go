@@ -61,6 +61,20 @@ func TestQuotaStrategyHighestRemaining(t *testing.T) {
 	}
 }
 
+func TestQuotaStrategyIgnoresOtherModelsQuota(t *testing.T) {
+	strategy := &QuotaStrategy{Provider: fakeUsage{usage: map[string]*agentusage.ProviderUsage{
+		"pro":   {Windows: []agentusage.UtilizationWindow{{Model: "gemini-pro", UtilizationPct: 100}}},
+		"flash": {Windows: []agentusage.UtilizationWindow{{Model: "gemini-pro", UtilizationPct: 100}, {Model: "gemini-flash", UtilizationPct: 20}}},
+	}}}
+	decision, err := strategy.Select(context.Background(), []Candidate{{ProfileID: "pro", Model: "gemini-pro"}, {ProfileID: "flash", Model: "gemini-flash"}})
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if decision.ProfileID != "flash" {
+		t.Fatalf("decision = %#v, want flash", decision)
+	}
+}
+
 func TestQuotaStrategyTieBreaksByProfileID(t *testing.T) {
 	strategy := &QuotaStrategy{Provider: fakeUsage{usage: map[string]*agentusage.ProviderUsage{
 		"z": usageAt(50),

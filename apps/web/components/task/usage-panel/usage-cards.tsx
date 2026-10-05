@@ -20,7 +20,10 @@ export function UsageCards({ rows }: { rows: UsageDisplayRow[] }) {
             className="rounded border border-border p-3"
           >
             <div className="min-w-0">
-              <div className="truncate text-sm font-medium text-foreground">
+              <div
+                className="truncate text-sm font-medium text-foreground"
+                title={row.title ?? undefined}
+              >
                 {deletedSession ? t("task:usagePanelDeletedSession") : row.primary}
               </div>
               {row.secondary ? (

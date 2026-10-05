@@ -33,6 +33,13 @@ type ProfileUsageProvider interface {
 	GetUsage(ctx context.Context, profileID string) (*agentusage.ProviderUsage, error)
 }
 
+// ProfileUsageModelProvider supplies the configured model when a usage
+// provider can resolve it. It is optional to preserve unknown semantics for
+// alternate providers.
+type ProfileUsageModelProvider interface {
+	ProfileModel(ctx context.Context, profileID string) (string, error)
+}
+
 // SetProfileUsageProvider wires the shared usage adapter into the batch
 // utilization endpoint. Safe to leave unset; the endpoint then reports unknown.
 func (h *Handlers) SetProfileUsageProvider(provider ProfileUsageProvider) {
@@ -123,7 +130,11 @@ func (h *Handlers) profileUtilizationItem(ctx context.Context, id string) profil
 		item.State = profileUtilizationStateUnavailable
 		return item
 	}
-	remaining, known := agentusage.RemainingPct(usage)
+	model := ""
+	if provider, ok := h.profileUsage.(ProfileUsageModelProvider); ok {
+		model, _ = provider.ProfileModel(ctx, id)
+	}
+	remaining, known := agentusage.RemainingPct(usage, model)
 	if !known {
 		return item
 	}

@@ -34,6 +34,13 @@ type UsageCache struct {
 	// coalesce into a single provider request instead of a burst.
 	fetchMu    sync.Mutex
 	fetchLocks map[string]*sync.Mutex
+
+	// onFetched, when set, is invoked after a real, successful, non-nil
+	// fetch with the cache key and the fetched value. It is never invoked
+	// for a cache hit, a cache hit served from the negative entry, or an
+	// error. Consumers use it to record measured history without becoming
+	// a second fetch path.
+	onFetched func(key string, usage *ProviderUsage)
 }
 
 // NewUsageCache creates an empty UsageCache.
@@ -42,6 +49,15 @@ func NewUsageCache() *UsageCache {
 		entries:    make(map[string]*cachedEntry),
 		fetchLocks: make(map[string]*sync.Mutex),
 	}
+}
+
+// SetOnFetched installs the callback invoked after each real successful
+// fetch. Passing nil clears it. The callback runs while the per-key fetch
+// lock is held, so it must not re-enter GetOrFetch for the same key.
+func (c *UsageCache) SetOnFetched(fn func(key string, usage *ProviderUsage)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onFetched = fn
 }
 
 // CacheKey builds a deterministic cache key from provider name and credential path.
@@ -92,7 +108,21 @@ func (c *UsageCache) GetOrFetchWithin(
 		return nil, err
 	}
 	c.storeSuccess(key, usage)
+	c.notifyFetched(key, usage)
 	return usage, nil
+}
+
+// notifyFetched invokes the fetch recorder without holding the entries lock.
+func (c *UsageCache) notifyFetched(key string, usage *ProviderUsage) {
+	if usage == nil {
+		return
+	}
+	c.mu.RLock()
+	fn := c.onFetched
+	c.mu.RUnlock()
+	if fn != nil {
+		fn(key, usage)
+	}
 }
 
 func (c *UsageCache) keyLock(key string) *sync.Mutex {
@@ -151,4 +181,23 @@ func (c *UsageCache) Invalidate(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.entries, key)
+}
+
+// InvalidateAll clears every cached value and error, so the next lookups
+// re-fetch. Callers use it after a credential is saved.
+func (c *UsageCache) InvalidateAll() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries = make(map[string]*cachedEntry)
+}
+
+// LastError returns the most recently recorded fetch error for a key, or nil.
+func (c *UsageCache) LastError(key string) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	entry, ok := c.entries[key]
+	if !ok {
+		return nil
+	}
+	return entry.err
 }

@@ -50,22 +50,30 @@ describe("hitRatio", () => {
 describe("cacheStatus", () => {
   const now = 1_000_000;
 
-  it("is unknown without messages", () => {
-    expect(cacheStatus({ newestMessageAt: null, eventCount: 5, now })).toBe("unknown");
+  it("is unknown without a usage event", () => {
+    expect(cacheStatus({ lastUsageEventAt: null, eventCount: 5, now })).toBe("unknown");
   });
 
   it("is unknown without usage events", () => {
-    expect(cacheStatus({ newestMessageAt: now, eventCount: 0, now })).toBe("unknown");
+    expect(cacheStatus({ lastUsageEventAt: now, eventCount: 0, now })).toBe("unknown");
   });
 
   it("is warm inside the expiry window", () => {
-    expect(
-      cacheStatus({ newestMessageAt: now - CACHE_EXPIRY_MS + 1, eventCount: 2, now }),
-    ).toBe("warm");
+    expect(cacheStatus({ lastUsageEventAt: now - CACHE_EXPIRY_MS + 1, eventCount: 2, now })).toBe(
+      "warm",
+    );
   });
 
   it("is likely expired at and beyond the expiry window", () => {
-    expect(cacheStatus({ newestMessageAt: now - CACHE_EXPIRY_MS, eventCount: 2, now })).toBe(
+    expect(cacheStatus({ lastUsageEventAt: now - CACHE_EXPIRY_MS, eventCount: 2, now })).toBe(
+      "likely_expired",
+    );
+  });
+
+  // A fresh session message must not warm the cache: only a provider round-trip
+  // (a usage event) can, so an old event stays likely_expired.
+  it("stays likely_expired while the newest usage event is old", () => {
+    expect(cacheStatus({ lastUsageEventAt: now - CACHE_EXPIRY_MS - 1, eventCount: 3, now })).toBe(
       "likely_expired",
     );
   });
@@ -131,11 +139,11 @@ describe("usageFlags", () => {
 });
 
 describe("estimatedExpiryAt", () => {
-  it("is null without a newest message", () => {
+  it("is null without a usage event", () => {
     expect(estimatedExpiryAt(null)).toBeNull();
   });
 
-  it("adds the expiry window to the newest message", () => {
+  it("adds the expiry window to the newest usage event", () => {
     expect(estimatedExpiryAt(1_000)).toBe(1_000 + CACHE_EXPIRY_MS);
   });
 });

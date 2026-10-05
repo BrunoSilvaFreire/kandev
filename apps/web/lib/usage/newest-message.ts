@@ -1,8 +1,6 @@
 import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 import type { Message } from "@/lib/types/http";
 
-const NANOSECONDS_PER_MILLISECOND = BigInt(1_000_000);
-
 /**
  * Returns the conversation message with the newest `created_at`, breaking ties
  * by id so the result is deterministic. Messages with an unparseable timestamp
@@ -22,16 +20,4 @@ export function newestMessage(messages: Message[]): Message | null {
     }
   }
   return newest;
-}
-
-/**
- * Epoch milliseconds of the newest message, or null when there is none.
- * `parseTurnTimestamp` returns epoch nanoseconds, so the value is scaled to the
- * millisecond unit the cache heuristic compares against.
- */
-export function newestMessageAtMs(messages: Message[]): number | null {
-  const newest = newestMessage(messages);
-  if (!newest) return null;
-  const at = parseTurnTimestamp(newest.created_at);
-  return at === null ? null : Number(at / NANOSECONDS_PER_MILLISECOND);
 }

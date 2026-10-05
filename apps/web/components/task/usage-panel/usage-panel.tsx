@@ -55,15 +55,22 @@ export function UsagePanel({ taskId }: { taskId: string | null }) {
     taskId ? state.taskSessionsByTask.itemsByTaskId[taskId] : undefined,
   );
   const profiles = useAppStore((state) => state.agentProfiles.items);
-  const messagesBySession = useAppStore((state) => state.messages.bySession);
 
   const rows = useMemo(
     () =>
       buildUsageDisplayRows(
-        { view, groups, sessions, profiles, lastPromptBySession, messagesBySession, now },
+        {
+          view,
+          groups,
+          sessions,
+          profiles,
+          deletedProfile: t("task:usagePanelDeletedProfile"),
+          lastPromptBySession,
+          now,
+        },
         t("task:usagePanelUnknown"),
       ),
-    [view, groups, sessions, profiles, lastPromptBySession, messagesBySession, now, t],
+    [view, groups, sessions, profiles, lastPromptBySession, now, t],
   );
 
   if (!taskId) {
@@ -91,7 +98,9 @@ export function UsagePanel({ taskId }: { taskId: string | null }) {
             onClick={() => setView(candidate)}
             className={cn(
               "min-h-8 cursor-pointer rounded px-2 text-xs",
-              view === candidate ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:bg-muted/60",
+              view === candidate
+                ? "bg-muted font-medium text-foreground"
+                : "text-muted-foreground hover:bg-muted/60",
             )}
           >
             {t(VIEW_LABEL_KEY[candidate])}

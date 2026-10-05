@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import {
   getSessionUsageTotals,
@@ -8,17 +8,14 @@ import {
 import {
   CACHE_RECHECK_MS,
   cacheStatus,
+  epochMillisFromWire,
   estimatedExpiryAt,
   usageFlags,
   type CacheStatus,
   type UsageFlags,
 } from "@/lib/usage/efficiency";
-import { newestMessageAtMs } from "@/lib/usage/newest-message";
-import type { Message } from "@/lib/types/http";
 import type { PromptUsageEntry } from "@/lib/state/slices/session-runtime/types";
 import { t } from "@/lib/i18n";
-
-const EMPTY_MESSAGES: Message[] = [];
 
 export type SessionUsageInspector = {
   /** Session-scoped ledger totals (one session is one agent profile). */
@@ -63,10 +60,6 @@ export function useSessionUsageInspector(
   const lastPrompt = useAppStore((state) =>
     sessionId ? state.promptUsage.bySessionId[sessionId] : undefined,
   );
-  const messages = useAppStore((state) =>
-    sessionId ? (state.messages.bySession[sessionId] ?? EMPTY_MESSAGES) : EMPTY_MESSAGES,
-  );
-  const newestMessageAt = useMemo(() => newestMessageAtMs(messages), [messages]);
 
   // Drop the previous scope's totals so a switch cannot briefly show them, and
   // invalidate any in-flight request so it cannot land on the new scope.
@@ -107,8 +100,9 @@ export function useSessionUsageInspector(
     // `lastPrompt` is a dependency so a new prompt refetches the ledger.
   }, [enabled, taskId, sessionId, lastPrompt, load]);
 
+  const lastUsageEventAt = epochMillisFromWire(session?.last_event_at);
   const status = cacheStatus({
-    newestMessageAt,
+    lastUsageEventAt,
     eventCount: session?.event_count ?? 0,
     now,
   });
@@ -119,7 +113,7 @@ export function useSessionUsageInspector(
     task,
     lastPrompt,
     status,
-    expiresAt: estimatedExpiryAt(newestMessageAt),
+    expiresAt: estimatedExpiryAt(lastUsageEventAt),
     flags,
     loading,
     error,

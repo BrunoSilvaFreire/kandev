@@ -193,7 +193,10 @@ The `AgentInstance` response (from `/api/v1/office/workspaces/:id/agents`) gains
 ## Out of scope
 
 - Real-time (sub-second) utilization polling — provider APIs are not real-time and polling aggressively would itself consume quota.
-- Utilization tracking for providers without a public usage API (Gemini, Copilot, Amp, etc.) — those agents remain API key billing type with dollar costs only.
+- Utilization tracking for providers without a public usage API (Copilot, Amp,
+  etc.) — those agents remain API key billing type with dollar costs only.
+  Gemini Code Assist subscription quota is now covered by
+  [`REQ-COSTS-PROVIDER-USAGE-006`](provider-usage-monitoring.md#req-costs-provider-usage-006-gemini-code-assist-quota).
 - Billing integration or actual charge reconciliation — all costs remain estimates.
 - Per-model quota breakdown for Codex — the Codex usage API only returns two aggregate percentages.
 - Automatic token refresh for Codex — the Codex auth.json token refresh flow is not publicly documented; if the token is expired the fetch returns an error and the check is skipped (fail-open).

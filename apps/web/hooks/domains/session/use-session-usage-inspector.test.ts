@@ -100,9 +100,11 @@ describe("useSessionUsageInspector", () => {
   it("turns likely_expired while idle once the cache window passes", async () => {
     vi.useFakeTimers();
     try {
-      mocks.state.messages.bySession["session-a"] = [{ created_at: new Date().toISOString() }];
       mocks.getSessionUsageTotals.mockResolvedValue(
-        totals("session", "session-a", { event_count: 3 }),
+        totals("session", "session-a", {
+          event_count: 3,
+          last_event_at: new Date().toISOString(),
+        }),
       );
       const { result } = renderHook(() =>
         useSessionUsageInspector(TASK_ID, "session-a", { enabled: true }),

@@ -33,6 +33,7 @@ function group(overrides: Partial<UsageGroup> = {}): UsageGroup {
 const BASE_ARGS = {
   sessions: undefined,
   profiles: [{ id: "profile-1", name: "Claude Opus" }],
+  deletedProfile: "Deleted profile",
   lastPromptBySession: {},
   messagesBySession: {},
   now: 1_000_000,
@@ -78,7 +79,7 @@ describe("buildUsageDisplayRows", () => {
     expect(rows).toHaveLength(2);
     const idle = rows.find((row) => row.sessionId === "s2");
     expect(idle?.totals.event_count).toBe(0);
-    expect(idle?.primary).toBe("s2");
+    expect(idle?.primary).toBe("Unknown");
   });
 
   it("labels an agent group with no profile id as unknown", () => {
@@ -90,7 +91,7 @@ describe("buildUsageDisplayRows", () => {
     expect(rows[0].primary).toBe("Unknown");
   });
 
-  it("falls back to the agent profile name and a short id for an unnamed session", () => {
+  it("falls back to the agent profile name for a session that has no name", () => {
     const rows = buildUsageDisplayRows(
       {
         ...BASE_ARGS,
@@ -101,7 +102,24 @@ describe("buildUsageDisplayRows", () => {
       "Unknown",
     );
 
-    expect(rows[0].primary).toBe("Claude Opus · 12345678");
+    expect(rows[0].primary).toBe("Claude Opus");
+    expect(rows[0].primary).not.toContain("12345678");
+    expect(rows[0].title).toBe("12345678");
+  });
+
+  it("never renders a deleted profile id as the agent row label", () => {
+    const rows = buildUsageDisplayRows(
+      {
+        ...BASE_ARGS,
+        view: "agent",
+        groups: [group({ session_id: null, agent_profile_id: "dead-profile-uuid" })],
+      },
+      "Unknown",
+    );
+
+    expect(rows[0].primary).toBe("Deleted profile");
+    expect(rows[0].primary).not.toContain("dead-pro");
+    expect(rows[0].title).toBe("dead-pro");
   });
 
   it("keeps a deleted-session group as a null session id", () => {

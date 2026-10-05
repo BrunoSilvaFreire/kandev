@@ -1,5 +1,5 @@
 ---
-status: draft
+status: deprecated
 system: agents
 implementation_plans:
   - docs/plans/tagged-quota-agent-selection/plan.md
@@ -8,6 +8,14 @@ requirements:
 ---
 
 # Tagged quota-aware workflow agent selection requirements
+
+> **Deprecated (2026-09-25).** Superseded by
+> [Dynamic Profile Scheduling](dynamic-profile-scheduling.md)
+> (`REQ-AGENTS-DYNAMIC-PROFILE-SCHEDULING-001`), which owns schedule-time
+> ranking. The workflow-step `allowed_tags` scheduler described here is retained
+> only during the compatibility release and is removed after the migration and
+> parity gates pass. Requirement and acceptance-criterion IDs are retained for
+> history.
 
 ## Overview
 

@@ -65,8 +65,21 @@ clock without a fetch.
 
 ## Cache status
 
-Per session row, cache status uses the shared `cacheStatus` helper with the
-newest message in the store for that session (when loaded) or the group's last
-event, whichever is later. It reuses `CACHE_EXPIRY_MS` and `CACHE_RECHECK_MS`
-with no new constant, and is labelled an estimate because providers do not
-expose cache lifetime.
+Per session row, cache status uses the shared `cacheStatus` helper keyed on the
+**newest usage-ledger event** (`last_event_at`), the only observable provider
+round-trip. Messages are ignored entirely: opening or starting a session posts
+a message but warms no provider prompt cache, so a fresh message must not turn
+the status warm. The session Usage inspector passes
+`epochMillisFromWire(session.last_event_at)`; the breakdown row and the
+resume-with-handoff offer reuse the same session totals rather than a second
+ledger read. It reuses `CACHE_EXPIRY_MS` and `CACHE_RECHECK_MS` with no new
+constant, and is labelled an estimate because providers do not expose cache
+lifetime.
+
+## Fork refinement (2026-09-25)
+
+The cache definition was previously keyed on the newest message
+(`newestMessageAt`); it is now keyed on the newest usage event
+(`lastUsageEventAt`). `lib/usage/newest-message.ts` retains only the
+`newestMessage` helper used for the resume offer's dismissal key.
+EOF

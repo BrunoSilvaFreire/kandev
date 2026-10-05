@@ -29,6 +29,22 @@ func claudeBillingType() usage.BillingType {
 	return usage.BillingTypeAPIKey
 }
 
+// geminiBillingType detects whether the Gemini CLI stored OAuth credentials.
+// The token is read-only: Kandev never refreshes it and never writes the file.
+// Computed on every call so a `gemini` /auth login is picked up without a
+// restart.
+func geminiBillingType() usage.BillingType {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return usage.BillingTypeAPIKey
+	}
+	client := usage.NewGeminiUsageClientWithPath(filepath.Join(home, ".gemini", "oauth_creds.json"))
+	if client.HasSubscriptionCredentials() {
+		return usage.BillingTypeSubscription
+	}
+	return usage.BillingTypeAPIKey
+}
+
 // codexBillingType detects whether the Codex agent is using subscription
 // credentials. It reads ~/.codex/auth.json — that path matches the
 // SourceFiles / Runtime mounts in codex_acp.go, where the real Codex CLI

@@ -1,11 +1,16 @@
 ---
-status: draft
+status: superseded
 system: agents
 requirements:
   - REQ-AGENTS-TAGGED-QUOTA-SELECTION-001
 ---
 
 # Tagged quota-aware workflow agent selection system design
+
+> **Superseded (2026-09-25).** Schedule-time ranking moved to
+> [Dynamic Profile Scheduling](dynamic-profile-scheduling.md). This design keeps
+> describing the temporary legacy bridge until it is removed after the migration
+> and parity gates pass.
 
 ## Purpose and boundaries
 

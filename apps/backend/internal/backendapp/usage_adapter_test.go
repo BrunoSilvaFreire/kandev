@@ -4,10 +4,43 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	agentusage "github.com/kandev/kandev/internal/agent/usage"
 )
+
+type fakeLimitHits struct {
+	observed, reset time.Time
+	ok              bool
+	err             error
+}
+
+func (f fakeLimitHits) LatestLimitHit(context.Context, string) (time.Time, time.Time, bool, error) {
+	return f.observed, f.reset, f.ok, f.err
+}
+
+func TestUsageAdapterActiveLimitHitOverridesFailedFetch(t *testing.T) {
+	now := time.Now()
+	adapter := &usageProviderAdapter{svc: agentusage.NewUsageService(), limitHits: fakeLimitHits{observed: now, reset: now.Add(time.Hour), ok: true}}
+	adapter.svc.Register("p", nil, "openai:key")
+	usage, err := adapter.withLimitHit(context.Background(), "p", nil, errors.New("fetch failed"))
+	if err != nil || usage == nil || len(usage.Windows) != 1 || usage.Windows[0].UtilizationPct != 100 {
+		t.Fatalf("usage/err = %#v/%v", usage, err)
+	}
+}
+
+func TestUsageAdapterLimitHitExpiresAndNewerFetchWins(t *testing.T) {
+	now := time.Now()
+	adapter := &usageProviderAdapter{svc: agentusage.NewUsageService(), limitHits: fakeLimitHits{observed: now, reset: now.Add(-time.Minute), ok: true}}
+	adapter.svc.Register("p", nil, "openai:key")
+	usage := &agentusage.ProviderUsage{FetchedAt: now.Add(time.Minute), Windows: []agentusage.UtilizationWindow{{UtilizationPct: 10}}}
+	got, err := adapter.withLimitHit(context.Background(), "p", usage, nil)
+	if err != nil || len(got.Windows) != 1 {
+		t.Fatalf("usage/err = %#v/%v", got, err)
+	}
+}
 
 // failingProfileStore fails every profile lookup, standing in for an
 // unavailable settings database.
@@ -44,6 +77,27 @@ func TestMockUsageFromTags(t *testing.T) {
 	}
 	if _, ok := mockUsageFromTags(&settingsmodels.AgentProfile{Tags: []string{"mock-quota-nope"}}); ok {
 		t.Fatal("malformed mock tag must be ignored")
+	}
+}
+
+func TestUsageAdapterRegistersAntigravity(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	adapter := &usageProviderAdapter{svc: agentusage.NewUsageService()}
+	adapter.ensureRegistered("profile-agy", "agy-acp")
+
+	key, ok := adapter.CacheKeyFor("profile-agy")
+	if !ok {
+		t.Fatal("expected agy-acp to register a live client")
+	}
+	if key != agentusage.AntigravityCacheKey() {
+		t.Fatalf("cache key = %q, want %q", key, agentusage.AntigravityCacheKey())
+	}
+}
+
+func TestUsageAdapterEnsureCacheKeyUnresolvable(t *testing.T) {
+	adapter := &usageProviderAdapter{svc: agentusage.NewUsageService(), settingsStore: failingProfileStore{}}
+	if _, ok := adapter.EnsureCacheKey(context.Background(), "profile-missing"); ok {
+		t.Fatal("a failing profile lookup must not resolve a cache key")
 	}
 }
 

@@ -1,4 +1,5 @@
 import type { UsageTotals } from "@/lib/api/domains/usage-api";
+import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 
 /**
  * Estimated prompt-cache lifetime. Providers do not expose a TTL, and observed
@@ -22,10 +23,17 @@ export const HIGH_COST_SUBCENTS_THRESHOLD = 50_000;
 export type CacheStatus = "warm" | "likely_expired" | "unknown";
 
 export type CacheStatusInput = {
-  newestMessageAt: number | null;
+  lastUsageEventAt: number | null;
   eventCount: number;
   now: number;
 };
+
+/** Epoch milliseconds for a wire timestamp, or null when missing/invalid. */
+export function epochMillisFromWire(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const parsed = parseStrictRfc3339Timestamp(value);
+  return parsed === null ? null : Number(parsed / BigInt(1_000_000));
+}
 
 /**
  * Prompt-cache hit ratio: cached reads over all input tokens (uncached input
@@ -42,8 +50,8 @@ export function hitRatio(totals: UsageTotals): number | null {
 
 /** Cache state from the shared expiry heuristic. */
 export function cacheStatus(input: CacheStatusInput): CacheStatus {
-  if (input.eventCount <= 0 || input.newestMessageAt === null) return "unknown";
-  return input.now - input.newestMessageAt < CACHE_EXPIRY_MS ? "warm" : "likely_expired";
+  if (input.eventCount <= 0 || input.lastUsageEventAt === null) return "unknown";
+  return input.now - input.lastUsageEventAt < CACHE_EXPIRY_MS ? "warm" : "likely_expired";
 }
 
 export type UsageFlags = {
@@ -64,7 +72,7 @@ export function usageFlags(input: { totals: UsageTotals; cacheStatus: CacheStatu
   };
 }
 
-/** Estimated instant the prompt cache expires for the newest message. */
-export function estimatedExpiryAt(newestMessageAt: number | null): number | null {
-  return newestMessageAt === null ? null : newestMessageAt + CACHE_EXPIRY_MS;
+/** Estimated instant the prompt cache expires for the newest usage event. */
+export function estimatedExpiryAt(lastUsageEventAt: number | null): number | null {
+  return lastUsageEventAt === null ? null : lastUsageEventAt + CACHE_EXPIRY_MS;
 }
