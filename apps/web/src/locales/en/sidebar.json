@@ -121,5 +121,7 @@
   "newViewNumbered": "New view {{suffix}}",
   "untitledView": "Untitled view",
   "workspaceContextRefreshFailed": "Could not refresh tasks.",
-  "workspaceContextAccessDenied": "You no longer have access to this workspace."
+  "workspaceContextAccessDenied": "You no longer have access to this workspace.",
+  "quickChats": "Quick Chats",
+  "quickChatsKeywords": "quick chats browse conversations"
 }

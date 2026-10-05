@@ -21,6 +21,7 @@
   "group": "分組",
   "groupByNone": "無",
   "groupByRepository": "儲存庫",
+  "groupByRepositoryGroup": "儲存庫群組",
   "groupByState": "狀態",
   "groupByWorkflow": "工作流程",
   "ungrouped": "未分組",

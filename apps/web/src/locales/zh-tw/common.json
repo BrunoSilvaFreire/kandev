@@ -549,5 +549,6 @@
   "sidebarYearsMax": "99+年",
   "integrationSettings": "整合設定",
   "pageNavigation": "本頁導覽",
-  "viewOptions": "檢視選項"
+  "viewOptions": "檢視選項",
+  "retry": "重試"
 }

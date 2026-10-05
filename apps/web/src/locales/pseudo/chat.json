@@ -152,5 +152,18 @@
   "emptyTurnKnownCommand": "`/{{command}}` ŕàń ƀũţ ƥŕōďũćēď ńō ōũţƥũţ. {{hint}}",
   "emptyTurnNoOutput": "Ţĥē àĝēńţ ƒĩńĩśĥēď ŵĩţĥōũţ ƥŕōďũćĩńĝ àńŷ ōũţƥũţ.",
   "emptyTurnResendHint": "Ţŕŷ ŕēśēńďĩńĝ ŷōũŕ ŕēqũēśţ àś à ńōŕḿàĺ ḿēśśàĝē, ŵĩţĥōũţ ţĥē ĺēàďĩńĝ śĺàśĥ.",
-  "emptyTurnUnknownCommand": "`/{{command}}` ĩśń'ţ à ćōḿḿàńď ţĥĩś àĝēńţ ŕēćōĝńĩźēś, śō ĩţ ŕēţũŕńēď ńō ōũţƥũţ. {{hint}}"
+  "emptyTurnUnknownCommand": "`/{{command}}` ĩśń'ţ à ćōḿḿàńď ţĥĩś àĝēńţ ŕēćōĝńĩźēś, śō ĩţ ŕēţũŕńēď ńō ōũţƥũţ. {{hint}}",
+  "deleteConversation": "Ďēĺēţē ćōńvēŕśàţĩōń",
+  "initialPrompt": "Ĩńĩţĩàĺ ƥŕōḿƥţ",
+  "initialPromptHelp": "Ŵŕĩţē à ƒĩŕśţ ḿēśśàĝē ţō śēńď àś śōōń àś ţĥē ćĥàţ śţàŕţś. Ĺēàvē ēḿƥţŷ ţō śţàŕţ àń ēḿƥţŷ ćĥàţ.",
+  "initialPromptPlaceholder": "Ďēśćŕĩƀē ŵĥàţ ŷōũ ŵàńţ ţĥē àĝēńţ ţō ďō",
+  "quickChatsLoadFailed": "Ćōũĺď ńōţ ĺōàď Qũĩćķ Ćĥàţś.",
+  "quickChatsEmpty": "Ńō Qũĩćķ Ćĥàţś ŷēţ",
+  "quickChatsEmptyHint": "Śţàŕţ ōńē ƒŕōḿ ţĥē Qũĩćķ Ćĥàţ ƀũţţōń ōŕ ţĥē śĩďēƀàŕ.",
+  "openInPanel": "Ōƥēń ĩń ƥàńēĺ",
+  "untitledQuickChat": "Ũńţĩţĺēď Qũĩćķ Ćĥàţ",
+  "quickChatRowActions": "Àćţĩōńś ƒōŕ {{name}}",
+  "renameQuickChat": "Ŕēńàḿē Qũĩćķ Ćĥàţ",
+  "renameQuickChatDescription": "Ćĥōōśē à ńàḿē śĥōŵń ĩń ţĥē ƀŕōŵśē ĺĩśţ àńď ţĥē ţàƀ śţŕĩƥ.",
+  "openFullPage": "Ōƥēń ƒũĺĺ ƥàĝē"
 }

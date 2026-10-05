@@ -549,5 +549,6 @@
   "sidebarYearsMax": "99+年",
   "integrationSettings": "集成设置",
   "pageNavigation": "本页导航",
-  "viewOptions": "视图选项"
+  "viewOptions": "视图选项",
+  "retry": "重试"
 }

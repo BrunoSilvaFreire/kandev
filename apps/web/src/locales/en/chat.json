@@ -152,5 +152,18 @@
   "emptyTurnKnownCommand": "`/{{command}}` ran but produced no output. {{hint}}",
   "emptyTurnNoOutput": "The agent finished without producing any output.",
   "emptyTurnResendHint": "Try resending your request as a normal message, without the leading slash.",
-  "emptyTurnUnknownCommand": "`/{{command}}` isn't a command this agent recognizes, so it returned no output. {{hint}}"
+  "emptyTurnUnknownCommand": "`/{{command}}` isn't a command this agent recognizes, so it returned no output. {{hint}}",
+  "deleteConversation": "Delete conversation",
+  "initialPrompt": "Initial prompt",
+  "initialPromptHelp": "Write a first message to send as soon as the chat starts. Leave empty to start an empty chat.",
+  "initialPromptPlaceholder": "Describe what you want the agent to do",
+  "quickChatsLoadFailed": "Could not load Quick Chats.",
+  "quickChatsEmpty": "No Quick Chats yet",
+  "quickChatsEmptyHint": "Start one from the Quick Chat button or the sidebar.",
+  "openInPanel": "Open in panel",
+  "untitledQuickChat": "Untitled Quick Chat",
+  "quickChatRowActions": "Actions for {{name}}",
+  "renameQuickChat": "Rename Quick Chat",
+  "renameQuickChatDescription": "Choose a name shown in the browse list and the tab strip.",
+  "openFullPage": "Open full page"
 }

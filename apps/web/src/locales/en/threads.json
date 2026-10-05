@@ -61,6 +61,7 @@
   "filterWorkflow": "Workflow",
   "filterWorkflowStep": "Workflow step",
   "filterRepository": "Repository",
+  "filterRepositoryGroup": "Repository group",
   "filterPrimaryAgent": "Primary agent",
   "filterExecutorType": "Executor type",
   "filterPriority": "Priority",

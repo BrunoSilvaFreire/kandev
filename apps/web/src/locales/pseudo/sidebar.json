@@ -121,5 +121,7 @@
   "newViewNumbered": "Ńēŵ vĩēŵ {{suffix}}",
   "untitledView": "Ũńţĩţĺēď vĩēŵ",
   "workspaceContextRefreshFailed": "Ćōũĺď ńōţ ŕēƒŕēśĥ ţàśķś.",
-  "workspaceContextAccessDenied": "Ŷōũ ńō ĺōńĝēŕ ĥàvē àććēśś ţō ţĥĩś ŵōŕķśƥàćē."
+  "workspaceContextAccessDenied": "Ŷōũ ńō ĺōńĝēŕ ĥàvē àććēśś ţō ţĥĩś ŵōŕķśƥàćē.",
+  "quickChats": "Qũĩćķ Ćĥàţś",
+  "quickChatsKeywords": "qũĩćķ ćĥàţś ƀŕōŵśē ćōńvēŕśàţĩōńś"
 }

@@ -549,5 +549,6 @@
   "sidebarYearsMax": "99+y",
   "integrationSettings": "Integration settings",
   "pageNavigation": "On this page",
-  "viewOptions": "View options"
+  "viewOptions": "View options",
+  "retry": "Retry"
 }

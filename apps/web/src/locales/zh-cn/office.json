@@ -881,6 +881,7 @@
   "outputSummary": "输出摘要",
   "subIssueOfParent": "{{parent}} 的子议题",
   "subscriptionQuota": "订阅配额",
+  "viewUsage": "查看用量",
   "succeeded": "成功",
   "successRate": "成功率",
   "summarizeMissed": "汇总错过的（只唤醒一次）",

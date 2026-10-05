@@ -21,6 +21,7 @@
   "group": "分组",
   "groupByNone": "无",
   "groupByRepository": "仓库",
+  "groupByRepositoryGroup": "仓库组",
   "groupByState": "状态",
   "groupByWorkflow": "工作流",
   "ungrouped": "未分组",

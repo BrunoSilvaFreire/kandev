@@ -881,6 +881,7 @@
   "outputSummary": "Output summary",
   "subIssueOfParent": "Sub-issue of {{parent}}",
   "subscriptionQuota": "Subscription Quota",
+  "viewUsage": "View usage",
   "succeeded": "Succeeded",
   "successRate": "Success Rate",
   "summarizeMissed": "Summarize missed (wakes once)",

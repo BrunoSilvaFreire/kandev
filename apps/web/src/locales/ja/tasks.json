@@ -21,6 +21,7 @@
   "group": "グループ",
   "groupByNone": "なし",
   "groupByRepository": "リポジトリ",
+  "groupByRepositoryGroup": "リポジトリグループ",
   "groupByState": "状態",
   "groupByWorkflow": "ワークフロー",
   "ungrouped": "グループなし",

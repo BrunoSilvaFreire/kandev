@@ -152,5 +152,18 @@
   "emptyTurnKnownCommand": "`/{{command}}` 已运行，但没有产生任何输出。{{hint}}",
   "emptyTurnNoOutput": "智能体已结束，但没有产生任何输出。",
   "emptyTurnResendHint": "请尝试作为普通消息重新发送你的请求，不要带开头的斜杠。",
-  "emptyTurnUnknownCommand": "`/{{command}}` 不是该智能体识别的命令，因此没有返回任何内容。{{hint}}"
+  "emptyTurnUnknownCommand": "`/{{command}}` 不是该智能体识别的命令，因此没有返回任何内容。{{hint}}",
+  "deleteConversation": "删除对话",
+  "initialPrompt": "初始提示词",
+  "initialPromptHelp": "写一条在聊天开始后立即发送的首条消息。留空则启动一个空聊天。",
+  "initialPromptPlaceholder": "描述你希望代理执行的任务",
+  "quickChatsLoadFailed": "无法加载快速聊天。",
+  "quickChatsEmpty": "还没有快速聊天",
+  "quickChatsEmptyHint": "通过快速聊天按钮或侧边栏开始一个。",
+  "openInPanel": "在面板中打开",
+  "untitledQuickChat": "未命名快速聊天",
+  "quickChatRowActions": "{{name}} 的操作",
+  "renameQuickChat": "重命名快速聊天",
+  "renameQuickChatDescription": "选择一个显示在浏览列表和标签栏中的名称。",
+  "openFullPage": "打开完整页面"
 }

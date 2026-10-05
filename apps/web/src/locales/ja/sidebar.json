@@ -121,5 +121,7 @@
   "newViewNumbered": "新しい表示 {{suffix}}",
   "untitledView": "名前なしビュー",
   "workspaceContextRefreshFailed": "タスクを更新できなかった。",
-  "workspaceContextAccessDenied": "このワークスペースへのアクセス権がなくなった。"
+  "workspaceContextAccessDenied": "このワークスペースへのアクセス権がなくなった。",
+  "quickChats": "クイックチャット",
+  "quickChatsKeywords": "クイックチャット 一覧 会話"
 }

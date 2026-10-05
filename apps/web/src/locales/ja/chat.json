@@ -152,5 +152,18 @@
   "emptyTurnKnownCommand": "`/{{command}}` は実行されましたが、出力はありませんでした。{{hint}}",
   "emptyTurnNoOutput": "エージェントは出力を生成せずに終了しました。",
   "emptyTurnResendHint": "先頭のスラッシュなしで、通常のメッセージとしてリクエストを再送信してください。",
-  "emptyTurnUnknownCommand": "`/{{command}}` はこのエージェントが認識するコマンドではないため、出力はありませんでした。{{hint}}"
+  "emptyTurnUnknownCommand": "`/{{command}}` はこのエージェントが認識するコマンドではないため、出力はありませんでした。{{hint}}",
+  "deleteConversation": "会話を削除",
+  "initialPrompt": "最初のプロンプト",
+  "initialPromptHelp": "チャット開始後すぐに送信する最初のメッセージを書きます。空のままにすると空のチャットを開始します。",
+  "initialPromptPlaceholder": "エージェントに実行してほしいことを説明してください",
+  "quickChatsLoadFailed": "クイックチャットを読み込めませんでした。",
+  "quickChatsEmpty": "クイックチャットはまだありません",
+  "quickChatsEmptyHint": "クイックチャットボタンまたはサイドバーから開始できます。",
+  "openInPanel": "パネルで開く",
+  "untitledQuickChat": "無題のクイックチャット",
+  "quickChatRowActions": "{{name}} の操作",
+  "renameQuickChat": "クイックチャットの名前を変更",
+  "renameQuickChatDescription": "一覧とタブに表示される名前を選択します。",
+  "openFullPage": "フルページで開く"
 }

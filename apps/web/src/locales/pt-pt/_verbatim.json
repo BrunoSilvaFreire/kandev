@@ -13,5 +13,9 @@
   "task:promptHistoryPromptLabelGeneric": "Technical term kept in English across localized developer tooling.",
   "task:usageInspectorCacheTitle": "\"Cache\" is the ordinary Portuguese computing term; translating it would change nothing.",
   "task:usageInspectorTokensTitle": "Technical term kept in English across localized developer tooling.",
-  "task:usageInspectorTotal": "\"Total\" is the ordinary Portuguese word; translating it would change nothing."
+  "task:usageInspectorTotal": "\"Total\" is the ordinary Portuguese word; translating it would change nothing.",
+  "usage:tabQuotas": "\"Quotas\" is the ordinary Portuguese word; translating it would change nothing.",
+  "usage:breakdownSortTokens": "Technical term kept in English across localized developer tooling.",
+  "usage:breakdownColumnTokens": "Technical term kept in English across localized developer tooling.",
+  "usage:breakdownTotalTokens": "Only the token-count value is interpolated; \"tokens\" is a technical term kept in English."
 }

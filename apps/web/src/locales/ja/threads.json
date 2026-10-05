@@ -147,5 +147,6 @@
   "statusWorking": "作業中",
   "subagentCount_one": "{{count}} サブエージェント",
   "subagentCount_other": "{{count}} サブエージェント",
-  "title": "スレッド"
+  "title": "スレッド",
+  "filterRepositoryGroup": "リポジトリグループ"
 }

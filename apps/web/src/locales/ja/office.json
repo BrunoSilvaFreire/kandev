@@ -881,6 +881,7 @@
   "outputSummary": "出力サマリー",
   "subIssueOfParent": "{{parent}} のサブ課題",
   "subscriptionQuota": "サブスクリプション割り当て",
+  "viewUsage": "使用状況を表示",
   "succeeded": "成功",
   "successRate": "成功率",
   "summarizeMissed": "取りこぼしを要約する(1回だけ起動)",

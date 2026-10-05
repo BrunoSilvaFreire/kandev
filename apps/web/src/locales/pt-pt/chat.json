@@ -152,5 +152,18 @@
   "emptyTurnKnownCommand": "`/{{command}}` correu mas não produziu qualquer resultado. {{hint}}",
   "emptyTurnNoOutput": "O agente terminou sem produzir qualquer resultado.",
   "emptyTurnResendHint": "Experimente reenviar o seu pedido como mensagem normal, sem a barra inicial.",
-  "emptyTurnUnknownCommand": "`/{{command}}` não é um comando que este agente reconheça, por isso não devolveu nada. {{hint}}"
+  "emptyTurnUnknownCommand": "`/{{command}}` não é um comando que este agente reconheça, por isso não devolveu nada. {{hint}}",
+  "deleteConversation": "Eliminar conversa",
+  "initialPrompt": "Prompt inicial",
+  "initialPromptHelp": "Escreva uma primeira mensagem para enviar assim que o chat começar. Deixe vazio para iniciar um chat vazio.",
+  "initialPromptPlaceholder": "Descreva o que quer que o agente faça",
+  "quickChatsLoadFailed": "Não foi possível carregar os chats rápidos.",
+  "quickChatsEmpty": "Ainda não há chats rápidos",
+  "quickChatsEmptyHint": "Inicie um com o botão Quick Chat ou na barra lateral.",
+  "openInPanel": "Abrir no painel",
+  "untitledQuickChat": "Chat rápido sem título",
+  "quickChatRowActions": "Ações para {{name}}",
+  "renameQuickChat": "Renomear chat rápido",
+  "renameQuickChatDescription": "Escolha um nome apresentado na lista e na barra de separadores.",
+  "openFullPage": "Abrir página completa"
 }

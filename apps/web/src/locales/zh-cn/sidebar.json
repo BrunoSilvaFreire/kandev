@@ -121,5 +121,7 @@
   "newViewNumbered": "新视图 {{suffix}}",
   "untitledView": "未命名视图",
   "workspaceContextRefreshFailed": "无法刷新任务。",
-  "workspaceContextAccessDenied": "您已无法访问此工作区。"
+  "workspaceContextAccessDenied": "您已无法访问此工作区。",
+  "quickChats": "快速聊天",
+  "quickChatsKeywords": "快速聊天 浏览 对话"
 }

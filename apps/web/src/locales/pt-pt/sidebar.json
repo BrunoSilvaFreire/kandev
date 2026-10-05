@@ -121,5 +121,7 @@
   "orgChart": "Organograma",
   "untitledView": "Vista sem título",
   "workspaceContextRefreshFailed": "Não foi possível atualizar as tarefas.",
-  "workspaceContextAccessDenied": "Já não tem acesso a esta área de trabalho."
+  "workspaceContextAccessDenied": "Já não tem acesso a esta área de trabalho.",
+  "quickChats": "Chats rápidos",
+  "quickChatsKeywords": "chats rápidos conversas navegar"
 }

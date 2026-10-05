@@ -21,6 +21,7 @@
   "group": "Group",
   "groupByNone": "None",
   "groupByRepository": "Repository",
+  "groupByRepositoryGroup": "Repository group",
   "groupByState": "State",
   "groupByWorkflow": "Workflow",
   "ungrouped": "Ungrouped",
