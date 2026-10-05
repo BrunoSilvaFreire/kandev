@@ -38,8 +38,6 @@ func (f *fakePlanCatalogReader) ListRevisions(_ context.Context, _ string) ([]*m
 	return f.revisions, nil
 }
 
-func strPtr(v string) *string { return &v }
-
 func TestDocumentCatalog_MergesPlanFirstAndMetadataOnly(t *testing.T) {
 	now := time.Now().UTC()
 	sess := "sess-alpha"

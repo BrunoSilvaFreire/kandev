@@ -480,13 +480,13 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	// a destructive rewrite and legacy rows read as Unknown/legacy. The session
 	// FK is SET NULL so deleting a session leaves document-routing history
 	// readable. See initTaskSessionRoutesSchema for the per-route ledger table.
-	r.migrate.Apply("task_sessions.workflow_step_id_at_creation", `ALTER TABLE task_sessions ADD COLUMN workflow_step_id_at_creation TEXT DEFAULT ''`)
-	r.migrate.Apply("task_step_transitions.trigger_detail", `ALTER TABLE task_step_transitions ADD COLUMN trigger_detail TEXT`)
+	_ = r.migrate.Apply("task_sessions.workflow_step_id_at_creation", `ALTER TABLE task_sessions ADD COLUMN workflow_step_id_at_creation TEXT DEFAULT ''`)
+	_ = r.migrate.Apply("task_step_transitions.trigger_detail", `ALTER TABLE task_step_transitions ADD COLUMN trigger_detail TEXT`)
 	// TODO: drop the `_ =` to match sibling Apply calls once the errcheck exclusion for new bare calls is confirmed.
 	_ = r.migrate.Apply("task_session_routes.decision_detail", `ALTER TABLE task_session_routes ADD COLUMN decision_detail TEXT`)
-	r.migrate.Apply("task_document_revisions.source_task_id", `ALTER TABLE task_document_revisions ADD COLUMN source_task_id TEXT`)
-	r.migrate.Apply("task_document_revisions.source_session_id", `ALTER TABLE task_document_revisions ADD COLUMN source_session_id TEXT REFERENCES task_sessions(id) ON DELETE SET NULL`)
-	r.migrate.Apply("task_document_revisions.source_workflow_step_id", `ALTER TABLE task_document_revisions ADD COLUMN source_workflow_step_id TEXT`)
+	_ = r.migrate.Apply("task_document_revisions.source_task_id", `ALTER TABLE task_document_revisions ADD COLUMN source_task_id TEXT`)
+	_ = r.migrate.Apply("task_document_revisions.source_session_id", `ALTER TABLE task_document_revisions ADD COLUMN source_session_id TEXT REFERENCES task_sessions(id) ON DELETE SET NULL`)
+	_ = r.migrate.Apply("task_document_revisions.source_workflow_step_id", `ALTER TABLE task_document_revisions ADD COLUMN source_workflow_step_id TEXT`)
 
 	// Checked last so a failure on any required migration above --
 	// including this file's own marker_positions column -- fails startup
