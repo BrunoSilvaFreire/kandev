@@ -427,3 +427,24 @@ and can be superseded by a move that commits moments later, which the ledger
 records and the stamp does not. That is expected, not an inconsistency, and is
 why `task_history` outranks `turn_start` in the basis precedence. Neither writer
 corrects the other.
+
+## Fork refinements (2026-09-25)
+
+- **Step visits carry their destination sessions.** `StepVisitSummary` no
+  longer collapses to a single `last_destination_session_id`. It exposes
+  `sessions: StepVisitSession[]` (`session_id`, `agent_profile_id`,
+  `workflow_step_transition_id`, `occurred_at`), built from the route ledger
+  grouped by destination step, deduplicated by session, and ordered oldest to
+  newest. The transition summary, the header hover card, and the compact step
+  disclosure share one `StepVisitSessionList`; each row activates its session
+  through the sanctioned `useActivateTaskSession` path.
+- **Route decisions persist optional detail.** `task_session_routes` gains a
+  nullable `decision_detail` TEXT column (additive `ADD COLUMN`; legacy rows
+  read NULL) holding closed-key JSON. The decision constructors fill it with
+  the inputs they already know: candidate session id/state for
+  `reused_existing` and `selected_candidate_terminal`, the required and
+  candidate model for `exact_model_incompatibility`, and the start policy for
+  `forced_new_policy`. It rides on `workflowRouteDecision`, so
+  `recordWorkflowRouteDecision` needs no new parameters beyond the decision.
+  The task-history panel renders it as labelled key/value rows inside the
+  expandable Details block.
