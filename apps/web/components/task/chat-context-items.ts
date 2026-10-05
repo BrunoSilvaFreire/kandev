@@ -8,6 +8,7 @@ import type {
   PRFeedbackComment,
   WalkthroughComment,
   AgentMessageComment,
+  DocumentComment,
 } from "@/lib/state/slices/comments";
 import type { TaskPreviewFeedback } from "@/lib/types/http";
 
@@ -37,6 +38,8 @@ export type BuildContextItemsParams = {
   handleClearWalkthroughComments: () => void;
   messageComments: AgentMessageComment[];
   handleClearMessageComments: () => void;
+  documentComments: DocumentComment[];
+  handleClearDocumentComments: () => void;
   taskId: string | null;
   onOpenPreviewFeedback?: () => void;
 };
@@ -215,6 +218,20 @@ function buildAgentMessageCommentItems(params: BuildContextItemsParams): Context
   ];
 }
 
+function buildDocumentCommentItems(params: BuildContextItemsParams): ContextItem[] {
+  const { documentComments, handleClearDocumentComments } = params;
+  if (documentComments.length === 0) return [];
+  return [
+    {
+      kind: "document-comment" as const,
+      id: "document-comments",
+      label: t("task:documentCommentCount", { count: documentComments.length }),
+      comments: documentComments,
+      onRemove: handleClearDocumentComments,
+    },
+  ];
+}
+
 /** Sort: pinned first, then by kind order, then by label */
 const KIND_ORDER: Record<string, number> = {
   plan: 0,
@@ -225,8 +242,9 @@ const KIND_ORDER: Record<string, number> = {
   "preview-feedback": 5,
   "walkthrough-comment": 6,
   "agent-message-comment": 7,
-  image: 8,
-  "pr-feedback": 9,
+  "document-comment": 8,
+  image: 9,
+  "pr-feedback": 10,
 };
 
 export function contextItemSortFn(a: ContextItem, b: ContextItem): number {
@@ -247,6 +265,7 @@ export function buildContextItems(params: BuildContextItemsParams): ContextItem[
   items.push(...buildCommentItems(params));
   items.push(...buildWalkthroughCommentItems(params));
   items.push(...buildAgentMessageCommentItems(params));
+  items.push(...buildDocumentCommentItems(params));
   items.push(...buildPRFeedbackItems(params));
 
   if (params.planComments.length > 0) {

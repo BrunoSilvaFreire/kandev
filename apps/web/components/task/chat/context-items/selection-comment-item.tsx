@@ -16,7 +16,7 @@ export const SelectionCommentItem = memo(function SelectionCommentItem({
   onClick,
   onRemove,
 }: {
-  kind: "plan-comment" | "agent-message-comment";
+  kind: "plan-comment" | "agent-message-comment" | "document-comment";
   label: string;
   comments: SelectionComment[];
   onClick?: () => void;

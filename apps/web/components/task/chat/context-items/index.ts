@@ -9,5 +9,6 @@ export { PlanCommentItem } from "./plan-comment-item";
 export { PreviewFeedbackItem } from "./preview-feedback-item";
 export { PRFeedbackItem } from "./pr-feedback-item";
 export { WalkthroughCommentItem } from "./walkthrough-comment-item";
+export { DocumentCommentItem } from "./document-comment-item";
 export { ImageItem } from "./image-item";
 export { LazyFilePreview } from "./lazy-file-preview";

@@ -5,10 +5,12 @@ import {
   formatPRFeedbackAsMarkdown,
   formatWalkthroughCommentsAsMarkdown,
   formatAgentMessageCommentsAsMarkdown,
+  formatDocumentCommentsAsMarkdown,
   formatCommentsForMessage,
 } from "./format";
 import type {
   AgentMessageComment,
+  DocumentComment,
   PlanComment,
   DiffComment,
   ReviewFileComment,
@@ -314,4 +316,39 @@ it("formats whole-file feedback without inventing a line anchor", () => {
   expect(output).not.toContain("```");
   expect(output).toContain("> Split this file.\n> Keep the examples.");
   expect(formatCommentsForMessage([comment]).diffComments).toEqual([comment]);
+});
+
+describe("formatDocumentCommentsAsMarkdown", () => {
+  function makeDocumentComment(overrides: Partial<DocumentComment> = {}): DocumentComment {
+    return {
+      id: "doc-1",
+      sessionId: "sess-1",
+      source: "document",
+      documentKey: "spec",
+      revision: 3,
+      selectedText: "the retry limit is 5",
+      text: "confirm this is intentional",
+      createdAt: "2026-09-25T00:00:00Z",
+      status: "pending",
+      ...overrides,
+    };
+  }
+
+  it("returns an empty string for no comments", () => {
+    expect(formatDocumentCommentsAsMarkdown([])).toBe("");
+  });
+
+  it("names the document key and revision with the selection", () => {
+    const output = formatDocumentCommentsAsMarkdown([makeDocumentComment()]);
+    expect(output).toContain("### Document Comments");
+    expect(output).toContain("spec");
+    expect(output).toContain("revision 3");
+    expect(output).toContain("> the retry limit is 5");
+    expect(output).toContain("> confirm this is intentional");
+  });
+
+  it("groups document comments in formatCommentsForMessage", () => {
+    const comment = makeDocumentComment();
+    expect(formatCommentsForMessage([comment]).documentComments).toEqual([comment]);
+  });
 });

@@ -45,6 +45,8 @@ describe("buildContextItems agent-message comments", () => {
       handleClearWalkthroughComments: vi.fn(),
       messageComments: [comment],
       handleClearMessageComments: vi.fn(),
+      documentComments: [],
+      handleClearDocumentComments: vi.fn(),
       taskId: "task-1",
     } as never);
 
@@ -81,6 +83,8 @@ describe("buildContextItems task plan comments", () => {
       handleClearWalkthroughComments: vi.fn(),
       messageComments: [],
       handleClearMessageComments: vi.fn(),
+      documentComments: [],
+      handleClearDocumentComments: vi.fn(),
       taskId: "task-1",
     } as never);
 
@@ -125,6 +129,8 @@ describe("buildContextItems task preview feedback", () => {
       handleClearWalkthroughComments: vi.fn(),
       messageComments: [],
       handleClearMessageComments: vi.fn(),
+      documentComments: [],
+      handleClearDocumentComments: vi.fn(),
       taskId: "task-1",
       onOpenPreviewFeedback: open,
     } as never);
@@ -163,6 +169,8 @@ describe("buildContextItems file and directory context", () => {
       handleClearWalkthroughComments: vi.fn(),
       messageComments: [],
       handleClearMessageComments: vi.fn(),
+      documentComments: [],
+      handleClearDocumentComments: vi.fn(),
       taskId: "task-1",
     });
   }
@@ -224,6 +232,8 @@ it.each(["api", ""])("opens whole-file composer context in repository %j", (repo
     handleClearWalkthroughComments: vi.fn(),
     messageComments: [],
     handleClearMessageComments: vi.fn(),
+    documentComments: [],
+    handleClearDocumentComments: vi.fn(),
     taskId: "task-1",
   });
   const item = items.find((candidate) => candidate.kind === "comment");

@@ -114,6 +114,14 @@ export type AgentMessageComment = CommentBase & {
   anchor: MessageTextAnchor;
 };
 
+/** A selection in a non-plan task document, carried as pending chat context. */
+export type DocumentComment = CommentBase & {
+  source: "document";
+  documentKey: string;
+  revision: number;
+  selectedText: string;
+};
+
 export type Comment =
   | DiffComment
   | ReviewFileComment
@@ -121,7 +129,8 @@ export type Comment =
   | FileEditorComment
   | PRFeedbackComment
   | WalkthroughComment
-  | AgentMessageComment;
+  | AgentMessageComment
+  | DocumentComment;
 
 // ---------------------------------------------------------------------------
 // Type guards
@@ -149,6 +158,10 @@ export function isWalkthroughComment(c: Comment): c is WalkthroughComment {
 
 export function isAgentMessageComment(c: Comment): c is AgentMessageComment {
   return c.source === "agent-message";
+}
+
+export function isDocumentComment(c: Comment): c is DocumentComment {
+  return c.source === "document";
 }
 
 // ---------------------------------------------------------------------------

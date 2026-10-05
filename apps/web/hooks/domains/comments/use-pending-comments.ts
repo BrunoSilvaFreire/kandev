@@ -7,12 +7,14 @@ import type {
   PRFeedbackComment,
   WalkthroughComment,
   AgentMessageComment,
+  DocumentComment,
 } from "@/lib/state/slices/comments";
 import {
   isDiffComment,
   isPRFeedbackComment,
   isWalkthroughComment,
   isAgentMessageComment,
+  isDocumentComment,
 } from "@/lib/state/slices/comments";
 import { usePlanComments } from "./use-plan-comments";
 
@@ -21,6 +23,7 @@ const EMPTY_DIFF_COMMENTS: DiffComment[] = [];
 const EMPTY_PR_FEEDBACK_COMMENTS: PRFeedbackComment[] = [];
 const EMPTY_WALKTHROUGH_COMMENTS: WalkthroughComment[] = [];
 const EMPTY_AGENT_MESSAGE_COMMENTS: AgentMessageComment[] = [];
+const EMPTY_DOCUMENT_COMMENTS: DocumentComment[] = [];
 
 /**
  * Get all pending comments (any source).
@@ -126,5 +129,24 @@ export function usePendingAgentMessageComments(sessionId?: string | null): Agent
       }
     }
     return pending.length === 0 ? EMPTY_AGENT_MESSAGE_COMMENTS : pending;
+  }, [byId, pendingForChat, sessionId]);
+}
+
+/** Get pending selections in non-plan task documents for one session. */
+export function usePendingDocumentComments(sessionId?: string | null): DocumentComment[] {
+  const byId = useCommentsStore((state) => state.byId);
+  const pendingForChat = useCommentsStore((state) => state.pendingForChat);
+
+  return useMemo(() => {
+    if (!sessionId || pendingForChat.length === 0) return EMPTY_DOCUMENT_COMMENTS;
+    const pending: DocumentComment[] = [];
+    for (const id of pendingForChat) {
+      const comment = byId[id];
+      if (comment && isDocumentComment(comment)) {
+        if (comment.sessionId !== sessionId) continue;
+        pending.push(comment);
+      }
+    }
+    return pending.length === 0 ? EMPTY_DOCUMENT_COMMENTS : pending;
   }, [byId, pendingForChat, sessionId]);
 }

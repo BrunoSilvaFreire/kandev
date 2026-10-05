@@ -8,6 +8,7 @@ import {
   formatPRFeedbackAsMarkdown,
   formatWalkthroughCommentsAsMarkdown,
   formatAgentMessageCommentsAsMarkdown,
+  formatDocumentCommentsAsMarkdown,
 } from "@/lib/state/slices/comments/format";
 import type {
   Comment,
@@ -17,6 +18,7 @@ import type {
   PRFeedbackComment,
   WalkthroughComment,
   AgentMessageComment,
+  DocumentComment,
 } from "@/lib/state/slices/comments";
 import type { Message } from "@/lib/types/http";
 import { deriveSessionInputMode } from "@/hooks/domains/session/session-input-mode";
@@ -48,6 +50,8 @@ function formatSingleComment(comment: Comment): string {
       return formatWalkthroughCommentsAsMarkdown([comment as WalkthroughComment]);
     case "agent-message":
       return formatAgentMessageCommentsAsMarkdown([comment as AgentMessageComment]);
+    case "document":
+      return formatDocumentCommentsAsMarkdown([comment as DocumentComment]);
     case "file-editor": {
       const fc = comment as FileEditorComment;
       const lines: string[] = ["### File Comment", ""];

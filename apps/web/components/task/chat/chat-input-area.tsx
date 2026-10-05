@@ -19,6 +19,7 @@ import {
   formatPRFeedbackAsMarkdown,
   formatWalkthroughCommentsAsMarkdown,
   formatAgentMessageCommentsAsMarkdown,
+  formatDocumentCommentsAsMarkdown,
 } from "@/lib/state/slices/comments/format";
 import { usePlanActions } from "@/hooks/domains/kanban/use-plan-actions";
 import { useExecutorEnvironmentAvailability } from "@/hooks/domains/session/use-executor-environment-availability";
@@ -26,7 +27,7 @@ import { useToast } from "@/components/toast-provider";
 import { isMessageSendError, MessageSendError } from "@/lib/chat/message-send-error";
 import { QueueAdmissionError, QueueFullError } from "@/lib/api/domains/queue-api";
 import type { ReviewComment } from "@/lib/state/slices/comments";
-import type { AgentMessageComment } from "@/lib/state/slices/comments";
+import type { AgentMessageComment, DocumentComment } from "@/lib/state/slices/comments";
 import type { ChatPanelState } from "./use-chat-panel-state";
 import { useComposerProps } from "./use-composer-props";
 import { cn } from "@/lib/utils";
@@ -63,6 +64,7 @@ export function buildSubmitMessage(args: {
   planComments: import("@/lib/state/slices/comments").PlanComment[];
   walkthroughComments?: import("@/lib/state/slices/comments").WalkthroughComment[];
   messageComments?: AgentMessageComment[];
+  documentComments?: DocumentComment[];
 }): string {
   const {
     message,
@@ -70,6 +72,7 @@ export function buildSubmitMessage(args: {
     pendingPRFeedback,
     walkthroughComments = [],
     messageComments = [],
+    documentComments = [],
   } = args;
   let finalMessage = message;
   if (reviewComments && reviewComments.length > 0) {
@@ -86,6 +89,9 @@ export function buildSubmitMessage(args: {
     finalMessage = finalMessage
       ? `${messageCommentsMarkdown}${finalMessage}`
       : messageCommentsMarkdown;
+  }
+  if (documentComments.length > 0) {
+    finalMessage = formatDocumentCommentsAsMarkdown(documentComments) + finalMessage;
   }
   return finalMessage;
 }
@@ -207,6 +213,7 @@ function completeChatSubmission(payload: ChatSubmitPayload, panelState: ChatPane
     pendingPRFeedback,
     walkthroughComments,
     messageComments,
+    documentComments,
     markCommentsSent,
     handleClearPRFeedback,
     handleClearWalkthroughComments,
@@ -216,6 +223,7 @@ function completeChatSubmission(payload: ChatSubmitPayload, panelState: ChatPane
   } = panelState;
   if (payload.reviewComments?.length) markCommentsSent(payload.reviewComments.map((c) => c.id));
   if (messageComments.length > 0) markCommentsSent(messageComments.map((c) => c.id));
+  if (documentComments.length > 0) markCommentsSent(documentComments.map((c) => c.id));
   if (pendingPRFeedback.length > 0) handleClearPRFeedback();
   if (walkthroughComments.length > 0) handleClearWalkthroughComments();
   if (!resolvedSessionId) return true;
@@ -245,6 +253,7 @@ async function submitChatPayload({
     pendingPRFeedback,
     walkthroughComments,
     messageComments,
+    documentComments,
     pendingClarification,
   } = panelState;
   const finalMessage = buildSubmitMessage({
@@ -254,6 +263,7 @@ async function submitChatPayload({
     planComments,
     walkthroughComments,
     messageComments,
+    documentComments,
   });
   const planCommentRefs = toTaskPlanCommentRefs(planComments);
   const previewFeedbackRefs = toTaskPreviewFeedbackRefs(previewFeedback ?? []);

@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useCallback } from "react";
+import { forwardRef, useCallback, useState } from "react";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { Message } from "@/lib/types/http";
 import type { ReviewComment } from "@/lib/state/slices/comments";
@@ -8,9 +8,11 @@ import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import type { TaskPlanCommentRef, TaskPreviewFeedbackRef } from "@/lib/types/http";
+import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
 import { useChatInputContainer } from "./use-chat-input-container";
 import { SessionStoppedBanner } from "./session-stopped-banner";
 import { ResumeHandoffOffer } from "./resume-handoff-offer";
+import { EnhanceContextPicker } from "./enhance-context-picker";
 import { useSessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
 import {
   ChatInputBody,
@@ -269,12 +271,14 @@ function useChatPromptEnhancement({
   inputRef,
   taskId,
   sessionId,
+  contextItems,
   taskTitle,
   taskDescription,
 }: {
   inputRef: ContainerState["inputRef"];
   taskId: string | null;
   sessionId: string | null;
+  contextItems: ContextItem[];
   taskTitle?: string;
   taskDescription: string;
 }) {
@@ -284,6 +288,7 @@ function useChatPromptEnhancement({
     taskTitle,
     taskDescription,
   });
+  const [enhancePickerOpen, setEnhancePickerOpen] = useState(false);
   const getCurrentEditorValue = useCallback(() => inputRef.current?.getValue() ?? null, [inputRef]);
   const applyEnhancedPrompt = useCallback(
     (nextValue: string) => applyEnhancedPromptToEditor(inputRef, nextValue),
@@ -294,17 +299,29 @@ function useChatPromptEnhancement({
     getCurrent: getCurrentEditorValue,
     apply: applyEnhancedPrompt,
   });
-  const handleEnhancePrompt = useCallback(() => {
-    const currentValue = getCurrentEditorValue();
-    if (currentValue === null) return;
-    if (!currentValue.trim()) return;
-    const generation = promptDelivery.captureScope();
-    void enhancePrompt(currentValue, (result) =>
-      promptDelivery.deliver(currentValue, result, generation),
-    );
-  }, [getCurrentEditorValue, enhancePrompt, promptDelivery]);
+  const enhanceWithContext = useCallback(
+    (selectedContext: import("@/lib/api/domains/utility-api").SelectedContextItem[]) => {
+      const currentValue = getCurrentEditorValue();
+      if (currentValue === null || !currentValue.trim()) return;
+      const generation = promptDelivery.captureScope();
+      void enhancePrompt(
+        currentValue,
+        (result) => promptDelivery.deliver(currentValue, result, generation),
+        selectedContext,
+      );
+    },
+    [enhancePrompt, getCurrentEditorValue, promptDelivery],
+  );
 
-  return { handleEnhancePrompt, isEnhancingPrompt, isUtilityConfigured, promptDelivery };
+  return {
+    isEnhancingPrompt,
+    isUtilityConfigured,
+    promptDelivery,
+    enhancePickerOpen,
+    setEnhancePickerOpen,
+    enhanceWithContext,
+    contextItems,
+  };
 }
 
 function useChatInputRecoveryActions(taskId: string | null, sessionId: string | null) {
@@ -356,6 +373,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       inputRef: s.inputRef,
       taskId,
       sessionId,
+      contextItems: p.contextItems ?? [],
       taskTitle,
       taskDescription,
     });
@@ -392,44 +410,71 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     }
 
     return (
-      <>
-        {p.showResumeHandoff ? (
-          <ResumeHandoffOffer
-            taskId={taskId}
-            sessionId={sessionId}
-            onHandoffNotSent={(handoff) => applyEnhancedPromptToEditor(s.inputRef, handoff)}
-          />
-        ) : null}
-        <ChatInputBody
-          containerRef={s.containerRef}
-          height={s.height}
-          resizeHandleProps={s.resizeHandleProps}
-          isStarting={isBusyVisual}
-          isAgentBusy={isAgentBusy}
-          hasClarification={s.hasClarification}
-          showRequestChangesTooltip={p.showRequestChangesTooltip}
-          hasPendingComments={s.hasPendingComments}
-          planModeEnabled={props.planModeEnabled}
-          showFocusHint={s.showFocusHint}
-          needsRecovery={(props.needsRecovery ?? false) || executorUnavailable}
-          addFiles={s.addFiles}
-          contextAreaProps={buildContextAreaProps(s, p)}
-          promptResultRecovery={
-            promptEnhancement.promptDelivery.pendingResult ? (
-              <PromptResultRecovery
-                pendingResult={promptEnhancement.promptDelivery.pendingResult}
-                onApply={promptEnhancement.promptDelivery.applyPending}
-                onCopy={promptEnhancement.promptDelivery.copyPending}
+      <Popover
+        open={promptEnhancement.enhancePickerOpen}
+        onOpenChange={promptEnhancement.setEnhancePickerOpen}
+      >
+        <PopoverAnchor asChild>
+          <div>
+            {p.showResumeHandoff ? (
+              <ResumeHandoffOffer
+                taskId={taskId}
+                sessionId={sessionId}
+                onHandoffNotSent={(handoff) => applyEnhancedPromptToEditor(s.inputRef, handoff)}
+                getDraft={() => s.inputRef.current?.getValue() ?? s.value}
+                clearDraft={() => {
+                  s.inputRef.current?.setValue("");
+                  s.handleChange("");
+                }}
               />
-            ) : null
-          }
-          editorAreaProps={buildEditorAreaProps(s, p, {
-            onEnhancePrompt: promptEnhancement.handleEnhancePrompt,
-            isEnhancingPrompt: promptEnhancement.isEnhancingPrompt,
-            isUtilityConfigured: promptEnhancement.isUtilityConfigured,
-          })}
-        />
-      </>
+            ) : null}
+            <ChatInputBody
+              containerRef={s.containerRef}
+              height={s.height}
+              resizeHandleProps={s.resizeHandleProps}
+              isStarting={isBusyVisual}
+              isAgentBusy={isAgentBusy}
+              hasClarification={s.hasClarification}
+              showRequestChangesTooltip={p.showRequestChangesTooltip}
+              hasPendingComments={s.hasPendingComments}
+              planModeEnabled={props.planModeEnabled}
+              showFocusHint={s.showFocusHint}
+              needsRecovery={(props.needsRecovery ?? false) || executorUnavailable}
+              addFiles={s.addFiles}
+              contextAreaProps={buildContextAreaProps(s, p)}
+              promptResultRecovery={
+                promptEnhancement.promptDelivery.pendingResult ? (
+                  <PromptResultRecovery
+                    pendingResult={promptEnhancement.promptDelivery.pendingResult}
+                    onApply={promptEnhancement.promptDelivery.applyPending}
+                    onCopy={promptEnhancement.promptDelivery.copyPending}
+                  />
+                ) : null
+              }
+              editorAreaProps={buildEditorAreaProps(s, p, {
+                onEnhancePrompt: () => promptEnhancement.setEnhancePickerOpen(true),
+                isEnhancingPrompt: promptEnhancement.isEnhancingPrompt,
+                isUtilityConfigured: promptEnhancement.isUtilityConfigured,
+              })}
+            />
+          </div>
+        </PopoverAnchor>
+        <PopoverContent
+          side="top"
+          align="end"
+          className="p-3"
+          data-testid="enhance-context-popover"
+        >
+          <EnhanceContextPicker
+            taskId={taskId}
+            contextItems={promptEnhancement.contextItems}
+            onConfirm={(items) => {
+              promptEnhancement.setEnhancePickerOpen(false);
+              promptEnhancement.enhanceWithContext(items);
+            }}
+          />
+        </PopoverContent>
+      </Popover>
     );
   },
 );

@@ -585,3 +585,9 @@ correctness boundary.
 
 - [Task-owned plan comments](../../../plans/task-owned-plan-comments/plan.md)
 - [Plan comment recovery](../../../plans/plan-comment-recovery/plan.md)
+
+## Fork refinement (2026-09-25): generic document selections
+
+A `DocumentComment` (`source: "document"` plus `documentKey`, `revision`,
+`selectedText`, `text`) reuses the session-scoped comments store, keyed to
+`tasks.activeSessionId`; the Review surface reuses `PlanSelectionPopover`.

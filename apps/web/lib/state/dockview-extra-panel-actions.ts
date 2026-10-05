@@ -8,7 +8,12 @@ import {
   type StoreSet,
 } from "./dockview-panel-actions";
 import { buildTerminalPanelActions } from "./dockview-terminal-panel-actions";
-import { PROMPT_HISTORY_PANEL_ID, USAGE_PANEL_ID } from "./layout-manager/constants";
+import {
+  DOCUMENTS_PANEL_ID,
+  PROMPT_HISTORY_PANEL_ID,
+  TASK_HISTORY_PANEL_ID,
+  USAGE_PANEL_ID,
+} from "./layout-manager/constants";
 import { panelTitle } from "./layout-manager/panel-title";
 import {
   parsePluginPanelId,
@@ -163,6 +168,73 @@ function buildSidePanelActions(get: StoreGet) {
         opts,
       );
     },
+    addDocumentsPanel: (opts?: SidePanelOpts) => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      addSidePanel(
+        api,
+        centerGroupId,
+        {
+          id: DOCUMENTS_PANEL_ID,
+          component: DOCUMENTS_PANEL_ID,
+          title: panelTitle(DOCUMENTS_PANEL_ID),
+        },
+        opts,
+      );
+    },
+  };
+}
+
+/**
+ * Build the Documents/Review actions. The Review surface is the existing
+ * `plan` singleton parameterized by `documentKey`: retarget it when open,
+ * otherwise open it in review mode.
+ */
+function buildDocumentsPanelActions(get: StoreGet) {
+  return {
+    openDocumentReview: (documentKey: string) => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      const existing = api.getPanel("plan");
+      if (existing) {
+        existing.api.updateParameters({ documentKey });
+        existing.api.setActive();
+        return;
+      }
+      addSidePanel(api, centerGroupId, {
+        id: "plan",
+        component: "plan",
+        title: panelTitle("plan"),
+        tabComponent: "planTab",
+        params: { documentKey },
+      });
+    },
+  };
+}
+
+/**
+ * Build the Task History actions. The singleton panel is retargeted with an
+ * optional `stepId` filter when open, otherwise opened beside the chat.
+ */
+function buildTaskHistoryActions(get: StoreGet) {
+  return {
+    openTaskHistory: (stepId?: string) => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      const params = stepId ? { stepId } : undefined;
+      const existing = api.getPanel(TASK_HISTORY_PANEL_ID);
+      if (existing) {
+        existing.api.updateParameters(params ?? {});
+        existing.api.setActive();
+        return;
+      }
+      addSidePanel(api, centerGroupId, {
+        id: TASK_HISTORY_PANEL_ID,
+        component: TASK_HISTORY_PANEL_ID,
+        title: panelTitle(TASK_HISTORY_PANEL_ID),
+        params,
+      });
+    },
   };
 }
 
@@ -175,6 +247,8 @@ export function buildExtraPanelActions(set: StoreSet, get: StoreGet) {
   return {
     ...buildTranscriptActions(set, get),
     ...buildSidePanelActions(get),
+    ...buildDocumentsPanelActions(get),
+    ...buildTaskHistoryActions(get),
     ...buildReviewPanelActions(get),
     ...buildTerminalPanelActions(get),
   };

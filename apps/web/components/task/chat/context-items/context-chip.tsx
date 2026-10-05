@@ -39,6 +39,7 @@ const ICON_BY_KIND: Record<ContextItemKind, TablerIcon> = {
   prompt: IconAt,
   "pr-feedback": IconGitPullRequest,
   "agent-message-comment": IconMessageDots,
+  "document-comment": IconMessageDots,
 };
 
 type ContextChipProps = {

@@ -5,9 +5,11 @@ import type {
   PRFeedbackComment,
   WalkthroughComment,
   AgentMessageComment,
+  DocumentComment,
 } from "./types";
 import {
   isAgentMessageComment,
+  isDocumentComment,
   isReviewComment,
   isPlanComment,
   isPRFeedbackComment,
@@ -152,6 +154,23 @@ export function formatAgentMessageCommentsAsMarkdown(comments: AgentMessageComme
   return lines.join("\n");
 }
 
+/** Format comments on selections in non-plan task documents. */
+export function formatDocumentCommentsAsMarkdown(comments: DocumentComment[]): string {
+  if (!comments || comments.length === 0) return "";
+
+  const lines: string[] = ["### Document Comments", ""];
+  for (const comment of comments) {
+    lines.push(`**${comment.documentKey} · revision ${comment.revision}**`);
+    if (comment.selectedText) {
+      lines.push(toBlockquote(comment.selectedText));
+    }
+    lines.push(toBlockquote(comment.text));
+    lines.push("");
+  }
+  lines.push("---", "");
+  return lines.join("\n");
+}
+
 /**
  * Format all pending comments for inclusion in a chat message.
  */
@@ -161,12 +180,14 @@ export function formatCommentsForMessage(comments: Comment[]): {
   prFeedbackComments: PRFeedbackComment[];
   walkthroughComments: WalkthroughComment[];
   agentMessageComments: AgentMessageComment[];
+  documentComments: DocumentComment[];
 } {
   const diffComments: ReviewComment[] = [];
   const planComments: PlanComment[] = [];
   const prFeedbackComments: PRFeedbackComment[] = [];
   const walkthroughComments: WalkthroughComment[] = [];
   const agentMessageComments: AgentMessageComment[] = [];
+  const documentComments: DocumentComment[] = [];
 
   for (const c of comments) {
     if (isReviewComment(c)) diffComments.push(c);
@@ -174,6 +195,7 @@ export function formatCommentsForMessage(comments: Comment[]): {
     else if (isPRFeedbackComment(c)) prFeedbackComments.push(c);
     else if (isWalkthroughComment(c)) walkthroughComments.push(c);
     else if (isAgentMessageComment(c)) agentMessageComments.push(c);
+    else if (isDocumentComment(c)) documentComments.push(c);
   }
 
   return {
@@ -182,5 +204,6 @@ export function formatCommentsForMessage(comments: Comment[]): {
     prFeedbackComments,
     walkthroughComments,
     agentMessageComments,
+    documentComments,
   };
 }
