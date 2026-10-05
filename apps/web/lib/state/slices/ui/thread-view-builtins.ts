@@ -14,6 +14,7 @@ export function createDefaultThreadView(id: string, name: string): ThreadView {
     taskScope: { mode: "all", taskIds: [] },
     filters: [],
     sort: { key: "attention", direction: "asc" },
+    group: "none",
     maxColumns: DEFAULT_THREAD_VIEW_MAX_COLUMNS,
     layout: "columns",
     autoHideComposer: false,

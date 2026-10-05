@@ -37,6 +37,8 @@ import { ColumnsMenu } from "./columns-menu";
 import { deriveAutoHiddenStepIds } from "@/lib/kanban/auto-hide-empty-columns";
 import { sortWorkflowStepsByPosition } from "@/lib/kanban/workflow-step-order";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
+import { useWorkflowGroupLanes } from "@/hooks/domains/kanban/use-workflow-group-lanes";
+import { WorkflowGroupLanes } from "./workflow-group-lanes";
 import {
   getEffectiveView,
   type MobileWorkflowNavigation,
@@ -216,6 +218,7 @@ const WorkflowItemContent = memo(function WorkflowItemContent({
       matchesPluginTaskFilters,
       vcsSearchTextByTaskId,
     );
+  const lanes = useWorkflowGroupLanes(wf, tasks);
   const snapshotSteps = snapshot?.steps ?? EMPTY_WORKFLOW_STEPS;
   const derivedAutoHiddenSet = useMemo(
     () => deriveAutoHiddenStepIds(snapshotSteps, occupancyTasks, autoHideEmpty, hiddenStepIds),
@@ -242,6 +245,37 @@ const WorkflowItemContent = memo(function WorkflowItemContent({
 
   if (!snapshot) return null;
 
+  const columnsMenu = (
+    <ColumnsMenu
+      workflowId={wf.id}
+      workflowName={wf.name}
+      steps={snapshotSteps}
+      hiddenStepIds={hiddenStepIds}
+      onToggle={onToggleStepVisibility}
+      autoHideEmpty={autoHideEmpty}
+      onToggleAutoHide={onToggleAutoHideEmpty}
+    />
+  );
+
+  if (lanes) {
+    return (
+      <WorkflowGroupLanes
+        wf={wf}
+        lanes={lanes}
+        steps={steps}
+        moveTargetSteps={moveTargetSteps}
+        isCollapsed={isCollapsed}
+        onToggleCollapse={onToggleCollapse}
+        dragHandleProps={dragHandleProps}
+        onToggleMultiSelect={onToggleMultiSelect}
+        isMultiSelectMode={viewProps.isMultiSelectMode}
+        ViewComponent={ViewComponent}
+        viewProps={viewProps}
+        columnsMenu={columnsMenu}
+      />
+    );
+  }
+
   if (hideHeader) {
     return <div className={fillHeight ? "h-full min-h-0" : undefined}>{content}</div>;
   }
@@ -257,17 +291,7 @@ const WorkflowItemContent = memo(function WorkflowItemContent({
       onToggleMultiSelect={onToggleMultiSelect}
       isMultiSelectMode={viewProps.isMultiSelectMode}
       fillHeight={fillHeight}
-      columnsMenu={
-        <ColumnsMenu
-          workflowId={wf.id}
-          workflowName={wf.name}
-          steps={snapshotSteps}
-          hiddenStepIds={hiddenStepIds}
-          onToggle={onToggleStepVisibility}
-          autoHideEmpty={autoHideEmpty}
-          onToggleAutoHide={onToggleAutoHideEmpty}
-        />
-      }
+      columnsMenu={columnsMenu}
     >
       {content}
     </SwimlaneSection>

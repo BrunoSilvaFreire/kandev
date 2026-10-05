@@ -9,6 +9,7 @@ import type {
   ThreadFilterDimension,
   ThreadFilterOp,
   ThreadFilterValue,
+  ThreadGroupKey,
   ThreadSortDirection,
   ThreadSortKey,
   ThreadTaskScope,
@@ -23,6 +24,7 @@ export const THREAD_FILTER_DIMENSIONS: readonly ThreadFilterDimension[] = [
   "workflow",
   "workflowStep",
   "repository",
+  "repositoryGroup",
   "primaryAgent",
   "executorType",
   "priority",
@@ -38,6 +40,16 @@ export const THREAD_FILTER_DIMENSIONS: readonly ThreadFilterDimension[] = [
   "taskLabel",
   "taskOrigin",
   "hasMultipleSessions",
+];
+
+/** Group keys a Threads view may persist. */
+export const THREAD_GROUP_KEYS: readonly ThreadGroupKey[] = [
+  "none",
+  "repository",
+  "repositoryGroup",
+  "workflow",
+  "state",
+  "priority",
 ];
 
 export const THREAD_SORT_KEYS: readonly ThreadSortKey[] = [
@@ -127,6 +139,10 @@ function normalizeMaxColumns(value: unknown): number | null {
     : null;
 }
 
+export function normalizeThreadGroup(value: unknown): ThreadGroupKey {
+  return isOneOf(value, THREAD_GROUP_KEYS) ? value : "none";
+}
+
 export function fromApiThreadView(api: ThreadViewApi): ThreadView {
   return {
     id: isString(api?.id) ? api.id : "",
@@ -134,6 +150,7 @@ export function fromApiThreadView(api: ThreadViewApi): ThreadView {
     taskScope: fromApiThreadTaskScope(api?.task_scope),
     filters: fromApiFilters(api?.filters),
     sort: normalizeSort(api?.sort),
+    group: normalizeThreadGroup(api?.group),
     maxColumns: normalizeMaxColumns(api?.max_columns),
     layout: api?.layout === "grid" ? "grid" : "columns",
     autoHideComposer: api?.auto_hide_composer === true,
@@ -146,6 +163,7 @@ export function fromApiThreadDraft(api: ThreadViewDraftApi): ThreadViewDraft {
     taskScope: fromApiThreadTaskScope(api?.task_scope),
     filters: fromApiFilters(api?.filters),
     sort: normalizeSort(api?.sort),
+    group: normalizeThreadGroup(api?.group),
     maxColumns: normalizeMaxColumns(api?.max_columns),
     layout: api?.layout === "grid" ? "grid" : "columns",
     autoHideComposer: api?.auto_hide_composer === true,
@@ -172,6 +190,7 @@ export function toApiThreadView(view: ThreadView): ThreadViewApi {
     task_scope: toApiTaskScope(view.taskScope),
     filters: view.filters.map(toApiClause),
     sort: { key: view.sort.key, direction: view.sort.direction },
+    group: view.group,
     max_columns: view.maxColumns,
     layout: view.layout,
     auto_hide_composer: view.autoHideComposer,
@@ -184,6 +203,7 @@ export function toApiThreadDraft(draft: ThreadViewDraft): ThreadViewDraftApi {
     task_scope: toApiTaskScope(draft.taskScope),
     filters: draft.filters.map(toApiClause),
     sort: { key: draft.sort.key, direction: draft.sort.direction },
+    group: draft.group,
     max_columns: draft.maxColumns,
     layout: draft.layout,
     auto_hide_composer: draft.autoHideComposer,

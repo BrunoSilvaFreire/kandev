@@ -69,7 +69,9 @@ export type MobileSessionCorePanel =
   | "terminal"
   | "review"
   | "prompt-history"
-  | "usage";
+  | "usage"
+  | "documents"
+  | "task-history";
 
 /** A plugin task panel id on mobile, `plugin:<pluginId>:<panelKey>` — see
  *  lib/state/layout-manager/plugin-panels.ts's pluginPanelId. */
@@ -80,6 +82,8 @@ export type MobileSessionPanel = MobileSessionCorePanel | MobileSessionPluginPan
 export type MobileSessionState = {
   activePanelBySessionId: Record<string, MobileSessionPanel>;
   reviewItemIdBySessionId: Record<string, string>;
+  /** Optional destination-step filter for the phone Task History surface. */
+  taskHistoryStepIdByTaskId: Record<string, string | null>;
   isTaskSwitcherOpen: boolean;
 };
 
@@ -371,6 +375,8 @@ export type UISliceActions = {
   setMobileKanbanSearchOpen: (open: boolean) => void;
   setMobileKanbanFocusedWorkflow: (workflowId: string | null) => void;
   setMobileSessionPanel: (sessionId: string, panel: MobileSessionPanel) => void;
+  /** Set the destination-step filter for the phone Task History surface. */
+  setMobileTaskHistoryStepId: (taskId: string, stepId: string | null) => void;
   setMobileSessionReview: (sessionId: string, reviewItemId: string | null) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;

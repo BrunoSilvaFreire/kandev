@@ -124,6 +124,7 @@ export const defaultUIState: UISliceState = {
   mobileSession: {
     activePanelBySessionId: {},
     reviewItemIdBySessionId: {},
+    taskHistoryStepIdByTaskId: {},
     isTaskSwitcherOpen: false,
   },
   chatInput: { planModeBySessionId: {}, cancellingBySessionId: {} },
@@ -264,6 +265,14 @@ function buildMobileActions(set: ImmerSet) {
     ) =>
       set((draft) => {
         draft.mobileSession.activePanelBySessionId[sessionId] = panel;
+      }),
+    setMobileTaskHistoryStepId: (taskId: string, stepId: string | null) =>
+      set((draft) => {
+        if (stepId) {
+          draft.mobileSession.taskHistoryStepIdByTaskId[taskId] = stepId;
+          return;
+        }
+        delete draft.mobileSession.taskHistoryStepIdByTaskId[taskId];
       }),
     setMobileSessionReview: (sessionId: string, reviewItemId: string | null) =>
       set((draft) => {

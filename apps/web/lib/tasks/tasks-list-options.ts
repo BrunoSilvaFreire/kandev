@@ -20,6 +20,7 @@ export const TASKS_LIST_GROUP_OPTIONS = [
   { value: "state" },
   { value: "workflow" },
   { value: "repository" },
+  { value: "repositoryGroup" },
   { value: "none" },
 ] as const;
 
@@ -51,6 +52,7 @@ export const GROUP_OPTION_LABEL_KEYS: Record<TasksListGroup, string> = {
   state: "tasks:groupByState",
   workflow: "tasks:groupByWorkflow",
   repository: "tasks:groupByRepository",
+  repositoryGroup: "tasks:groupByRepositoryGroup",
   none: "tasks:groupByNone",
 };
 

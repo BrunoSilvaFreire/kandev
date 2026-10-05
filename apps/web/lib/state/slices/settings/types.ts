@@ -18,6 +18,7 @@ import type {
   StartupPage,
 } from "@/lib/types/http";
 import type { SidebarLayoutApi } from "@/lib/types/http-user-settings";
+import type { ViewFilterClause } from "@/lib/view-model/types";
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
 import type { ThreadView, ThreadViewDraft } from "@/lib/state/slices/ui/thread-view-types";
 import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
@@ -496,6 +497,12 @@ export type UserSettingsState = {
   workflowIdsWithAutoHideEmptySteps: string[];
   kanbanSort: KanbanSort;
   kanbanPriorityFilterTokens: TaskPriority[];
+  /** Dimensions configured as always-visible Quick Filters, keyed by Home view. */
+  homeQuickFilters: Record<string, string[]>;
+  /** Active shared filter clauses for Kanban/List, keyed by Home view. */
+  taskViewFilters: Record<string, ViewFilterClause[]>;
+  /** Active shared grouping key for Kanban/List, keyed by Home view. */
+  taskViewGroups: Record<string, string>;
   loaded: boolean;
 };
 

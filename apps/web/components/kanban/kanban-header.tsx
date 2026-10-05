@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { PageTopbar } from "@/components/page-topbar";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
+import { KanbanViewFilters } from "./kanban-view-filters";
 import { usePluginTaskFilters } from "@/hooks/use-plugin-task-filters";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
 import { HealthIndicatorButton, HealthIssuesDialog } from "../system-health/health-indicator";
@@ -276,13 +277,16 @@ function TabletHeader({
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
           {currentPage !== "threads" && (
-            <KanbanDisplayDropdown
-              triggerSize="icon-lg"
-              currentPage={currentPage}
-              pluginFilters={pluginTaskFilters.filters}
-              pluginFilterSelections={pluginTaskFilters.selections}
-              onPluginFilterChange={pluginTaskFilters.setFilterSelection}
-            />
+            <>
+              <KanbanViewFilters />
+              <KanbanDisplayDropdown
+                triggerSize="icon-lg"
+                currentPage={currentPage}
+                pluginFilters={pluginTaskFilters.filters}
+                pluginFilterSelections={pluginTaskFilters.selections}
+                onPluginFilterChange={pluginTaskFilters.setFilterSelection}
+              />
+            </>
           )}
           <HealthIndicatorButton
             hasIssues={showHealthIndicator}
@@ -366,6 +370,7 @@ function DesktopHeader({
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
+          <KanbanViewFilters />
           <KanbanDisplayDropdown
             triggerSize="icon-lg"
             currentPage={currentPage}

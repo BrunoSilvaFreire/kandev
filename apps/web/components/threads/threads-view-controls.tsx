@@ -37,6 +37,7 @@ import {
 import type { ThreadCandidate, ThreadViewQueryResult } from "@/lib/threads/thread-view-query";
 import type { ThreadView, ThreadViewDraft } from "@/lib/state/slices/ui/thread-view-types";
 import type { Repository } from "@/lib/types/http";
+import { ThreadsQuickFilterBar } from "./threads-quick-filter-bar";
 import { ThreadsViewEditor } from "./threads-view-editor";
 import { MobileThreadViewList, ThreadViewDraftHint } from "./threads-view-list";
 
@@ -250,6 +251,12 @@ export function ThreadsViewControls({
           <span className="ml-1">{t("threads:hiddenCount", { count: hiddenCount })}</span>
         )}
       </span>
+      <ThreadsQuickFilterBar
+        activeView={activeView}
+        draft={draft}
+        candidates={candidates}
+        repositories={repositories}
+      />
     </div>
   );
 }

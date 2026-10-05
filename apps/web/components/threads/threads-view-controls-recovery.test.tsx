@@ -11,6 +11,7 @@ const ALL_VIEW: ThreadView = {
   taskScope: { mode: "all", taskIds: [] },
   filters: [],
   sort: { key: "attention", direction: "asc" },
+  group: "none",
   maxColumns: null,
   layout: "columns",
   autoHideComposer: false,

@@ -2,6 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import type { FilterClause, FilterOp } from "@/lib/state/slices/ui/sidebar-view-types";
+import { ViewFilterEditor } from "@/components/view-model/view-filter-editor";
 import {
   DIMENSION_METAS,
   getDimensionEnumOptions,
@@ -9,22 +10,22 @@ import {
   getOpLabel,
 } from "./filter-dimension-registry";
 import { useFilterValueOptions } from "./use-filter-value-options";
-import { TypedFilterClauseEditor } from "./typed-filter-clause-editor";
 
 type Props = {
   clause: FilterClause;
   onChange: (next: FilterClause) => void;
   onRemove: () => void;
+  quickFilter?: { visible: boolean; onToggle: (visible: boolean) => void };
 };
 
-export function FilterClauseEditor({ clause, onChange, onRemove }: Props) {
+export function FilterClauseEditor({ clause, onChange, onRemove, quickFilter }: Props) {
   const { t } = useTranslation();
   const meta = getDimensionMeta(clause.dimension);
   const dynamicOptions = useFilterValueOptions(clause.dimension);
   const options = getDimensionEnumOptions(meta) ?? dynamicOptions;
 
   return (
-    <TypedFilterClauseEditor
+    <ViewFilterEditor
       clause={clause}
       dimensions={DIMENSION_METAS}
       getMeta={getDimensionMeta}
@@ -33,6 +34,7 @@ export function FilterClauseEditor({ clause, onChange, onRemove }: Props) {
       optionsForDimension={() => options}
       onChange={onChange}
       onRemove={onRemove}
+      quickFilter={quickFilter}
     />
   );
 }

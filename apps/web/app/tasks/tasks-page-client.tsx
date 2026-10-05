@@ -26,6 +26,7 @@ import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { useWorkspaceMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { useTaskListFacets } from "@/hooks/use-task-list-facets";
 import { useTaskListFacetSelection } from "@/hooks/use-task-list-facet-selection";
+import { useListQuickFilterTasks } from "./use-list-quick-filter-tasks";
 import { linkToTask } from "@/lib/links";
 import { unarchiveToastPayload } from "@/lib/tasks/unarchive-feedback";
 import { isTaskDeleteDirtyWorktreeError } from "@/lib/api/task-delete-errors";
@@ -564,6 +565,7 @@ export function TasksPageClient(props: TasksPageClientProps) {
     onCoreSortChange: handleSortChange,
     onCoreGroupChange: handleGroupChange,
   });
+  const visibleTasks = useListQuickFilterTasks(displayedTasks);
 
   useTasksPageClientEffects({ setMobileSearchOpen, setView });
 
@@ -587,7 +589,7 @@ export function TasksPageClient(props: TasksPageClientProps) {
       }}
       isMobile={isMobile}
       isMobileSearchOpen={isMobileSearchOpen}
-      tasks={displayedTasks}
+      tasks={visibleTasks}
       workflows={s.workflows}
       repositories={s.repositories}
       facetOptions={facetOptions}

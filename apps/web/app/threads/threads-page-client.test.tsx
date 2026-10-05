@@ -10,6 +10,7 @@ const displaySettingsMock = vi.hoisted(() => ({
   activeWorkflowId: null as string | null,
   workspaces: [] as Array<{ id: string }>,
   workflows: [] as Array<{ id: string; workspaceId: string }>,
+  repositories: [] as Array<{ id: string; name: string }>,
 }));
 
 vi.mock("@/lib/routing/client-router", () => ({
@@ -33,6 +34,8 @@ vi.mock("@/components/state-provider", () => ({
     selector({
       kanbanMulti: { snapshots: {}, isLoading: false },
       taskRemoval: createTaskRemovalState(),
+      repositorySets: { itemsByWorkspaceId: {} },
+      workspaces: { activeId: null },
     }),
 }));
 

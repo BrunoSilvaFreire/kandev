@@ -182,6 +182,9 @@ type UserSettings struct {
 	WorkflowIDsWithAutoHideEmptySteps []string                          `json:"workflow_ids_with_auto_hide_empty_steps"`
 	KanbanSort                        string                            `json:"kanban_sort"`
 	KanbanPriorityFilterTokens        []string                          `json:"kanban_priority_filter_tokens"`
+	HomeQuickFilters                  map[string][]string               `json:"home_quick_filters"`
+	TaskViewFilters                   map[string][]ViewFilterClause     `json:"task_view_filters"`
+	TaskViewGroups                    map[string]string                 `json:"task_view_groups"`
 	Revision                          int64                             `json:"revision"`
 	CreatedAt                         time.Time                         `json:"created_at"`
 	UpdatedAt                         time.Time                         `json:"updated_at"`

@@ -24,6 +24,7 @@ import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
 import { TaskStateActions } from "@/components/task/task-state-actions";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { isFromOffice } from "@/lib/types/http";
+import { surfaceCapabilities, type AppSurface } from "@/lib/surface/surface-capabilities";
 import type { Repository, RepositoryScript, Task } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import type { Layout } from "react-resizable-panels";
@@ -41,6 +42,8 @@ type KanbanTaskShellProps = {
   initialLayout?: string | null;
   urlSimple?: string;
   urlMode?: string;
+  surface?: AppSurface;
+  panel?: string;
 };
 
 export function KanbanTaskShell({
@@ -54,8 +57,11 @@ export function KanbanTaskShell({
   initialLayout,
   urlSimple,
   urlMode,
+  surface = "task",
+  panel,
 }: KanbanTaskShellProps) {
   const { t } = useTranslation();
+  const capabilities = surfaceCapabilities(surface);
   // Kanban shell defaults to advanced. ?simple flips to simple.
   const mode = resolveTaskBodyMode({ simple: urlSimple, mode: urlMode }, "advanced");
   // "Open in office view" only makes sense when (a) the office feature is
@@ -75,6 +81,8 @@ export function KanbanTaskShell({
       defaultLayouts={defaultLayouts}
       initialLayout={initialLayout}
       officeTaskHref={showOfficeLink ? `/office/tasks/${taskId}` : null}
+      surface={surface}
+      panel={panel}
     />
   );
 
@@ -82,7 +90,7 @@ export function KanbanTaskShell({
     <div className="flex h-full min-h-0 w-full flex-col overflow-y-auto bg-background p-6">
       {showOfficeLink && <CrossLinkRow taskId={taskId} target="office" />}
       <div className="mt-4 max-w-3xl">
-        <SimpleTaskHeaderRow task={task} />
+        <SimpleTaskHeaderRow task={task} showTaskStateActions={capabilities.taskActions} />
         <p className="mt-4 text-sm text-muted-foreground">
           {showOfficeLink
             ? t("tasks:simpleViewForKanbanTasksShows")
@@ -127,19 +135,27 @@ function simpleTaskHeaderData(task: Task | null) {
   };
 }
 
-function SimpleTaskHeaderRow({ task }: { task: Task | null }) {
+function SimpleTaskHeaderRow({
+  task,
+  showTaskStateActions,
+}: {
+  task: Task | null;
+  showTaskStateActions: boolean;
+}) {
   const data = simpleTaskHeaderData(task);
   const pendingInput = useTaskPendingInput(data.primarySessionId, data.pendingFallback);
   return (
     <div className="flex items-center gap-2">
-      <TaskStateActions
-        state={data.state ?? undefined}
-        className="shrink-0"
-        foregroundActivity={data.foregroundActivity}
-        hasPendingClarification={pendingInput.clarification}
-        hasPendingPermission={pendingInput.permission}
-        interrupted={data.interrupted}
-      />
+      {showTaskStateActions && (
+        <TaskStateActions
+          state={data.state ?? undefined}
+          className="shrink-0"
+          foregroundActivity={data.foregroundActivity}
+          hasPendingClarification={pendingInput.clarification}
+          hasPendingPermission={pendingInput.permission}
+          interrupted={data.interrupted}
+        />
+      )}
       <TaskHeader
         identifier={data.identifier}
         title={data.title}

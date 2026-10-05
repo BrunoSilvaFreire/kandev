@@ -35,6 +35,9 @@ func applyThreadViews(settings *models.UserSettings, req *UpdateUserSettingsRequ
 		if views[i].Layout == "" {
 			views[i].Layout = models.ThreadLayoutColumns
 		}
+		if views[i].Group == "" {
+			views[i].Group = models.ThreadGroupNone
+		}
 	}
 	settings.ThreadViews = views
 	if req.ThreadActiveViewID == nil && !threadViewIDExists(views, settings.ThreadActiveViewID) {
@@ -70,6 +73,9 @@ func applyThreadViewState(settings *models.UserSettings, req *UpdateUserSettings
 	if draft.Layout == "" {
 		draft.Layout = models.ThreadLayoutColumns
 	}
+	if draft.Group == "" {
+		draft.Group = models.ThreadGroupNone
+	}
 	settings.ThreadViewDraft = &draft
 	return nil
 }
@@ -94,6 +100,9 @@ func validateThreadViews(views []models.ThreadView) error {
 		if err := validateThreadLayout(view.Layout); err != nil {
 			return fmt.Errorf("thread_views.%s: %w", view.ID, err)
 		}
+		if err := validateThreadGroup(view.Group); err != nil {
+			return fmt.Errorf("thread_views.%s: %w", view.ID, err)
+		}
 		if err := validateThreadViewBody(view.TaskScope, view.Filters, view.MaxColumns, false); err != nil {
 			return fmt.Errorf("thread_views.%s: %w", view.ID, err)
 		}
@@ -108,6 +117,9 @@ func validateThreadViewDraft(draft models.ThreadViewDraft, views []models.Thread
 	if err := validateThreadLayout(draft.Layout); err != nil {
 		return err
 	}
+	if err := validateThreadGroup(draft.Group); err != nil {
+		return err
+	}
 	return validateThreadViewBody(draft.TaskScope, draft.Filters, draft.MaxColumns, true)
 }
 
@@ -118,6 +130,28 @@ func validateThreadLayout(layout string) error {
 	default:
 		return fmt.Errorf("unsupported thread layout %q", layout)
 	}
+}
+
+// threadGroups is the closed set of grouping keys a Threads view may persist.
+var threadGroups = map[string]struct{}{
+	models.ThreadGroupNone: {},
+	"repository":           {},
+	"repositoryGroup":      {},
+	"workflow":             {},
+	"state":                {},
+	"priority":             {},
+}
+
+func validateThreadGroup(group string) error {
+	// Empty is the legacy payload shape and is normalized to "none" after
+	// validation, matching the layout default.
+	if group == "" {
+		return nil
+	}
+	if _, ok := threadGroups[group]; ok {
+		return nil
+	}
+	return fmt.Errorf("unsupported thread group %q", group)
 }
 
 func validateThreadViewBody(

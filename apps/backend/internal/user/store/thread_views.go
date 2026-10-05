@@ -20,6 +20,7 @@ func DefaultThreadViews() []models.ThreadView {
 		TaskScope:  models.ThreadTaskScope{Mode: models.ThreadTaskScopeAll, TaskIDs: []string{}},
 		Filters:    []models.ThreadViewClause{},
 		Sort:       models.ThreadViewSort{Key: "attention", Direction: "asc"},
+		Group:      models.ThreadGroupNone,
 		MaxColumns: &maxColumns,
 		Layout:     models.ThreadLayoutColumns,
 	}}

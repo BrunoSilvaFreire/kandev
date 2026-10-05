@@ -25,6 +25,8 @@ vi.mock("@/hooks/use-kanban-display-settings", () => ({
   useKanbanDisplaySettings: () => ({
     onToggleStepVisibility: stableCallbacks.onToggleStepVisibility,
     onToggleAutoHideEmpty: stableCallbacks.onToggleAutoHideEmpty,
+    repositories: [],
+    group: "none",
   }),
 }));
 

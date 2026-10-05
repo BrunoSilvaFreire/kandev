@@ -155,6 +155,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		WorkflowIDsWithAutoHideEmptySteps: req.WorkflowIDsWithAutoHideEmptySteps,
 		KanbanSort:                        req.KanbanSort,
 		KanbanPriorityFilterTokens:        req.KanbanPriorityFilterTokens,
+		HomeQuickFilters:                  req.HomeQuickFilters,
 	})
 	if err != nil {
 		return dto.UserSettingsResponse{}, err

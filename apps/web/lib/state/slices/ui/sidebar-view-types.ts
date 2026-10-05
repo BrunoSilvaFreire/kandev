@@ -1,3 +1,4 @@
+import type { ViewFilterClause, ViewFilterOp, ViewFilterValue } from "@/lib/view-model/types";
 import type { SidebarTaskRowPresentation } from "./sidebar-task-row-presentation";
 
 export type FilterDimension =
@@ -7,22 +8,18 @@ export type FilterDimension =
   | "workflowStep"
   | "executorType"
   | "repository"
+  | "repositoryGroup"
   | "hasDiff"
   | "hasPR"
   | "isPRReview"
   | "isIssueWatch"
   | "titleMatch";
 
-export type FilterOp = "is" | "is_not" | "in" | "not_in" | "matches" | "not_matches";
+export type FilterOp = ViewFilterOp;
 
-export type FilterValue = string | string[] | boolean;
+export type FilterValue = ViewFilterValue;
 
-export type FilterClause = {
-  id: string;
-  dimension: FilterDimension;
-  op: FilterOp;
-  value: FilterValue;
-};
+export type FilterClause = ViewFilterClause<FilterDimension>;
 
 export type SortKey = "state" | "updatedAt" | "lastActivityAt" | "createdAt" | "title" | "custom";
 export type SortDirection = "asc" | "desc";
@@ -33,10 +30,12 @@ export type { SidebarTaskRowPresentation } from "./sidebar-task-row-presentation
 export type GroupKey =
   | "none"
   | "repository"
+  | "repositoryGroup"
   | "workflow"
   | "workflowStep"
   | "executorType"
-  | "state";
+  | "state"
+  | "priority";
 
 export type SidebarView = {
   id: string;

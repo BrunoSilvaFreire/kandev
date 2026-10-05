@@ -1,10 +1,18 @@
 import type { KanbanState, WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import type { ForegroundActivity, TaskPriority, TaskState } from "@/lib/types/http";
 import { taskPRInfoFromSummary, type TaskPRInfo } from "@/lib/task-pr-info";
+import {
+  applyViewFilters,
+  applyViewGroup,
+  repositoryGroupKeyAndLabel,
+  threadCandidateDimensionValue,
+  type RepositoryGroup,
+  type ViewGroup,
+} from "@/lib/view-model";
+import { t } from "@/lib/i18n";
 import { selectActiveThreads, type ActiveThread } from "./active-threads";
 import type {
-  ThreadFilterClause,
-  ThreadFilterDimension,
+  ThreadGroupKey,
   ThreadSortKey,
   ThreadView,
   ThreadViewDraft,
@@ -49,6 +57,10 @@ export type ThreadViewQueryOptions = {
   draft?: ThreadViewDraft | null;
   /** Transient removal intent applies before every admission path, including deep links. */
   excludedTaskIds?: ReadonlySet<string>;
+  /** Ordered Repository Groups backing the `repositoryGroup` filter/group. */
+  repositoryGroups?: readonly RepositoryGroup[];
+  /** Display names for repository ids used in group headings. */
+  repositoryNames?: ReadonlyMap<string, string>;
 };
 
 export type ThreadViewQueryResult = {
@@ -58,6 +70,8 @@ export type ThreadViewQueryResult = {
   /** Complete current set used to retain admitted columns during live updates. */
   stableCandidates: ThreadCandidate[];
   admittedCandidates: ThreadCandidate[];
+  /** Admitted candidates grouped by the view's active group key. */
+  groupedCandidates: ViewGroup<ThreadCandidate>[];
   matchingCount: number;
   /** Number of temporary deep-link candidates outside the saved query. */
   temporaryAdmissionCount: number;
@@ -186,103 +200,49 @@ export function selectThreadCandidates(
     .filter((candidate): candidate is ThreadCandidate => candidate !== null);
 }
 
-// eslint-disable-next-line complexity -- The dimension registry is intentionally exhaustive and keeps filter evaluation type-safe.
-function candidateValue(
-  candidate: ThreadCandidate,
-  dimension: ThreadFilterDimension,
-): string | string[] | boolean {
-  switch (dimension) {
-    case "threadStatus":
-      return candidate.threadStatus;
-    case "pendingAction":
-      return candidate.pendingAction ?? candidate.taskPendingAction ?? "none";
-    case "taskState":
-      return candidate.taskState ?? "unknown";
-    case "workflow":
-      return candidate.workflowId;
-    case "workflowStep":
-      return candidate.workflowStepId;
+type ThreadGroupContext = {
+  repositoryGroups?: readonly RepositoryGroup[];
+  repositoryNames?: ReadonlyMap<string, string>;
+};
+
+function threadGroupExtractor(
+  groupKey: ThreadGroupKey,
+  context: ThreadGroupContext,
+): (candidate: ThreadCandidate) => { key: string; label: string } {
+  const ungrouped = () => t("sidebar:groupUnassigned");
+  switch (groupKey) {
     case "repository":
-      return candidate.repositoryIds;
-    case "primaryAgent":
-      return candidate.primaryAgentProfileId ?? "unknown";
-    case "executorType":
-      return candidate.executorType ?? "unknown";
+      return (candidate) => {
+        const first = candidate.repositoryIds[0];
+        if (!first) return { key: "__unassigned__", label: ungrouped() };
+        return { key: first, label: context.repositoryNames?.get(first) ?? first };
+      };
+    case "repositoryGroup":
+      return (candidate) =>
+        repositoryGroupKeyAndLabel(
+          candidate.repositoryIds,
+          context.repositoryGroups ?? [],
+          ungrouped(),
+        );
+    case "workflow":
+      return (candidate) => ({
+        key: candidate.workflowId || "__unassigned__",
+        label: candidate.workflowName || candidate.workflowId || ungrouped(),
+      });
+    case "state":
+      return (candidate) => ({
+        key: candidate.taskState ?? "__unassigned__",
+        label: candidate.taskState ?? ungrouped(),
+      });
     case "priority":
-      return candidate.priority ?? "unknown";
-    case "blocked":
-      return candidate.blocked;
-    case "hasQueuedPrompts":
-      return candidate.queuedPromptCount > 0;
-    case "hasActiveSubagents":
-      return candidate.activeSubagentCount > 0;
-    case "hasDiff":
-      return candidate.hasDiff;
-    case "hasPR":
-      return candidate.hasPR;
-    case "prNeedsAttention":
-      return candidate.prNeedsAttention;
-    case "taskType":
-      return candidate.taskType;
-    case "titleMatch":
-      return candidate.title;
-    case "hasActiveError":
-      return candidate.hasActiveError;
-    case "taskLabel":
-      return candidate.labels;
-    case "taskOrigin":
-      return candidate.taskOrigin;
-    case "hasMultipleSessions":
-      return candidate.hasMultipleSessions;
+      return (candidate) => ({
+        key: candidate.priority ?? "__unassigned__",
+        label: candidate.priority ?? ungrouped(),
+      });
+    case "none":
+    default:
+      return () => ({ key: "__all__", label: "" });
   }
-}
-
-type FilterScalar = string | boolean;
-
-function filterValues(value: ThreadFilterClause["value"]): FilterScalar[] {
-  return Array.isArray(value) ? value : [value];
-}
-
-function scalarEquals(actual: string | boolean, expected: FilterScalar): boolean {
-  return actual === expected;
-}
-
-function collectionContains(actual: string | string[] | boolean, expected: FilterScalar): boolean {
-  return Array.isArray(actual)
-    ? actual.some((item) => scalarEquals(item, expected))
-    : scalarEquals(actual, expected);
-}
-
-function matchesText(actual: string | string[] | boolean, expected: FilterScalar): boolean {
-  if (typeof expected !== "string") return false;
-  const needle = expected.toLocaleLowerCase();
-  const values = Array.isArray(actual) ? actual : [actual];
-  return values.some(
-    (value) => typeof value === "string" && value.toLocaleLowerCase().includes(needle),
-  );
-}
-
-function matchesClause(candidate: ThreadCandidate, clause: ThreadFilterClause): boolean {
-  const actual = candidateValue(candidate, clause.dimension);
-  const values = filterValues(clause.value);
-  switch (clause.op) {
-    case "is":
-      return values.some((value) => collectionContains(actual, value));
-    case "is_not":
-      return values.every((value) => !collectionContains(actual, value));
-    case "in":
-      return values.some((value) => collectionContains(actual, value));
-    case "not_in":
-      return values.every((value) => !collectionContains(actual, value));
-    case "matches":
-      return values.some((value) => matchesText(actual, value));
-    case "not_matches":
-      return values.every((value) => !matchesText(actual, value));
-  }
-}
-
-function candidateMatches(candidate: ThreadCandidate, filters: ThreadFilterClause[]): boolean {
-  return filters.every((filter) => matchesClause(candidate, filter));
 }
 
 const PRIORITY_RANK: Record<string, number> = {
@@ -419,6 +379,7 @@ function cloneViewWithDraft(
       value: Array.isArray(filter.value) ? [...filter.value] : filter.value,
     })),
     sort: { ...draft.sort },
+    group: draft.group,
     maxColumns: draft.maxColumns,
     layout: draft.layout,
     autoHideComposer: draft.autoHideComposer,
@@ -468,9 +429,11 @@ export function queryThreadView(
     (candidate) => !options.excludedTaskIds?.has(candidate.taskId),
   );
   const scoped = applyTaskScope(candidates, effectiveView.taskScope);
-  const matchingCandidates = scoped
-    .filter((candidate) => candidateMatches(candidate, effectiveView.filters))
-    .sort((left, right) => compareCandidates(left, right, effectiveView));
+  const matchingCandidates = applyViewFilters(
+    scoped,
+    effectiveView.filters,
+    (candidate, dimension) => threadCandidateDimensionValue(candidate, dimension, options),
+  ).sort((left, right) => compareCandidates(left, right, effectiveView));
   const deepLinkCandidate = options.requestedTaskId
     ? (candidates.find((candidate) => candidate.taskId === options.requestedTaskId) ?? null)
     : null;
@@ -489,11 +452,17 @@ export function queryThreadView(
   const hiddenCount = matchingCandidates.filter(
     (candidate) => !admittedIds.has(candidate.taskId),
   ).length;
+  const { groups } = applyViewGroup(
+    admittedCandidates,
+    effectiveView.group,
+    threadGroupExtractor(effectiveView.group, options),
+  );
   return {
     candidates,
     matchingCandidates,
     stableCandidates,
     admittedCandidates,
+    groupedCandidates: groups,
     matchingCount: matchingCandidates.length,
     temporaryAdmissionCount: isTemporaryAdmission ? 1 : 0,
     hiddenCount,

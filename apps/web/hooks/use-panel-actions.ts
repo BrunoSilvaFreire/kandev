@@ -6,6 +6,90 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useLayoutStore } from "@/lib/state/layout-store";
 import { useAppStore } from "@/components/state-provider";
 import { useFileEditors } from "@/hooks/use-file-editors";
+import { useRouter } from "@/lib/routing/client-router";
+import { linkToTask } from "@/lib/links";
+
+/** Mobile/tablet plan fallback: open the session's plan document. */
+function openPlanOnMobile(args: {
+  sessionId: string;
+  taskId: string;
+  setActiveDocument: (sessionId: string, doc: { type: "plan"; taskId: string }) => void;
+  openDocument: (sessionId: string) => void;
+  setPlanMode: (sessionId: string, enabled: boolean) => void;
+}): void {
+  args.setActiveDocument(args.sessionId, { type: "plan", taskId: args.taskId });
+  args.openDocument(args.sessionId);
+  args.setPlanMode(args.sessionId, true);
+}
+
+/** Desktop plan path when the surface has no dockview (the Quick Chat panel). */
+function navigateToPlanSurface(args: {
+  taskId: string;
+  isQuickChatTask: boolean;
+  push: (href: string) => void;
+}): void {
+  args.push(
+    args.isQuickChatTask
+      ? `/quick-chats/${args.taskId}?panel=plan`
+      : `${linkToTask(args.taskId)}?panel=plan`,
+  );
+}
+
+function buildAddBrowserAction(args: {
+  usesDesktopWorkbench: boolean;
+  dockAddBrowser: (url?: string) => void;
+  activeSessionId: string | null;
+}): (url?: string) => void {
+  return (url?: string) => {
+    if (args.usesDesktopWorkbench) {
+      args.dockAddBrowser(url);
+    } else if (args.activeSessionId) {
+      // Mobile/tablet: use layout store to open preview
+      useLayoutStore.getState().openPreview(args.activeSessionId);
+    }
+  };
+}
+
+type AddPlanArgs = {
+  usesDesktopWorkbench: boolean;
+  hasDockview: boolean;
+  dockAddPlan: () => void;
+  activeSessionId: string | null;
+  activeTaskId: string | null;
+  setActiveDocument: (sessionId: string, doc: { type: "plan"; taskId: string }) => void;
+  openDocument: (sessionId: string) => void;
+  setPlanMode: (sessionId: string, enabled: boolean) => void;
+  isQuickChatTask: boolean;
+  push: (href: string) => void;
+};
+
+function buildAddPlanAction(args: AddPlanArgs): () => void {
+  return () => {
+    if (args.usesDesktopWorkbench && args.hasDockview) {
+      args.dockAddPlan();
+      return;
+    }
+    if (!args.usesDesktopWorkbench && args.activeSessionId && args.activeTaskId) {
+      openPlanOnMobile({
+        sessionId: args.activeSessionId,
+        taskId: args.activeTaskId,
+        setActiveDocument: args.setActiveDocument,
+        openDocument: args.openDocument,
+        setPlanMode: args.setPlanMode,
+      });
+      return;
+    }
+    // Desktop without a dockview (the Quick Chat panel): route to the surface
+    // that owns one so the plan CTA is never inert.
+    if (args.usesDesktopWorkbench && args.activeTaskId) {
+      navigateToPlanSurface({
+        taskId: args.activeTaskId,
+        isQuickChatTask: args.isQuickChatTask,
+        push: args.push,
+      });
+    }
+  };
+}
 
 /**
  * Unified hook returning add-only panel action functions.
@@ -33,37 +117,43 @@ export function usePanelActions() {
   const setActiveDocument = useAppStore((s) => s.setActiveDocument);
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
   const setPlanMode = useAppStore((s) => s.setPlanMode);
+  const dockviewApi = useDockviewStore((s) => s.api);
+  const isQuickChatTask = useAppStore((s) =>
+    activeTaskId ? s.quickChat.sessions.some((session) => session.taskId === activeTaskId) : false,
+  );
+  const router = useRouter();
 
   const addBrowser = useCallback(
-    (url?: string) => {
-      if (usesDesktopWorkbench) {
-        dockAddBrowser(url);
-      } else if (activeSessionId) {
-        // Mobile/tablet: use layout store to open preview
-        useLayoutStore.getState().openPreview(activeSessionId);
-      }
-    },
+    buildAddBrowserAction({ usesDesktopWorkbench, dockAddBrowser, activeSessionId }),
     [usesDesktopWorkbench, dockAddBrowser, activeSessionId],
   );
 
-  const addPlan = useCallback(() => {
-    if (usesDesktopWorkbench) {
-      dockAddPlan();
-    } else if (activeSessionId && activeTaskId) {
-      // Mobile/tablet: open document panel with plan
-      setActiveDocument(activeSessionId, { type: "plan", taskId: activeTaskId });
-      openDocument(activeSessionId);
-      setPlanMode(activeSessionId, true);
-    }
-  }, [
-    usesDesktopWorkbench,
-    dockAddPlan,
-    activeSessionId,
-    activeTaskId,
-    setActiveDocument,
-    openDocument,
-    setPlanMode,
-  ]);
+  const addPlan = useCallback(
+    buildAddPlanAction({
+      usesDesktopWorkbench,
+      hasDockview: Boolean(dockviewApi),
+      dockAddPlan,
+      activeSessionId,
+      activeTaskId,
+      setActiveDocument,
+      openDocument,
+      setPlanMode,
+      isQuickChatTask,
+      push: (href) => router.push(href),
+    }),
+    [
+      usesDesktopWorkbench,
+      dockviewApi,
+      dockAddPlan,
+      activeSessionId,
+      activeTaskId,
+      setActiveDocument,
+      openDocument,
+      setPlanMode,
+      isQuickChatTask,
+      router,
+    ],
+  );
 
   const addChat = useCallback(() => {
     if (usesDesktopWorkbench) {

@@ -5,6 +5,11 @@ import { useAppStore } from "@/components/state-provider";
 import type { Task } from "@/components/kanban-card";
 import { mapSelectedRepositoryIds } from "@/lib/kanban/filters";
 import { projectWorkflowTasks } from "@/lib/kanban/task-projections";
+import { resolveKanbanFilterClauses } from "@/lib/view-model/kanban";
+import type { KanbanFilterDimension } from "@/lib/view-model/kanban";
+import type { ViewFilterClause } from "@/lib/view-model/types";
+import type { RepositoryGroup } from "@/lib/view-model/repository-group";
+import { useRepositoryGroups } from "@/hooks/use-repository-groups";
 import {
   selectMobileNavigatorWorkflows,
   selectWorkflowSwimlanes,
@@ -22,6 +27,8 @@ type TaskProjectionCacheEntry = {
   vcsSearchTextByTaskId: Record<string, string> | undefined;
   matchesPluginTaskFilters: ((taskId: string) => boolean) | undefined;
   priorityFilterTokens: TaskPriority[];
+  clauses: readonly ViewFilterClause<KanbanFilterDimension>[] | undefined;
+  repositoryGroups: readonly RepositoryGroup[];
   visibleTasks: Task[];
 };
 
@@ -95,6 +102,8 @@ type TaskProjectionCacheOptions = {
   vcsSearchTextByTaskId: Record<string, string> | undefined;
   matchesPluginTaskFilters?: (taskId: string) => boolean;
   priorityFilterTokens: TaskPriority[];
+  clauses?: readonly ViewFilterClause<KanbanFilterDimension>[];
+  repositoryGroups: readonly RepositoryGroup[];
 };
 
 function useTaskProjectionCache({
@@ -105,6 +114,8 @@ function useTaskProjectionCache({
   vcsSearchTextByTaskId,
   matchesPluginTaskFilters,
   priorityFilterTokens,
+  clauses,
+  repositoryGroups,
 }: TaskProjectionCacheOptions): (workflowId: string) => Task[] {
   const projectionCacheRef = useRef(new Map<string, TaskProjectionCacheEntry>());
   useEffect(() => {
@@ -124,7 +135,9 @@ function useTaskProjectionCache({
         cached.searchQuery === searchQuery &&
         cached.vcsSearchTextByTaskId === vcsSearchTextByTaskId &&
         cached.matchesPluginTaskFilters === matchesPluginTaskFilters &&
-        cached.priorityFilterTokens === priorityFilterTokens
+        cached.priorityFilterTokens === priorityFilterTokens &&
+        cached.clauses === clauses &&
+        cached.repositoryGroups === repositoryGroups
       ) {
         return cached.visibleTasks;
       }
@@ -134,6 +147,8 @@ function useTaskProjectionCache({
         matchesPluginTaskFilters,
         hiddenStepIds: hiddenStepIds?.length ? new Set(hiddenStepIds) : undefined,
         priorityFilterTokens,
+        clauses,
+        repositoryGroups,
       }).visibleTasks;
       projectionCacheRef.current.set(workflowId, {
         snapshot,
@@ -143,6 +158,8 @@ function useTaskProjectionCache({
         vcsSearchTextByTaskId,
         matchesPluginTaskFilters,
         priorityFilterTokens,
+        clauses,
+        repositoryGroups,
         visibleTasks,
       });
       return visibleTasks;
@@ -151,6 +168,8 @@ function useTaskProjectionCache({
       hiddenWorkflowStepIds,
       matchesPluginTaskFilters,
       priorityFilterTokens,
+      clauses,
+      repositoryGroups,
       repoFilter,
       searchQuery,
       vcsSearchTextByTaskId,
@@ -177,6 +196,8 @@ export function useSwimlaneRenderData(
   const priorityFilterTokens = useAppStore(
     (state) => state.userSettings.kanbanPriorityFilterTokens,
   );
+  const taskViewFilters = useAppStore((state) => state.userSettings.taskViewFilters);
+  const repositoryGroups = useRepositoryGroups();
 
   const repositories = useMemo(
     () => Object.values(repositoriesByWorkspace).flat() as Repository[],
@@ -185,6 +206,15 @@ export function useSwimlaneRenderData(
   const repoFilter = useMemo(
     () => mapSelectedRepositoryIds(repositories, selectedRepositoryIds),
     [repositories, selectedRepositoryIds],
+  );
+  const clauses = useMemo(
+    () =>
+      resolveKanbanFilterClauses(
+        taskViewFilters?.kanban,
+        selectedRepositoryIds,
+        priorityFilterTokens,
+      ),
+    [taskViewFilters?.kanban, selectedRepositoryIds, priorityFilterTokens],
   );
   const { allOrderedWorkflows, orderedWorkflows } = useOrderedWorkflowLists(
     workflowFilter,
@@ -200,6 +230,8 @@ export function useSwimlaneRenderData(
     vcsSearchTextByTaskId,
     matchesPluginTaskFilters,
     priorityFilterTokens,
+    clauses,
+    repositoryGroups,
   });
 
   const hasLiveHiddenSteps = useCallback(
@@ -265,6 +297,15 @@ export function useWorkflowSwimlaneData(
   const priorityFilterTokens = useAppStore(
     (state) => state.userSettings.kanbanPriorityFilterTokens,
   );
+  const taskViewFilters = useAppStore((state) => state.userSettings.taskViewFilters);
+  const repositoryGroups = useRepositoryGroups();
+  const clauses = useMemo(
+    () =>
+      taskViewFilters?.kanban && taskViewFilters.kanban.length > 0
+        ? (taskViewFilters.kanban as ViewFilterClause<KanbanFilterDimension>[])
+        : undefined,
+    [taskViewFilters?.kanban],
+  );
   const derivedHiddenSet = useMemo(() => {
     if (!snapshot || hiddenStepIds.length === 0) return new Set<string>();
     const liveStepIds = new Set(snapshot.steps.map((step) => step.id));
@@ -279,11 +320,15 @@ export function useWorkflowSwimlaneData(
       matchesPluginTaskFilters,
       hiddenStepIds: hiddenSet,
       priorityFilterTokens,
+      clauses,
+      repositoryGroups,
     });
   }, [
     hiddenSet,
     matchesPluginTaskFilters,
     priorityFilterTokens,
+    clauses,
+    repositoryGroups,
     repoFilter,
     searchQuery,
     vcsSearchTextByTaskId,

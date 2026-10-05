@@ -14,7 +14,9 @@ import type {
   ThreadView,
   ThreadViewDraft,
 } from "@/lib/state/slices/ui/thread-view-types";
+import { useHomeQuickFilters } from "@/hooks/use-home-quick-filters";
 import { TypedSortPicker } from "@/components/task/sidebar-filter/sort-picker-primitive";
+import { ThreadGroupSection } from "./threads-group-section";
 import { ThreadsViewFilterRow } from "./threads-view-filter-row";
 import { EditorActions, SectionLabel } from "./threads-view-editor-actions";
 import {
@@ -30,7 +32,7 @@ type ThreadViewDraftUpdate = (
   patch: Partial<
     Pick<
       ThreadView,
-      "taskScope" | "filters" | "sort" | "maxColumns" | "layout" | "autoHideComposer"
+      "taskScope" | "filters" | "sort" | "group" | "maxColumns" | "layout" | "autoHideComposer"
     >
   >,
 ) => void;
@@ -235,6 +237,11 @@ function EditorSections({
         mobile={mobile}
         onChange={(sort) => onUpdate({ sort })}
         onReapplySort={onReapplySort}
+      />
+      <ThreadGroupSection
+        group={current.group}
+        mobile={mobile}
+        onChange={(group) => onUpdate({ group })}
       />
       <ThreadsViewDisplay
         current={current}
@@ -456,6 +463,7 @@ function ThreadFilterSection({
   onRemove: (id: string) => void;
 }) {
   const { t } = useTranslation();
+  const { dimensions, toggleDimension } = useHomeQuickFilters("threads");
   const atLimit = filters.length >= MAX_THREAD_VIEW_FILTERS;
   return (
     <div className="space-y-1 border-b p-2">
@@ -491,6 +499,10 @@ function ThreadFilterSection({
           candidates={candidates}
           repositoryNames={repositoryNames}
           mobile={mobile}
+          quickFilter={{
+            visible: dimensions.includes(filter.dimension),
+            onToggle: (visible) => toggleDimension(filter.dimension, visible),
+          }}
           onChange={onChange}
           onRemove={() => onRemove(filter.id)}
         />

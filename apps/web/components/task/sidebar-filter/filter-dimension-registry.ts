@@ -1,11 +1,14 @@
 import { t } from "@/lib/i18n";
+import { getViewDimensionMeta } from "@/lib/view-model/dimensions";
 import type { FilterDimension, FilterOp } from "@/lib/state/slices/ui/sidebar-view-types";
 
 export type DimensionValueKind = "boolean" | "enum" | "text";
 
 // `labelKey` / `placeholderKey` hold catalog keys rather than copy: this table
 // is module scope, so a resolved `t()` here would freeze at the boot locale.
-// The `value` fields are persisted filter values and stay in English.
+// The `value` fields are persisted filter values and stay in English. The
+// substantive metadata (kind, operators, defaults) comes from the shared
+// `lib/view-model/dimensions` registry so every Home view agrees.
 export type DimensionMeta = {
   dimension: FilterDimension;
   labelKey: string;
@@ -17,104 +20,37 @@ export type DimensionMeta = {
   defaultValue: string | string[] | boolean;
 };
 
-const STATE_OPTIONS = [
-  { value: "review", labelKey: "task:filterStateReview" },
-  { value: "in_progress", labelKey: "task:filterStateInProgress" },
-  { value: "backlog", labelKey: "task:filterStateBacklog" },
+/** The dimensions the sidebar offers, in display order, with their display copy. */
+const SIDEBAR_DIMENSIONS: ReadonlyArray<{ dimension: FilterDimension; labelKey: string }> = [
+  { dimension: "archived", labelKey: "task:filterDimensionArchived" },
+  { dimension: "isPRReview", labelKey: "task:filterDimensionPrReview" },
+  { dimension: "isIssueWatch", labelKey: "task:filterDimensionIssueWatch" },
+  { dimension: "hasDiff", labelKey: "task:filterDimensionHasDiff" },
+  { dimension: "hasPR", labelKey: "task:filterDimensionHasPr" },
+  { dimension: "state", labelKey: "task:filterDimensionState" },
+  { dimension: "workflow", labelKey: "task:filterDimensionWorkflow" },
+  { dimension: "workflowStep", labelKey: "task:filterDimensionWorkflowStep" },
+  { dimension: "executorType", labelKey: "task:filterDimensionExecutorType" },
+  { dimension: "repository", labelKey: "task:filterDimensionRepository" },
+  { dimension: "repositoryGroup", labelKey: "task:filterDimensionRepositoryGroup" },
+  { dimension: "titleMatch", labelKey: "task:filterDimensionTitle" },
 ];
 
-export const DIMENSION_METAS: DimensionMeta[] = [
-  {
-    dimension: "archived",
-    labelKey: "task:filterDimensionArchived",
-    valueKind: "boolean",
-    ops: ["is", "is_not"],
-    defaultOp: "is",
-    defaultValue: true,
+export const DIMENSION_METAS: DimensionMeta[] = SIDEBAR_DIMENSIONS.map(
+  ({ dimension, labelKey }) => {
+    const shared = getViewDimensionMeta(dimension);
+    return {
+      dimension,
+      labelKey,
+      valueKind: shared.valueKind,
+      ops: [...shared.ops],
+      enumOptions: shared.fixedOptions ? [...shared.fixedOptions] : undefined,
+      placeholderKey: shared.placeholderKey,
+      defaultOp: shared.defaultOp,
+      defaultValue: shared.defaultValue,
+    };
   },
-  {
-    dimension: "isPRReview",
-    labelKey: "task:filterDimensionPrReview",
-    valueKind: "boolean",
-    ops: ["is", "is_not"],
-    defaultOp: "is",
-    defaultValue: true,
-  },
-  {
-    dimension: "isIssueWatch",
-    labelKey: "task:filterDimensionIssueWatch",
-    valueKind: "boolean",
-    ops: ["is", "is_not"],
-    defaultOp: "is",
-    defaultValue: true,
-  },
-  {
-    dimension: "hasDiff",
-    labelKey: "task:filterDimensionHasDiff",
-    valueKind: "boolean",
-    ops: ["is", "is_not"],
-    defaultOp: "is",
-    defaultValue: true,
-  },
-  {
-    dimension: "hasPR",
-    labelKey: "task:filterDimensionHasPr",
-    valueKind: "boolean",
-    ops: ["is", "is_not"],
-    defaultOp: "is",
-    defaultValue: true,
-  },
-  {
-    dimension: "state",
-    labelKey: "task:filterDimensionState",
-    valueKind: "enum",
-    ops: ["in", "not_in", "is", "is_not"],
-    enumOptions: STATE_OPTIONS,
-    defaultOp: "in",
-    defaultValue: ["review", "in_progress"],
-  },
-  {
-    dimension: "workflow",
-    labelKey: "task:filterDimensionWorkflow",
-    valueKind: "enum",
-    ops: ["is", "is_not", "in", "not_in"],
-    defaultOp: "is",
-    defaultValue: "",
-  },
-  {
-    dimension: "workflowStep",
-    labelKey: "task:filterDimensionWorkflowStep",
-    valueKind: "enum",
-    ops: ["is", "is_not", "in", "not_in"],
-    defaultOp: "is",
-    defaultValue: "",
-  },
-  {
-    dimension: "executorType",
-    labelKey: "task:filterDimensionExecutorType",
-    valueKind: "enum",
-    ops: ["is", "is_not", "in", "not_in"],
-    defaultOp: "is",
-    defaultValue: "",
-  },
-  {
-    dimension: "repository",
-    labelKey: "task:filterDimensionRepository",
-    valueKind: "enum",
-    ops: ["is", "is_not", "in", "not_in"],
-    defaultOp: "is",
-    defaultValue: "",
-  },
-  {
-    dimension: "titleMatch",
-    labelKey: "task:filterDimensionTitle",
-    valueKind: "text",
-    ops: ["matches", "not_matches"],
-    placeholderKey: "task:filterTitlePlaceholder",
-    defaultOp: "matches",
-    defaultValue: "",
-  },
-];
+);
 
 export function getDimensionMeta(dim: FilterDimension): DimensionMeta {
   const meta = DIMENSION_METAS.find((m) => m.dimension === dim);

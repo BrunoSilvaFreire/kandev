@@ -110,6 +110,9 @@ export function createDefaultUserSettings(): UserSettingsState {
     workflowIdsWithAutoHideEmptySteps: [],
     kanbanSort: DEFAULT_KANBAN_SORT,
     kanbanPriorityFilterTokens: [],
+    homeQuickFilters: {},
+    taskViewFilters: {},
+    taskViewGroups: {},
     loaded: false,
   };
 }
@@ -308,6 +311,15 @@ function buildAppearanceFields(s: UserSettingsData, current: UserSettingsState) 
   };
 }
 
+/** Maps the shared Home-view filter/group settings onto state. */
+function buildHomeViewFields(s: UserSettingsData, current: UserSettingsState) {
+  return {
+    homeQuickFilters: s.home_quick_filters ?? current.homeQuickFilters,
+    taskViewFilters: s.task_view_filters ?? current.taskViewFilters,
+    taskViewGroups: s.task_view_groups ?? current.taskViewGroups,
+  };
+}
+
 /** Maps the core user-settings API fields onto state, falling back to current values. */
 export function buildCoreFields(
   s: UserSettingsData,
@@ -397,6 +409,7 @@ export function buildCoreFields(
       current.kanbanPriorityFilterTokens,
       parseKanbanPriorityFilterTokens,
     ),
+    ...buildHomeViewFields(s, current),
     ...buildTerminalFields(s, current),
     ...buildSystemMetricsDisplayFields(s, current),
   };

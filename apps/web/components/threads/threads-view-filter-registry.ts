@@ -1,6 +1,8 @@
 import type { TFunction } from "i18next";
 import { getExecutorLabel } from "@/lib/executor-icons";
 import { generateUUID } from "@/lib/utils";
+import { getViewDimensionMeta } from "@/lib/view-model/dimensions";
+import type { RepositoryGroup } from "@/lib/view-model/repository-group";
 import type {
   ThreadFilterClause,
   ThreadFilterDimension,
@@ -22,176 +24,46 @@ export type ThreadDimensionMeta = {
   placeholder?: string;
 };
 
-export const THREAD_DIMENSION_METAS: readonly ThreadDimensionMeta[] = [
-  {
-    dimension: "threadStatus",
-    labelKey: "threads:filterThreadStatus",
-    valueKind: "enum",
-    ops: ["is", "is_not", "in", "not_in"],
-    defaultOp: "is",
-    defaultValue: "needs_action",
-  },
-  {
-    dimension: "pendingAction",
-    labelKey: "threads:filterPendingAction",
-    valueKind: "enum",
-    ops: ["is", "is_not", "in", "not_in"],
-    defaultOp: "is",
-    defaultValue: "clarification",
-  },
-  {
-    dimension: "taskState",
-    labelKey: "threads:filterTaskState",
-    valueKind: "enum",
-    ops: ["is", "is_not", "in", "not_in"],
-    defaultOp: "is",
-    defaultValue: "IN_PROGRESS",
-  },
-  {
-    dimension: "workflow",
-    labelKey: "threads:filterWorkflow",
-    valueKind: "enum",
-    ops: ["is", "is_not", "in", "not_in"],
-    defaultOp: "is",
-    defaultValue: "",
-  },
-  {
-    dimension: "workflowStep",
-    labelKey: "threads:filterWorkflowStep",
-    valueKind: "enum",
-    ops: ["is", "is_not", "in", "not_in"],
-    defaultOp: "is",
-    defaultValue: "",
-  },
-  {
-    dimension: "repository",
-    labelKey: "threads:filterRepository",
-    valueKind: "enum",
-    ops: ["is", "is_not", "in", "not_in"],
-    defaultOp: "is",
-    defaultValue: "",
-  },
-  {
-    dimension: "primaryAgent",
-    labelKey: "threads:filterPrimaryAgent",
-    valueKind: "enum",
-    ops: ["is", "is_not", "in", "not_in"],
-    defaultOp: "is",
-    defaultValue: "",
-  },
-  {
-    dimension: "executorType",
-    labelKey: "threads:filterExecutorType",
-    valueKind: "enum",
-    ops: ["is", "is_not", "in", "not_in"],
-    defaultOp: "is",
-    defaultValue: "",
-  },
-  {
-    dimension: "priority",
-    labelKey: "threads:filterPriority",
-    valueKind: "enum",
-    ops: ["is", "is_not", "in", "not_in"],
-    defaultOp: "is",
-    defaultValue: "medium",
-  },
-  {
-    dimension: "blocked",
-    labelKey: "threads:filterBlocked",
-    valueKind: "boolean",
-    ops: ["is", "is_not"],
-    defaultOp: "is",
-    defaultValue: true,
-  },
-  {
-    dimension: "hasQueuedPrompts",
-    labelKey: "threads:filterQueuedPrompts",
-    valueKind: "boolean",
-    ops: ["is", "is_not"],
-    defaultOp: "is",
-    defaultValue: true,
-  },
-  {
-    dimension: "hasActiveSubagents",
-    labelKey: "threads:filterActiveSubagents",
-    valueKind: "boolean",
-    ops: ["is", "is_not"],
-    defaultOp: "is",
-    defaultValue: true,
-  },
-  {
-    dimension: "hasDiff",
-    labelKey: "threads:filterDiff",
-    valueKind: "boolean",
-    ops: ["is", "is_not"],
-    defaultOp: "is",
-    defaultValue: true,
-  },
-  {
-    dimension: "hasPR",
-    labelKey: "threads:filterPullRequest",
-    valueKind: "boolean",
-    ops: ["is", "is_not"],
-    defaultOp: "is",
-    defaultValue: true,
-  },
-  {
-    dimension: "prNeedsAttention",
-    labelKey: "threads:filterPullRequestAttention",
-    valueKind: "boolean",
-    ops: ["is", "is_not"],
-    defaultOp: "is",
-    defaultValue: true,
-  },
-  {
-    dimension: "taskType",
-    labelKey: "threads:filterTaskType",
-    valueKind: "enum",
-    ops: ["is", "is_not", "in", "not_in"],
-    defaultOp: "is",
-    defaultValue: "standard",
-  },
-  {
-    dimension: "titleMatch",
-    labelKey: "threads:filterTitle",
-    valueKind: "text",
-    ops: ["matches", "not_matches"],
-    defaultOp: "matches",
-    defaultValue: "",
-  },
-  {
-    dimension: "hasActiveError",
-    labelKey: "threads:filterActiveError",
-    valueKind: "boolean",
-    ops: ["is", "is_not"],
-    defaultOp: "is",
-    defaultValue: true,
-  },
-  {
-    dimension: "taskLabel",
-    labelKey: "threads:filterTaskLabel",
-    valueKind: "enum",
-    ops: ["is", "is_not", "in", "not_in"],
-    defaultOp: "is",
-    defaultValue: "",
-  },
-  {
-    dimension: "taskOrigin",
-    labelKey: "threads:filterTaskOrigin",
-    valueKind: "enum",
-    ops: ["is", "is_not", "in", "not_in"],
-    defaultOp: "is",
-    defaultValue: "manual",
-  },
-  {
-    dimension: "hasMultipleSessions",
-    labelKey: "threads:filterMultipleSessions",
-    valueKind: "boolean",
-    ops: ["is", "is_not"],
-    defaultOp: "is",
-    defaultValue: true,
-  },
+// Substantive metadata (kind, operators, defaults) is shared with the sidebar
+// through `lib/view-model/dimensions`; only the display copy is Threads-local.
+const THREAD_DIMENSIONS: ReadonlyArray<{ dimension: ThreadFilterDimension; labelKey: string }> = [
+  { dimension: "threadStatus", labelKey: "threads:filterThreadStatus" },
+  { dimension: "pendingAction", labelKey: "threads:filterPendingAction" },
+  { dimension: "taskState", labelKey: "threads:filterTaskState" },
+  { dimension: "workflow", labelKey: "threads:filterWorkflow" },
+  { dimension: "workflowStep", labelKey: "threads:filterWorkflowStep" },
+  { dimension: "repository", labelKey: "threads:filterRepository" },
+  { dimension: "repositoryGroup", labelKey: "threads:filterRepositoryGroup" },
+  { dimension: "primaryAgent", labelKey: "threads:filterPrimaryAgent" },
+  { dimension: "executorType", labelKey: "threads:filterExecutorType" },
+  { dimension: "priority", labelKey: "threads:filterPriority" },
+  { dimension: "blocked", labelKey: "threads:filterBlocked" },
+  { dimension: "hasQueuedPrompts", labelKey: "threads:filterQueuedPrompts" },
+  { dimension: "hasActiveSubagents", labelKey: "threads:filterActiveSubagents" },
+  { dimension: "hasDiff", labelKey: "threads:filterDiff" },
+  { dimension: "hasPR", labelKey: "threads:filterPullRequest" },
+  { dimension: "prNeedsAttention", labelKey: "threads:filterPullRequestAttention" },
+  { dimension: "taskType", labelKey: "threads:filterTaskType" },
+  { dimension: "titleMatch", labelKey: "threads:filterTitle" },
+  { dimension: "hasActiveError", labelKey: "threads:filterActiveError" },
+  { dimension: "taskLabel", labelKey: "threads:filterTaskLabel" },
+  { dimension: "taskOrigin", labelKey: "threads:filterTaskOrigin" },
+  { dimension: "hasMultipleSessions", labelKey: "threads:filterMultipleSessions" },
 ];
+
+export const THREAD_DIMENSION_METAS: readonly ThreadDimensionMeta[] = THREAD_DIMENSIONS.map(
+  ({ dimension, labelKey }) => {
+    const shared = getViewDimensionMeta(dimension);
+    return {
+      dimension,
+      labelKey,
+      valueKind: shared.valueKind,
+      ops: [...shared.ops],
+      defaultOp: shared.defaultOp,
+      defaultValue: shared.defaultValue,
+    };
+  },
+);
 
 export const THREAD_SORT_OPTIONS: readonly {
   key: ThreadSortKey;
@@ -320,7 +192,12 @@ export function getThreadFilterOptions(
   candidates: ThreadCandidate[],
   t: TFunction,
   repositoryNames: ReadonlyMap<string, string> = new Map(),
+  repositoryGroups: readonly RepositoryGroup[] = [],
 ): Array<{ value: string; label: string; group?: string }> {
+  if (dimension === "repositoryGroup") {
+    return repositoryGroups.map((group) => ({ value: group.id, label: group.name }));
+  }
+
   const fixed = FIXED_OPTIONS[dimension];
   if (fixed) return fixed.map((option) => ({ value: option.value, label: t(option.labelKey) }));
 

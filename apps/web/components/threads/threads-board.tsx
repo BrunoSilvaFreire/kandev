@@ -21,7 +21,8 @@ import { MobileThreadPicker } from "./mobile-thread-picker";
 import { ThreadTaskActionsProvider } from "./thread-task-actions";
 import { useThreadSelectionRecovery } from "./use-thread-selection-recovery";
 import { resolveThreadLayout, type ThreadLayoutResult } from "./thread-layout";
-import type { ThreadLayout } from "@/lib/state/slices/ui/thread-view-types";
+import type { ThreadGroupKey, ThreadLayout } from "@/lib/state/slices/ui/thread-view-types";
+import type { ViewGroup } from "@/lib/view-model";
 import { cn } from "@/lib/utils";
 
 type ThreadsBoardProps = {
@@ -29,6 +30,10 @@ type ThreadsBoardProps = {
   isLoading?: boolean;
   layout?: ThreadLayout;
   autoHideComposer?: boolean;
+  /** The active group key; `none` renders the single flat deck. */
+  groupKey?: ThreadGroupKey;
+  /** Admitted threads grouped by `groupKey`, in display order. */
+  groups?: ViewGroup<ActiveThread>[];
   /** Column a deep link asked for; scrolled into view and ringed on arrival. */
   focusedTaskId?: string | null;
   /**
@@ -187,11 +192,14 @@ function useThreadPicker(
  * horizontally. Columns keep the order the selector gave them, so a thread the
  * reader is following does not jump while they read it.
  */
+// eslint-disable-next-line complexity, max-lines-per-function -- A single deck owns the flat and grouped renderings and the picker wiring.
 export function ThreadsBoard({
   threads,
   isLoading = false,
   layout = "columns",
   autoHideComposer = false,
+  groupKey = "none",
+  groups = [],
   focusedTaskId = null,
   focusRequestKey = focusedTaskId,
   focusedSessionId = null,
@@ -216,6 +224,24 @@ export function ThreadsBoard({
     rememberThread,
   } = useThreadBoardLayout(orderedIds, layout, isMobile, activationTaskId);
   const picker = useThreadPicker(boardRef, isMobile, mobileTaskId, orderedIds[0] ?? null);
+  const grouped = groupKey !== "none" && groups.length > 0;
+
+  const renderColumn = (thread: ActiveThread) => (
+    <ThreadColumn
+      key={thread.taskId}
+      thread={thread}
+      autoHideComposer={autoHideComposer && !isMobile && isFinePointer}
+      mobileNavigation={isMobile ? { onChoose: () => picker.choose(thread.taskId) } : undefined}
+      isFocused={thread.taskId === markedTaskId}
+      layoutKey={layoutKey}
+      requestedSessionId={thread.taskId === focusedTaskId ? focusedSessionId : null}
+      isPreloaded={preloadTaskIds.has(thread.taskId)}
+      isDetailActive={detailTaskIds.has(thread.taskId)}
+      onInvalidRequestedSession={onInvalidRequestedSession}
+      onColumnRef={registerColumn}
+      onOpenTask={onOpenTask}
+    />
+  );
 
   return (
     <ThreadTaskActionsProvider boardRef={boardRef}>
@@ -245,33 +271,34 @@ export function ThreadsBoard({
               rememberThread(event);
             }}
             className={cn(
-              "min-h-0 min-w-0 w-full flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden overscroll-x-contain md:gap-3 md:p-3 md:snap-none",
-              composition.layout === "grid" ? "grid" : "flex",
+              "min-h-0 min-w-0 w-full flex-1 overscroll-contain md:gap-3 md:p-3",
+              grouped
+                ? "flex flex-col gap-4 overflow-y-auto"
+                : "snap-x snap-mandatory overflow-x-auto overflow-y-hidden overscroll-x-contain md:snap-none",
+              !grouped && (composition.layout === "grid" ? "grid" : "flex"),
             )}
-            style={boardLayoutStyle(composition)}
+            style={grouped ? undefined : boardLayoutStyle(composition)}
           >
-            {threads.map((thread) => (
-              <ThreadColumn
-                key={thread.taskId}
-                thread={thread}
-                autoHideComposer={autoHideComposer && !isMobile && isFinePointer}
-                mobileNavigation={
-                  isMobile
-                    ? {
-                        onChoose: () => picker.choose(thread.taskId),
-                      }
-                    : undefined
-                }
-                isFocused={thread.taskId === markedTaskId}
-                layoutKey={layoutKey}
-                requestedSessionId={thread.taskId === focusedTaskId ? focusedSessionId : null}
-                isPreloaded={preloadTaskIds.has(thread.taskId)}
-                isDetailActive={detailTaskIds.has(thread.taskId)}
-                onInvalidRequestedSession={onInvalidRequestedSession}
-                onColumnRef={registerColumn}
-                onOpenTask={onOpenTask}
-              />
-            ))}
+            {grouped
+              ? groups.map((group) => {
+                  const memberIds = new Set(group.items.map((item) => item.taskId));
+                  const memberThreads = threads.filter((thread) => memberIds.has(thread.taskId));
+                  if (memberThreads.length === 0) return null;
+                  return (
+                    <section
+                      key={group.key}
+                      className="flex min-h-0 flex-col gap-1"
+                      data-testid="threads-group-section"
+                      data-thread-group={group.key}
+                    >
+                      <h3 className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        {group.label}
+                      </h3>
+                      <div className="flex min-h-0 gap-3">{memberThreads.map(renderColumn)}</div>
+                    </section>
+                  );
+                })
+              : threads.map(renderColumn)}
           </div>
         )}
         {isMobile && threads.length > 0 && (

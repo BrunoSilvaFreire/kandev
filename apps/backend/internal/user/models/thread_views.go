@@ -7,6 +7,7 @@ const (
 	ThreadTaskScopeSelected = "selected"
 	ThreadLayoutColumns     = "columns"
 	ThreadLayoutGrid        = "grid"
+	ThreadGroupNone         = "none"
 )
 
 // ThreadTaskScope limits a Threads saved view to all eligible tasks or to an
@@ -23,6 +24,7 @@ type ThreadView struct {
 	TaskScope        ThreadTaskScope    `json:"task_scope"`
 	Filters          []ThreadViewClause `json:"filters"`
 	Sort             ThreadViewSort     `json:"sort"`
+	Group            string             `json:"group"`
 	MaxColumns       *int               `json:"max_columns"`
 	Layout           string             `json:"layout"`
 	AutoHideComposer bool               `json:"auto_hide_composer"`
@@ -48,6 +50,7 @@ type ThreadViewDraft struct {
 	TaskScope        ThreadTaskScope    `json:"task_scope"`
 	Filters          []ThreadViewClause `json:"filters"`
 	Sort             ThreadViewSort     `json:"sort"`
+	Group            string             `json:"group"`
 	MaxColumns       *int               `json:"max_columns"`
 	Layout           string             `json:"layout"`
 	AutoHideComposer bool               `json:"auto_hide_composer"`

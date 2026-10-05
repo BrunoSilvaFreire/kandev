@@ -15,6 +15,7 @@ const TASK_METADATA_KEYS = [
   "workflow_session_route",
   "initial_session_runtime_config",
   "initial_session_runtime_config_profile_id",
+  "step_primary_sessions",
 ] as const;
 
 const SESSION_METADATA_KEYS = [

@@ -1,3 +1,10 @@
+import type {
+  ViewFilterClause,
+  ViewFilterOp,
+  ViewFilterValue,
+  ViewGroupKey,
+} from "@/lib/view-model/types";
+
 export type ThreadTaskScope =
   | { mode: "all"; taskIds: [] }
   | { mode: "selected"; taskIds: string[] };
@@ -9,6 +16,7 @@ export type ThreadFilterDimension =
   | "workflow"
   | "workflowStep"
   | "repository"
+  | "repositoryGroup"
   | "primaryAgent"
   | "executorType"
   | "priority"
@@ -25,15 +33,16 @@ export type ThreadFilterDimension =
   | "taskOrigin"
   | "hasMultipleSessions";
 
-export type ThreadFilterOp = "is" | "is_not" | "in" | "not_in" | "matches" | "not_matches";
-export type ThreadFilterValue = string | string[] | boolean;
+export type ThreadFilterOp = ViewFilterOp;
+export type ThreadFilterValue = ViewFilterValue;
 
-export type ThreadFilterClause = {
-  id: string;
-  dimension: ThreadFilterDimension;
-  op: ThreadFilterOp;
-  value: ThreadFilterValue;
-};
+export type ThreadFilterClause = ViewFilterClause<ThreadFilterDimension>;
+
+/** Group keys a Threads view can render. `none` is always available. */
+export type ThreadGroupKey = Extract<
+  ViewGroupKey,
+  "none" | "repository" | "repositoryGroup" | "workflow" | "state" | "priority"
+>;
 
 export type ThreadSortKey =
   | "attention"
@@ -55,6 +64,7 @@ export type ThreadView = {
   taskScope: ThreadTaskScope;
   filters: ThreadFilterClause[];
   sort: ThreadSortSpec;
+  group: ThreadGroupKey;
   maxColumns: number | null;
   layout: ThreadLayout;
   autoHideComposer: boolean;

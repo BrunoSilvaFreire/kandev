@@ -1,11 +1,20 @@
 import type { TaskSwitcherItem } from "@/components/task/task-switcher";
 import { getExecutorLabel } from "@/lib/executor-icons";
 import { t } from "@/lib/i18n";
+import {
+  isTaskPriority,
+  TASK_PRIORITY_LABEL_KEYS,
+  TASK_PRIORITY_TOKENS,
+} from "@/lib/tasks/task-priority";
+import { applyViewFilters } from "@/lib/view-model/filters";
+import {
+  repositoryGroupKeyAndLabel,
+  sidebarTaskDimensionValue,
+  type ViewDimensionContext,
+} from "@/lib/view-model";
 import type {
   FilterClause,
-  FilterDimension,
   FilterOp,
-  FilterValue,
   GroupKey,
   SidebarView,
   SortKey,
@@ -44,27 +53,7 @@ export type SidebarTaskPrefs = {
   subtaskOrderByParentId?: Record<string, string[]>;
 };
 
-type DimensionExtractor = (task: TaskSwitcherItem) => FilterValue | undefined;
-
-const dimensionExtractors: Record<FilterDimension, DimensionExtractor> = {
-  archived: (t) => t.isArchived === true,
-  // State filters intentionally use the action buckets exposed by the filter UI.
-  state: (t) => getStateBucket(t),
-  workflow: (t) => t.workflowId,
-  workflowStep: (t) => t.workflowStepId,
-  executorType: (t) => t.remoteExecutorType,
-  // Repository filters keep the primary compatibility value. Grouping uses
-  // the complete combination separately in `groupExtractors` below.
-  repository: (t) => t.repositoryPath,
-  hasDiff: (t) => {
-    const ds = t.diffStats;
-    return !!ds && (ds.additions > 0 || ds.deletions > 0);
-  },
-  hasPR: (t) => !!t.prInfo,
-  isPRReview: (t) => t.isPRReview === true,
-  isIssueWatch: (t) => t.isIssueWatch === true,
-  titleMatch: (t) => t.title ?? "",
-};
+type RepositoryGroupContext = Pick<ViewDimensionContext, "repositoryGroups">;
 
 export function viewRequiresArchivedTasks(
   view: Pick<SidebarView, "filters"> | null | undefined,
@@ -79,45 +68,14 @@ export function viewRequiresArchivedTasks(
   );
 }
 
-function toStringArray(v: FilterValue): string[] {
-  if (Array.isArray(v)) return v.map(String);
-  return [String(v)];
-}
-
-function evaluateClause(task: TaskSwitcherItem, clause: FilterClause): boolean {
-  const extract = dimensionExtractors[clause.dimension];
-  const actual = extract(task);
-
-  switch (clause.op) {
-    case "is":
-      return String(actual) === String(clause.value);
-    case "is_not":
-      return String(actual) !== String(clause.value);
-    case "in":
-      return toStringArray(clause.value).includes(String(actual));
-    case "not_in":
-      return !toStringArray(clause.value).includes(String(actual));
-    case "matches": {
-      const hay = String(actual ?? "").toLowerCase();
-      const needle = String(clause.value).toLowerCase();
-      return needle === "" || hay.includes(needle);
-    }
-    case "not_matches": {
-      const hay = String(actual ?? "").toLowerCase();
-      const needle = String(clause.value).toLowerCase();
-      return needle !== "" && !hay.includes(needle);
-    }
-    default:
-      return true;
-  }
-}
-
 export function applyFilters(
   tasks: TaskSwitcherItem[],
   clauses: FilterClause[],
+  context?: RepositoryGroupContext,
 ): TaskSwitcherItem[] {
-  if (clauses.length === 0) return tasks;
-  return tasks.filter((task) => clauses.every((clause) => evaluateClause(task, clause)));
+  return applyViewFilters(tasks, clauses, (task, dimension) =>
+    sidebarTaskDimensionValue(task, dimension, context),
+  );
 }
 
 type SortComparator = (a: TaskSwitcherItem, b: TaskSwitcherItem) => number;
@@ -232,7 +190,7 @@ function repositoryCombinationKey(repositories: string[]): string {
   return `${REPOSITORY_COMBINATION_PREFIX}${JSON.stringify(repositories)}`;
 }
 
-const groupExtractors: Record<Exclude<GroupKey, "none">, GroupExtractor> = {
+const groupExtractors: Partial<Record<Exclude<GroupKey, "none">, GroupExtractor>> = {
   // Parameter named `task`, not `t`: this file's other extractors and loops use
   // `t` for a task, which shadows the imported translator. These four resolve
   // copy, so they must not. Rename the parameter before adding a `t()` call to
@@ -270,7 +228,32 @@ const groupExtractors: Record<Exclude<GroupKey, "none">, GroupExtractor> = {
   },
   // State groups use persisted task states so headings match task status labels.
   state: getTaskStateGroup,
+  priority: (task) => {
+    if (task.priority && isTaskPriority(task.priority)) {
+      return { key: task.priority, label: t(TASK_PRIORITY_LABEL_KEYS[task.priority]) };
+    }
+    return { key: "__unassigned__", label: t(UNASSIGNED_LABEL_KEY) };
+  },
 };
+
+/**
+ * Resolve the grouping extractor for a key. `repositoryGroup` needs the
+ * workspace's Repository Groups, so it is built from the context rather than a
+ * static table entry; every other key reads the static table.
+ */
+function resolveGroupExtractor(
+  groupKey: Exclude<GroupKey, "none">,
+  context?: RepositoryGroupContext,
+): GroupExtractor {
+  if (groupKey === "repositoryGroup") {
+    const groups = context?.repositoryGroups ?? [];
+    return (task) => {
+      const ids = (task.repositoryLinks ?? []).map((link) => String(link.repository_id));
+      return repositoryGroupKeyAndLabel(ids, groups, t(UNASSIGNED_LABEL_KEY));
+    };
+  }
+  return groupExtractors[groupKey]!;
+}
 
 function separateSubtasks(tasks: TaskSwitcherItem[]): {
   rootTasks: TaskSwitcherItem[];
@@ -296,6 +279,7 @@ export function applyGroup(
   groupKey: GroupKey,
   effectiveStateSubMap?: Map<string, TaskSwitcherItem[]>,
   effectiveStateByTaskId?: ReadonlyMap<string, EffectiveTaskTreeState>,
+  context?: RepositoryGroupContext,
 ): GroupedSidebarList {
   const { rootTasks, subTasksByParentId } = separateSubtasks(tasks);
 
@@ -307,7 +291,7 @@ export function applyGroup(
     };
   }
 
-  const extract = groupExtractors[groupKey];
+  const extract = resolveGroupExtractor(groupKey, context);
   const resolvedStates =
     groupKey === "state" && effectiveStateSubMap
       ? (effectiveStateByTaskId ?? resolveEffectiveStateMap(tasks, effectiveStateSubMap))
@@ -332,6 +316,7 @@ export function applyGroup(
     sortRepoGroups(groups);
   }
   if (groupKey === "state") sortStateGroups(groups);
+  if (groupKey === "priority") sortPriorityGroups(groups);
   return { groups, subTasksByParentId, groupKey };
 }
 
@@ -367,6 +352,16 @@ function sortRepoGroups(groups: SidebarGroup[]): void {
 function sortStateGroups(groups: SidebarGroup[]): void {
   groups.sort((a, b) => {
     const order = (STATE_GROUP_ORDER[a.key] ?? 99) - (STATE_GROUP_ORDER[b.key] ?? 99);
+    if (order !== 0) return order;
+    return a.label.localeCompare(b.label);
+  });
+}
+
+function sortPriorityGroups(groups: SidebarGroup[]): void {
+  groups.sort((a, b) => {
+    const aIndex = (TASK_PRIORITY_TOKENS as readonly string[]).indexOf(a.key);
+    const bIndex = (TASK_PRIORITY_TOKENS as readonly string[]).indexOf(b.key);
+    const order = (aIndex === -1 ? 99 : aIndex) - (bIndex === -1 ? 99 : bIndex);
     if (order !== 0) return order;
     return a.label.localeCompare(b.label);
   });
@@ -548,8 +543,9 @@ export function applyView(
   tasks: TaskSwitcherItem[],
   view: SidebarView,
   prefs?: SidebarTaskPrefs,
+  context?: RepositoryGroupContext,
 ): GroupedSidebarList {
-  const filtered = applyFilters(tasks, view.filters);
+  const filtered = applyFilters(tasks, view.filters, context);
   const { subTasksByParentId } = separateSubtasks(filtered);
   const effectiveStateByTaskId =
     view.sort.key === "state" || view.group === "state"
@@ -562,7 +558,13 @@ export function applyView(
     subTasksByParentId,
     effectiveStateByTaskId,
   );
-  const grouped = applyGroup(sorted, view.group, subTasksByParentId, effectiveStateByTaskId);
+  const grouped = applyGroup(
+    sorted,
+    view.group,
+    subTasksByParentId,
+    effectiveStateByTaskId,
+    context,
+  );
   const subOrderMap = prefs?.subtaskOrderByParentId;
   if (subOrderMap) {
     for (const [parentId, orderedIds] of Object.entries(subOrderMap)) {

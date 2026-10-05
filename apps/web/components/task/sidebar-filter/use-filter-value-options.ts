@@ -12,7 +12,7 @@ type Option = { value: string; label: string; color?: string; group?: string };
 type Snapshots = AppState["kanbanMulti"]["snapshots"];
 type ReposByWorkspace = AppState["repositories"]["itemsByWorkspaceId"];
 
-function workflowOptions(snapshots: Snapshots): Option[] {
+export function workflowOptions(snapshots: Snapshots): Option[] {
   return Object.entries(snapshots).map(([id, snap]) => ({
     value: id,
     label: snap.workflowName || id,
@@ -37,7 +37,7 @@ export function workflowStepOptions(snapshots: Snapshots): Option[] {
   return out;
 }
 
-function executorTypeOptions(snapshots: Snapshots): Option[] {
+export function executorTypeOptions(snapshots: Snapshots): Option[] {
   const seen = new Set<string>();
   for (const snap of Object.values(snapshots)) {
     for (const task of snap.tasks) {
@@ -58,6 +58,13 @@ export function repositoryOptions(repositoriesByWorkspace: ReposByWorkspace): Op
 export function useFilterValueOptions(dimension: FilterDimension): Option[] {
   const snapshots = useAppStore((s) => s.kanbanMulti.snapshots);
   const repositoriesByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
+  const repositorySets = useAppStore(
+    (s) => s.repositorySets.itemsByWorkspaceId[s.workspaces.activeId ?? ""],
+  );
+  const repositoryGroups = useMemo(
+    () => (repositorySets ?? []).map((set) => ({ value: set.id, label: set.name })),
+    [repositorySets],
+  );
   // `executorTypeOptions` resolves its labels through `getExecutorLabel`, which
   // now reads the catalog. Subscribing here — and keeping the language in the
   // memo's deps — is what makes those labels follow a runtime locale switch;
@@ -69,6 +76,7 @@ export function useFilterValueOptions(dimension: FilterDimension): Option[] {
     if (dimension === "workflowStep") return workflowStepOptions(snapshots);
     if (dimension === "executorType") return executorTypeOptions(snapshots);
     if (dimension === "repository") return repositoryOptions(repositoriesByWorkspace);
+    if (dimension === "repositoryGroup") return repositoryGroups;
     return [];
-  }, [dimension, snapshots, repositoriesByWorkspace, i18n.language]);
+  }, [dimension, snapshots, repositoriesByWorkspace, repositoryGroups, i18n.language]);
 }

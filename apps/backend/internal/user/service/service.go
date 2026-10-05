@@ -116,6 +116,9 @@ type UpdateUserSettingsRequest struct {
 	WorkflowIDsWithAutoHideEmptySteps *[]string
 	KanbanSort                        *string
 	KanbanPriorityFilterTokens        *[]string
+	HomeQuickFilters                  *map[string][]string
+	TaskViewFilters                   *map[string][]models.ViewFilterClause
+	TaskViewGroups                    *map[string]string
 }
 
 type SystemMetricsDisplaySettingsPatch struct {
@@ -511,6 +514,75 @@ func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *Up
 		}
 		settings.KanbanPriorityFilterTokens = normalizeKanbanPriorityFilterTokens(*req.KanbanPriorityFilterTokens)
 	}
+	if req.HomeQuickFilters != nil {
+		if err := applyHomeQuickFilters(settings, *req.HomeQuickFilters); err != nil {
+			return err
+		}
+	}
+	if req.TaskViewFilters != nil {
+		if err := applyTaskViewFilters(settings, *req.TaskViewFilters); err != nil {
+			return err
+		}
+	}
+	if req.TaskViewGroups != nil {
+		if err := applyTaskViewGroups(settings, *req.TaskViewGroups); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+const (
+	maxHomeQuickFilterViews             = 8
+	maxHomeQuickFilterDimensionsPerView = 32
+)
+
+// applyHomeQuickFilters bounds the request, then keeps only known Home view ids
+// and non-empty, de-duplicated dimension values.
+func applyHomeQuickFilters(settings *models.UserSettings, value map[string][]string) error {
+	if len(value) > maxHomeQuickFilterViews {
+		return fmt.Errorf("home_quick_filters: max %d views allowed", maxHomeQuickFilterViews)
+	}
+	for _, dimensions := range value {
+		if len(dimensions) > maxHomeQuickFilterDimensionsPerView {
+			return fmt.Errorf(
+				"home_quick_filters: max %d dimensions per view allowed",
+				maxHomeQuickFilterDimensionsPerView,
+			)
+		}
+	}
+	settings.HomeQuickFilters = models.NormalizeHomeQuickFilters(value)
+	return nil
+}
+
+const (
+	maxTaskViewFilterViews = 8
+)
+
+// applyTaskViewFilters bounds the request, then keeps only known task views and
+// well-formed clauses (known operator, non-empty id/dimension, bounded value).
+func applyTaskViewFilters(
+	settings *models.UserSettings,
+	value map[string][]models.ViewFilterClause,
+) error {
+	if len(value) > maxTaskViewFilterViews {
+		return fmt.Errorf("task_view_filters: max %d views allowed", maxTaskViewFilterViews)
+	}
+	for _, clauses := range value {
+		if len(clauses) > models.MaxTaskViewFilterClauses {
+			return fmt.Errorf(
+				"task_view_filters: max %d clauses per view allowed",
+				models.MaxTaskViewFilterClauses,
+			)
+		}
+	}
+	settings.TaskViewFilters = models.NormalizeTaskViewFilters(value)
+	return nil
+}
+
+// applyTaskViewGroups keeps only known task views and known group keys.
+func applyTaskViewGroups(settings *models.UserSettings, value map[string]string) error {
+	settings.TaskViewGroups = models.NormalizeTaskViewGroups(value)
 	return nil
 }
 
@@ -1213,6 +1285,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"workflow_ids_with_auto_hide_empty_steps":  settings.WorkflowIDsWithAutoHideEmptySteps,
 		"kanban_sort":                              settings.KanbanSort,
 		"kanban_priority_filter_tokens":            settings.KanbanPriorityFilterTokens,
+		"home_quick_filters":                       models.NormalizeHomeQuickFilters(settings.HomeQuickFilters),
 		"revision":                                 settings.Revision,
 		"updated_at":                               settings.UpdatedAt.Format(time.RFC3339),
 	}

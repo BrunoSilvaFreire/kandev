@@ -235,6 +235,19 @@ it("changes for connection, session, task, step, and profile updates", () => {
   expect(
     getWorkflowMovePreviewRevision(state as AppState, TASK_ID, WORKFLOW_ID, "step-2"),
   ).not.toBe(beforeModel);
+
+  const beforeStepPrimary = getWorkflowMovePreviewRevision(
+    state as AppState,
+    TASK_ID,
+    WORKFLOW_ID,
+    "step-2",
+  );
+  state.kanban.tasks[0]!.metadata = {
+    step_primary_sessions: { "step-2": "session-other" },
+  };
+  expect(
+    getWorkflowMovePreviewRevision(state as AppState, TASK_ID, WORKFLOW_ID, "step-2"),
+  ).not.toBe(beforeStepPrimary);
 });
 
 it("ignores non-predictive task, session, and profile bookkeeping updates", () => {

@@ -15,6 +15,9 @@ import { resolveFocusedThreadId, type ActiveThread } from "@/lib/threads/active-
 import { useStableThreadOrder } from "@/lib/threads/stable-order";
 import { DEFAULT_THREAD_VIEW } from "@/lib/state/slices/ui/thread-view-builtins";
 import { queryThreadView, type ThreadViewQueryResult } from "@/lib/threads/thread-view-query";
+import { toRepositoryGroups } from "@/lib/view-model/repository-group-source";
+import type { RepositoryGroup } from "@/lib/view-model/repository-group";
+import { repositorySlug } from "@/lib/repository-slug";
 import { useKanbanRouteBootstrap } from "@/src/kanban-route";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 
@@ -84,6 +87,8 @@ function useThreadDeck(
   snapshots: Record<string, WorkflowSnapshotData>,
   workspaceId: string | null | undefined,
   requestedTaskId: string | null,
+  repositoryGroups: readonly RepositoryGroup[],
+  repositoryNames: ReadonlyMap<string, string>,
 ) {
   const removals = useAppStore((state) => state.taskRemoval.operationsByToken);
   const storedThreadViews = useAppStore((state) => state.threadViews);
@@ -102,13 +107,24 @@ function useThreadDeck(
         workspaceId,
         requestedTaskId,
         draft: threadViews.draft,
+        repositoryGroups,
+        repositoryNames,
         excludedTaskIds: new Set(
           Object.values(removals)
             .filter((operation) => operation.action === "archive")
             .flatMap((operation) => operation.taskIds),
         ),
       }),
-    [snapshots, workspaceId, activeThreadView, requestedTaskId, threadViews.draft, removals],
+    [
+      snapshots,
+      workspaceId,
+      activeThreadView,
+      requestedTaskId,
+      threadViews.draft,
+      removals,
+      repositoryGroups,
+      repositoryNames,
+    ],
   );
   // Ranking decides where a column first appears; after that the slot is the
   // reader's, so replying to a thread cannot slide it across the deck.
@@ -170,7 +186,24 @@ export function ThreadsPageClient() {
 
   const requestedTaskId = searchParams.get("taskId");
   const requestedSessionId = searchParams.get("sessionId");
-  const { query, threads } = useThreadDeck(scopedSnapshots, scopedWorkspaceId, requestedTaskId);
+  const repositorySets = useAppStore(
+    (state) => state.repositorySets.itemsByWorkspaceId[scopedWorkspaceId ?? ""],
+  );
+  const repositoryGroups: RepositoryGroup[] = useMemo(
+    () => toRepositoryGroups(repositorySets),
+    [repositorySets],
+  );
+  const repositoryNames = useMemo(
+    () => new Map(repositories.map((repo) => [String(repo.id), repositorySlug(repo)])),
+    [repositories],
+  );
+  const { query, threads } = useThreadDeck(
+    scopedSnapshots,
+    scopedWorkspaceId,
+    requestedTaskId,
+    repositoryGroups,
+    repositoryNames,
+  );
 
   const handleOpenTask = useCallback((taskId: string) => router.push(linkToTask(taskId)), [router]);
   const handleInvalidRequestedSession = useCallback(
@@ -198,6 +231,8 @@ export function ThreadsPageClient() {
         threads={threads}
         layout={query.effectiveView.layout}
         autoHideComposer={query.effectiveView.autoHideComposer}
+        groupKey={query.effectiveView.group}
+        groups={query.groupedCandidates}
         isLoading={isLoading}
         focusedTaskId={focusedTaskId}
         focusedSessionId={focusedSessionId}

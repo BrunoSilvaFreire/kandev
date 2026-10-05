@@ -5,6 +5,7 @@ requirements:
   - REQ-WORKSPACES-REPOSITORY-SETS-001
   - REQ-WORKSPACES-REPOSITORY-SETS-002
   - REQ-WORKSPACES-REPOSITORY-SETS-003
+  - REQ-WORKSPACES-REPOSITORY-SETS-004
 ---
 
 # Repository Sets System Design
@@ -27,7 +28,8 @@ create a live link between a set and a task.
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `REQ-WORKSPACES-REPOSITORY-SETS-001` | [Persistence](#persistence), [Service and transport](#service-and-transport), [Events and boot state](#events-and-boot-state)                                                  |
 | `REQ-WORKSPACES-REPOSITORY-SETS-002` | [Settings experience](#settings-experience), [Shared branch selector](#shared-branch-selector), [Branch loading](#branch-loading), [Responsive behavior](#responsive-behavior) |
-| `REQ-WORKSPACES-REPOSITORY-SETS-003` | [Task form application](#task-form-application), [Local executor semantics](#local-executor-semantics), [Failure and recovery](#failure-and-recovery)                          |
+| `REQ-WORKSPACES-REPOSITORY-SETS-003` | [Task form application](#task-form-application), [Local executor semantics](#local-executor-semantics), [Failure and recovery](#failure-and-recovery)                                                                                |
+| `REQ-WORKSPACES-REPOSITORY-SETS-004` | [Repository groups](#repository-groups)                                                                                                                                                                                                       |
 
 ## Data model
 
@@ -235,6 +237,32 @@ differ.
 
 The task row shows both values when local execution makes them different. A
 copied saved base never changes the local checkout branch as a side effect.
+
+## Repository groups
+
+Repository Group is the user-facing name for a repository set. The persisted
+model, service methods, routes, and events keep their `RepositorySet` names, so
+this addition changes no backend contract and no stored data.
+
+The workspace frontend store exposes `repositorySets.itemsByWorkspaceId`. The
+shared view model (`apps/web/lib/view-model/`) registers one `repositoryGroup`
+dimension and one `repositoryGroup` group key whose options come from that
+store, kept live through the existing `repository_set.created|updated|deleted`
+events. The match predicate applies D7 semantics:
+
+- A task matches a group when any of the task's repositories is a member.
+- A group key places the task under the first group in set order that contains
+  the task's first repository; otherwise under `Ungrouped`.
+
+Because the dimension is registered once, Kanban/Pipeline, List, Threads, and
+the sidebar consume it without per-view implementation. The shared view model
+owns the filter and grouping contract; this design owns only the Repository
+Group identity and its options.
+
+The settings editor gains no new entity. It keeps create, rename, member
+assignment, and removal, and exposes set and member reordering through the
+existing `sort_order` and member positions. The UI copy is renamed to
+`Repository Groups` in all supported catalogs.
 
 ## Failure and recovery
 

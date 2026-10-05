@@ -12,6 +12,7 @@ import type {
   SortSpec,
 } from "@/lib/state/slices/ui/sidebar-view-types";
 import { cloneSidebarTaskRowPresentation } from "@/lib/state/slices/ui/sidebar-task-row-presentation";
+import { useHomeQuickFilters } from "@/hooks/use-home-quick-filters";
 import { DIMENSION_METAS } from "./filter-dimension-registry";
 import { FilterClauseEditor } from "./filter-clause-editor";
 import { GroupPicker } from "./group-picker";
@@ -101,10 +102,12 @@ const SECTION_LABEL_CLASS =
 const GROUP_SUMMARY_KEYS: Record<GroupKey, string> = {
   none: "task:groupNone",
   repository: "task:groupRepository",
+  repositoryGroup: "task:groupRepositoryGroup",
   workflow: "task:groupWorkflow",
   workflowStep: "task:groupWorkflowStep",
   executorType: "task:groupExecutorType",
   state: "task:groupState",
+  priority: "task:groupPriority",
 };
 
 function FilterSection({
@@ -121,6 +124,7 @@ function FilterSection({
   onRemove: (id: string) => void;
 }) {
   const { t } = useTranslation();
+  const { dimensions, toggleDimension } = useHomeQuickFilters("sidebar");
   return (
     <div className={`border-b px-2 pb-2 ${isDrawerLayout ? "pt-2" : "pt-0"}`}>
       <div className={`${isDrawerLayout ? "" : "-mt-1 "}mb-1 flex items-center justify-between`}>
@@ -145,6 +149,10 @@ function FilterSection({
               clause={clause}
               onChange={onChange}
               onRemove={() => onRemove(clause.id)}
+              quickFilter={{
+                visible: dimensions.includes(clause.dimension),
+                onToggle: (visible) => toggleDimension(clause.dimension, visible),
+              }}
             />
           ))}
         </div>

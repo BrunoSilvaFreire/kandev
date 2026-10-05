@@ -683,6 +683,9 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"workflow_ids_with_auto_hide_empty_steps":  settings.WorkflowIDsWithAutoHideEmptySteps,
 		"kanban_sort":                              models.NormalizeKanbanSort(settings.KanbanSort),
 		"kanban_priority_filter_tokens":            settings.KanbanPriorityFilterTokens,
+		"home_quick_filters":                       models.NormalizeHomeQuickFilters(settings.HomeQuickFilters),
+		"task_view_filters":                        models.NormalizeTaskViewFilters(settings.TaskViewFilters),
+		"task_view_groups":                         models.NormalizeTaskViewGroups(settings.TaskViewGroups),
 	})
 }
 
@@ -775,6 +778,9 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		WorkflowIDsWithAutoHideEmptySteps: []string{},
 		KanbanSort:                        models.KanbanSortDefault,
 		KanbanPriorityFilterTokens:        []string{},
+		HomeQuickFilters:                  map[string][]string{},
+		TaskViewFilters:                   map[string][]models.ViewFilterClause{},
+		TaskViewGroups:                    map[string]string{},
 	}
 }
 
@@ -875,6 +881,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		WorkflowIDsWithAutoHideEmptySteps json.RawMessage                         `json:"workflow_ids_with_auto_hide_empty_steps"`
 		KanbanSort                        string                                  `json:"kanban_sort"`
 		KanbanPriorityFilterTokens        json.RawMessage                         `json:"kanban_priority_filter_tokens"`
+		HomeQuickFilters                  map[string][]string                     `json:"home_quick_filters"`
+		TaskViewFilters                   map[string][]models.ViewFilterClause    `json:"task_view_filters"`
+		TaskViewGroups                    map[string]string                       `json:"task_view_groups"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -1065,6 +1074,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.WorkflowIDsWithAutoHideEmptySteps = decodeStringIDs(payload.WorkflowIDsWithAutoHideEmptySteps)
 	settings.KanbanSort = models.NormalizeKanbanSort(payload.KanbanSort)
 	settings.KanbanPriorityFilterTokens = decodeKanbanPriorityFilterTokens(payload.KanbanPriorityFilterTokens)
+	settings.HomeQuickFilters = models.NormalizeHomeQuickFilters(payload.HomeQuickFilters)
+	settings.TaskViewFilters = models.NormalizeTaskViewFilters(payload.TaskViewFilters)
+	settings.TaskViewGroups = models.NormalizeTaskViewGroups(payload.TaskViewGroups)
 	return settings, nil
 }
 

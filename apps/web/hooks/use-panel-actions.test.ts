@@ -7,6 +7,7 @@ const responsiveState = vi.hoisted(() => ({
 }));
 
 const dockActions = vi.hoisted(() => ({
+  api: {} as Record<string, never>,
   addBrowserPanel: vi.fn(),
   addPlanPanel: vi.fn(),
   addChatPanel: vi.fn(),
@@ -26,6 +27,7 @@ const appState = vi.hoisted(() => ({
       activeSessionId: "session-1",
       activeTaskId: "task-1",
     },
+    quickChat: { sessions: [] },
     setActiveDocument: vi.fn(),
     setPlanMode: vi.fn(),
   },

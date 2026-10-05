@@ -10,6 +10,7 @@ import { repositoryId, type Repository, type TaskPriority } from "@/lib/types/ht
 import { TASK_PRIORITY_TOKENS } from "@/lib/tasks/task-priority";
 import type { UserSettingsState } from "@/lib/state/slices/settings/types";
 import type { KanbanSort } from "@/lib/kanban/kanban-sort";
+import type { ViewFilterClause } from "@/lib/view-model/types";
 
 type DisplaySettings = UserSettingsState;
 
@@ -32,6 +33,8 @@ type CommitPayload = {
   workflowIdsWithAutoHideEmptySteps?: string[];
   kanbanSort?: KanbanSort;
   kanbanPriorityFilterTokens?: TaskPriority[];
+  taskViewFilters?: Record<string, ViewFilterClause[]>;
+  taskViewGroups?: Record<string, string>;
 };
 
 export function normalizeWorkflowIds(ids: string[]): string[] {
@@ -85,6 +88,20 @@ function priorityFilterTokensUnchanged(
   );
 }
 
+function viewFilterMapsUnchanged(
+  a: Record<string, ViewFilterClause[]> | undefined,
+  b: Record<string, ViewFilterClause[]> | undefined,
+): boolean {
+  return JSON.stringify(a ?? {}) === JSON.stringify(b ?? {});
+}
+
+function viewGroupMapsUnchanged(
+  a: Record<string, string> | undefined,
+  b: Record<string, string> | undefined,
+): boolean {
+  return JSON.stringify(a ?? {}) === JSON.stringify(b ?? {});
+}
+
 /** @internal Exported for testing the snapshot-not-delta commit semantics. */
 export function buildNormalizedSettings(
   next: CommitPayload,
@@ -108,6 +125,8 @@ export function buildNormalizedSettings(
     kanbanPriorityFilterTokens: normalizePriorityFilterTokens(
       next.kanbanPriorityFilterTokens ?? current.kanbanPriorityFilterTokens ?? [],
     ),
+    taskViewFilters: next.taskViewFilters ?? current.taskViewFilters ?? {},
+    taskViewGroups: next.taskViewGroups ?? current.taskViewGroups ?? {},
     loaded: true,
   };
 }
@@ -133,7 +152,9 @@ export function isSettingsUnchanged(
     priorityFilterTokensUnchanged(
       normalized.kanbanPriorityFilterTokens,
       current.kanbanPriorityFilterTokens,
-    )
+    ) &&
+    viewFilterMapsUnchanged(normalized.taskViewFilters, current.taskViewFilters) &&
+    viewGroupMapsUnchanged(normalized.taskViewGroups, current.taskViewGroups)
   );
 }
 
@@ -148,6 +169,8 @@ export function buildSettingsUpdatePayload(normalized: DisplaySettings): Record<
     workflow_ids_with_auto_hide_empty_steps: normalized.workflowIdsWithAutoHideEmptySteps,
     kanban_sort: normalized.kanbanSort,
     kanban_priority_filter_tokens: normalized.kanbanPriorityFilterTokens,
+    task_view_filters: normalized.taskViewFilters,
+    task_view_groups: normalized.taskViewGroups,
   };
 }
 

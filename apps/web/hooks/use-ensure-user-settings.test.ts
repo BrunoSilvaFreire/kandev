@@ -128,6 +128,9 @@ function makeUnloadedSettings(): UserSettingsState {
     workflowIdsWithAutoHideEmptySteps: [],
     kanbanSort: "created_desc",
     kanbanPriorityFilterTokens: [],
+    homeQuickFilters: {},
+    taskViewFilters: {},
+    taskViewGroups: {},
     loaded: false,
   };
 }

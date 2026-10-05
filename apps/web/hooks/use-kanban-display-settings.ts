@@ -11,6 +11,8 @@ import { selectWorkflowSwimlanes } from "@/lib/kanban/workflow-swimlanes";
 import type { KanbanSort } from "@/lib/kanban/kanban-sort";
 import { toggleKanbanPriorityFilterToken } from "@/lib/kanban/priority-filter-tokens";
 import type { TaskPriority } from "@/lib/types/http";
+import { resolveKanbanFilterClauses } from "@/lib/view-model/kanban";
+import type { ViewFilterClause, ViewGroupKey } from "@/lib/view-model/types";
 
 type UserSettingsFields = {
   workspaceId: string | null;
@@ -20,6 +22,8 @@ type UserSettingsFields = {
   workflowIdsWithAutoHideEmptySteps?: string[];
   kanbanSort?: KanbanSort;
   kanbanPriorityFilterTokens?: TaskPriority[];
+  taskViewFilters?: Record<string, ViewFilterClause[]>;
+  taskViewGroups?: Record<string, string>;
 };
 
 type CommitSettingsFn = (
@@ -165,37 +169,51 @@ function useStepVisibilityHandlers(
 }
 
 /**
- * Custom hook that consolidates all kanban display settings and eliminates prop drilling.
- * This hook provides access to workspaces, workflows, repositories, and preview settings,
- * along with handlers for changing these settings.
+ * The shared filter/group state for the Kanban/List view, persisted through
+ * `task_view_filters` / `task_view_groups`. Persisted clauses win over the
+ * legacy repository/priority values, which are read once as clauses.
  */
-export function useKanbanDisplaySettings() {
-  const workspaces = useAppStore((state) => state.workspaces.items);
-  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
-  const workflows = useAppStore((state) => state.workflows.items);
-  const activeWorkflowId = useAppStore((state) => state.workflows.activeId);
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
-  const setActiveWorkspace = useAppStore((state) => state.setActiveWorkspace);
-  const setActiveWorkflow = useAppStore((state) => state.setActiveWorkflow);
-  const enablePreviewOnClick = useAppStore((state) => state.userSettings.enablePreviewOnClick);
+function useKanbanViewFilterHandlers(
+  userSettings: UserSettingsFields,
+  commitSettings: CommitSettingsFn,
+  taskView: "kanban" | "list",
+) {
+  const filters = resolveKanbanFilterClauses(
+    userSettings.taskViewFilters?.[taskView],
+    userSettings.repositoryIds,
+    userSettings.kanbanPriorityFilterTokens,
+  );
+  const group = (userSettings.taskViewGroups?.[taskView] ?? "none") as ViewGroupKey;
+  const onFiltersChange = useCallback(
+    (next: ViewFilterClause[]) => {
+      commitSettings({
+        ...baseSettingsPayload(userSettings),
+        taskViewFilters: { ...(userSettings.taskViewFilters ?? {}), [taskView]: next },
+      });
+    },
+    [commitSettings, userSettings, taskView],
+  );
+  const onGroupChange = useCallback(
+    (next: ViewGroupKey) => {
+      commitSettings({
+        ...baseSettingsPayload(userSettings),
+        taskViewGroups: { ...(userSettings.taskViewGroups ?? {}), [taskView]: next },
+      });
+    },
+    [commitSettings, userSettings, taskView],
+  );
+  return { filters, group, onFiltersChange, onGroupChange };
+}
 
-  const {
-    settings: userSettings,
-    commitSettings,
-    repositories,
-    repositoriesLoading,
-    allRepositoriesSelected,
-  } = useUserDisplaySettings({ workspaceId: activeWorkspaceId, workflowId: activeWorkflowId });
-
-  const { onWorkspaceChange, onWorkflowChange } = useWorkspaceWorkflowHandlers({
-    activeWorkspaceId,
-    workflows,
-    userSettings,
-    commitSettings,
-    setActiveWorkspace,
-    setActiveWorkflow,
-  });
-
+/**
+ * The repository/preview/list/sort/priority write handlers for the Kanban and
+ * List views. Kept together so `useKanbanDisplaySettings` stays within the
+ * function-length budget.
+ */
+function useKanbanDisplayActionHandlers(
+  userSettings: UserSettingsFields,
+  commitSettings: CommitSettingsFn,
+) {
   const onRepositoryChange = useCallback(
     (value: string | "all") => {
       commitSettings({
@@ -235,11 +253,66 @@ export function useKanbanDisplaySettings() {
     },
     [commitSettings, userSettings],
   );
+  return {
+    onRepositoryChange,
+    onTogglePreviewOnClick,
+    onToggleTasksListShowDetails,
+    onBoardSortChange,
+    onPriorityFilterChange,
+  };
+}
+
+/**
+ * Custom hook that consolidates all kanban display settings and eliminates prop drilling.
+ * This hook provides access to workspaces, workflows, repositories, and preview settings,
+ * along with handlers for changing these settings.
+ */
+export function useKanbanDisplaySettings() {
+  const workspaces = useAppStore((state) => state.workspaces.items);
+  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
+  const workflows = useAppStore((state) => state.workflows.items);
+  const activeWorkflowId = useAppStore((state) => state.workflows.activeId);
+  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const setActiveWorkspace = useAppStore((state) => state.setActiveWorkspace);
+  const setActiveWorkflow = useAppStore((state) => state.setActiveWorkflow);
+  const enablePreviewOnClick = useAppStore((state) => state.userSettings.enablePreviewOnClick);
+
+  const {
+    settings: userSettings,
+    commitSettings,
+    repositories,
+    repositoriesLoading,
+    allRepositoriesSelected,
+  } = useUserDisplaySettings({ workspaceId: activeWorkspaceId, workflowId: activeWorkflowId });
+
+  const { onWorkspaceChange, onWorkflowChange } = useWorkspaceWorkflowHandlers({
+    activeWorkspaceId,
+    workflows,
+    userSettings,
+    commitSettings,
+    setActiveWorkspace,
+    setActiveWorkflow,
+  });
+
+  const {
+    onRepositoryChange,
+    onTogglePreviewOnClick,
+    onToggleTasksListShowDetails,
+    onBoardSortChange,
+    onPriorityFilterChange,
+  } = useKanbanDisplayActionHandlers(userSettings, commitSettings);
 
   const { eligibleWorkflows, onToggleStepVisibility, onToggleAutoHideEmpty } =
     useStepVisibilityHandlers(workflows, snapshots, userSettings, commitSettings, activeWorkflowId);
 
   const { effectiveView, onViewModeChange } = useViewModeChange();
+
+  const taskView: "kanban" | "list" = effectiveView === "list" ? "list" : "kanban";
+  const { filters, group, onFiltersChange, onGroupChange } = useKanbanViewFilterHandlers(
+    userSettings,
+    commitSettings,
+    taskView,
+  );
 
   return {
     workspaces,
@@ -259,6 +332,10 @@ export function useKanbanDisplaySettings() {
     workflowIdsWithAutoHideEmptySteps: userSettings.workflowIdsWithAutoHideEmptySteps ?? [],
     boardSort: userSettings.kanbanSort,
     priorityFilterTokens: userSettings.kanbanPriorityFilterTokens ?? [],
+    filters,
+    group,
+    onFiltersChange,
+    onGroupChange,
     onWorkspaceChange,
     onWorkflowChange,
     onRepositoryChange,

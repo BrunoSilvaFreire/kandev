@@ -6,6 +6,7 @@ import { createDefaultThreadView, MAX_THREAD_VIEWS } from "./thread-view-builtin
 import type { UISlice, UISliceState } from "./types";
 import type {
   ThreadFilterClause,
+  ThreadGroupKey,
   ThreadSortSpec,
   ThreadTaskScope,
   ThreadView,
@@ -56,6 +57,7 @@ function cloneView(view: ThreadView): ThreadView {
     taskScope: cloneScope(view.taskScope),
     filters: view.filters.map(cloneClause),
     sort: { ...view.sort },
+    group: view.group,
     maxColumns: view.maxColumns,
     layout: view.layout,
     autoHideComposer: view.autoHideComposer,
@@ -69,6 +71,7 @@ function cloneDraft(draft: ThreadViewDraft | null): ThreadViewDraft | null {
     taskScope: cloneScope(draft.taskScope),
     filters: draft.filters.map(cloneClause),
     sort: { ...draft.sort },
+    group: draft.group,
     maxColumns: draft.maxColumns,
     layout: draft.layout,
     autoHideComposer: draft.autoHideComposer,
@@ -250,6 +253,7 @@ export function buildThreadViewActions(set: ImmerSet, get: () => UISlice) {
         taskScope: ThreadTaskScope;
         filters: ThreadFilterClause[];
         sort: ThreadSortSpec;
+        group: ThreadGroupKey;
         maxColumns: number | null;
         layout: ThreadView["layout"];
         autoHideComposer: boolean;
@@ -263,6 +267,7 @@ export function buildThreadViewActions(set: ImmerSet, get: () => UISlice) {
           taskScope: cloneScope(active.taskScope),
           filters: active.filters.map(cloneClause),
           sort: { ...active.sort },
+          group: active.group,
           maxColumns: active.maxColumns,
           layout: active.layout,
           autoHideComposer: active.autoHideComposer,
@@ -274,6 +279,7 @@ export function buildThreadViewActions(set: ImmerSet, get: () => UISlice) {
             ? patch.filters.map(cloneClause)
             : current.filters.map(cloneClause),
           sort: patch.sort ? { ...patch.sort } : { ...current.sort },
+          group: patch.group ?? current.group,
           maxColumns: patch.maxColumns === undefined ? current.maxColumns : patch.maxColumns,
           layout: patch.layout ?? current.layout,
           autoHideComposer: patch.autoHideComposer ?? current.autoHideComposer,
@@ -295,6 +301,7 @@ export function buildThreadViewActions(set: ImmerSet, get: () => UISlice) {
           taskScope: cloneScope(state.draft.taskScope),
           filters: state.draft.filters.map(cloneClause),
           sort: { ...state.draft.sort },
+          group: state.draft.group,
           maxColumns: state.draft.maxColumns,
           layout: state.draft.layout,
           autoHideComposer: state.draft.autoHideComposer,
@@ -317,6 +324,7 @@ export function buildThreadViewActions(set: ImmerSet, get: () => UISlice) {
         view.taskScope = cloneScope(state.draft.taskScope);
         view.filters = state.draft.filters.map(cloneClause);
         view.sort = { ...state.draft.sort };
+        view.group = state.draft.group;
         view.maxColumns = state.draft.maxColumns;
         view.layout = state.draft.layout;
         view.autoHideComposer = state.draft.autoHideComposer;

@@ -25,6 +25,8 @@ repository settings, and repository branch information.
 
 - **Repository set:** A named and ordered group of repositories in one
   workspace.
+- **Repository group:** The user-facing name for a repository set. The backend
+  type and API remain `RepositorySet`.
 - **Set member:** One repository and its position in a repository set.
 - **Saved base:** An optional base branch on a set member.
 - **Task default:** The existing task-form branch selection when a set has no
@@ -135,7 +137,43 @@ do not select every branch for each task.
   rows separately from rows that are not workspace repositories.
 - **AC-WORKSPACES-REPOSITORY-SETS-003.10:** The control shall remain absent from
   Quick Chat, Remote URL, and No repository modes. Executor capability shall not
-  hide or disable the control.
+  hide or disable the control. Repository Groups remain available on Quick Chat
+  and other surfaces through the shared filter and grouping model
+  (`REQ-WORKSPACES-REPOSITORY-SETS-004`), not through this task-form control.
+
+### REQ-WORKSPACES-REPOSITORY-SETS-004: Repository Groups as a shared dimension
+
+**Intent:** Repository sets are exposed as named Repository Groups that filter
+and group task listings everywhere repository information is relevant.
+
+**User story:** As a user with many repositories, I want to filter and group
+views by Repository Group, so that I can focus on a whole project family.
+
+#### Acceptance criteria
+
+- **AC-WORKSPACES-REPOSITORY-SETS-004.1:** A Repository Group shall be a
+  repository set with the same create, rename, assign, remove, and reorder
+  lifecycle. The system shall not create a second grouping entity.
+- **AC-WORKSPACES-REPOSITORY-SETS-004.2:** The user-facing copy for repository
+  sets shall use `Repository Groups` in navigation, settings, filters, grouping,
+  and the task-create control. The backend type, persistence, and API names
+  shall remain `RepositorySet`.
+- **AC-WORKSPACES-REPOSITORY-SETS-004.3:** A task shall match a repository group
+  when at least one of its repositories is a member of that group.
+- **AC-WORKSPACES-REPOSITORY-SETS-004.4:** When grouping tasks by repository
+  group, the system shall place a task under the first group in set order that
+  contains the task's first repository. A task whose repositories belong to no
+  group shall appear under `Ungrouped`.
+- **AC-WORKSPACES-REPOSITORY-SETS-004.5:** Repository Group shall be available
+  as both a filter and a grouping key in every Home view that supports a
+  repository filter, through the shared view model. It shall not be implemented
+  independently per view.
+- **AC-WORKSPACES-REPOSITORY-SETS-004.6:** Repository-group options shall reflect
+  the workspace's current sets and shall update through the existing
+  repository-set event stream.
+- **AC-WORKSPACES-REPOSITORY-SETS-004.7:** The settings editor shall support
+  create, rename, assign, remove, and reorder of Repository Groups. Reorder
+  shall use the existing member and set ordering fields.
 
 ## Compatibility
 

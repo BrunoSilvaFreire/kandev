@@ -1,4 +1,5 @@
 import type { WorkspaceId } from "./ids";
+import type { ViewFilterClause } from "@/lib/view-model/types";
 
 export type MCPTaskAgentProfileDefault = "current_task" | "workspace_default";
 export type StartupPage = "task_overview" | "last_task" | "threads";
@@ -67,6 +68,7 @@ export type ThreadViewApi = {
   task_scope: ThreadTaskScopeApi;
   filters: ThreadViewClauseApi[];
   sort: ThreadViewSortApi;
+  group?: string;
   max_columns: number | null;
   layout?: string;
   auto_hide_composer?: boolean;
@@ -77,6 +79,7 @@ export type ThreadViewDraftApi = {
   task_scope: ThreadTaskScopeApi;
   filters: ThreadViewClauseApi[];
   sort: ThreadViewSortApi;
+  group?: string;
   max_columns: number | null;
   layout?: string;
   auto_hide_composer?: boolean;
@@ -251,6 +254,9 @@ export type UserSettings = {
   workflow_ids_with_auto_hide_empty_steps?: string[];
   kanban_sort?: string;
   kanban_priority_filter_tokens?: string[];
+  home_quick_filters?: Record<string, string[]>;
+  task_view_filters?: Record<string, ViewFilterClause[]>;
+  task_view_groups?: Record<string, string>;
   revision?: number;
   updated_at: string;
 };
@@ -340,6 +346,9 @@ export type UserSettingsUpdatePayload = {
   workflow_ids_with_auto_hide_empty_steps?: string[];
   kanban_sort?: string;
   kanban_priority_filter_tokens?: string[];
+  home_quick_filters?: Record<string, string[]>;
+  task_view_filters?: Record<string, ViewFilterClause[]>;
+  task_view_groups?: Record<string, string>;
 };
 
 export type SidebarWorkspaceStateApi = {
