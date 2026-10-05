@@ -1,0 +1,125 @@
+name: Fork release (Debian + Windows)
+
+# Fork-only GitHub release path. Deliberately isolated from release.yml: it never
+# runs the upstream release PR/merge, npm, Homebrew, Scoop, or container jobs and
+# never references a protected `release` environment. It consumes the Debian and
+# Windows installers produced by an already-successful `release.yml` desktop
+# validation run (`channel=stable`, `desktop_validation_only=true`) at the exact
+# tagged SHA, then publishes a GitHub release with those two artifact families
+# plus checksums. Windows installers are unsigned and must be labelled as such.
+#
+# Stage 1 (packaging, run separately on the exact SHA):
+#   gh workflow run release.yml -f channel=stable -f bump=patch \
+#     -f desktop_validation_only=true
+# Stage 2 (this workflow): publish from that run's artifacts.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Fork version without the leading v, e.g. 0.97.0-bruno-1"
+        required: true
+        type: string
+      source_run_id:
+        description: "release.yml desktop-validation run ID that produced the desktop-linux-x64 / desktop-windows-x64 artifacts"
+        required: true
+        type: string
+      dry_run:
+        description: "Download and checksum only; do not create the GitHub release"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish GitHub release (Debian + Windows only)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release and its tag
+      actions: read # download artifacts from the source run
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Download validated Debian and Windows artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          mkdir -p dist
+          gh run download "$SOURCE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "desktop-linux-x64" \
+            --dir dist
+          gh run download "$SOURCE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "desktop-windows-x64" \
+            --dir dist
+          find dist -type f | sort
+
+      - name: Collect .deb and NSIS .exe assets
+        run: |
+          set -euo pipefail
+          rm -rf release-assets
+          mkdir -p release-assets
+          find dist -type f -name '*.deb' -exec cp -v {} release-assets/ \;
+          find dist -type f -name '*.exe' -exec cp -v {} release-assets/ \;
+          deb_count="$(find release-assets -type f -name '*.deb' | wc -l)"
+          exe_count="$(find release-assets -type f -name '*.exe' | wc -l)"
+          echo "Debian packages: $deb_count; Windows installers: $exe_count"
+          test "$deb_count" -ge 1
+          test "$exe_count" -ge 1
+
+      - name: Write checksums
+        working-directory: release-assets
+        run: |
+          set -euo pipefail
+          sha256sum ./* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Verify release target matches the validated SHA
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          set -euo pipefail
+          source_sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" --jq .head_sha)"
+          current_sha="$(git rev-parse HEAD)"
+          echo "source run SHA: $source_sha"
+          echo "this ref SHA:   $current_sha"
+          if [ "$source_sha" != "$current_sha" ]; then
+            echo "::error::source run $SOURCE_RUN_ID is not the exact dispatched SHA ($source_sha != $current_sha)"
+            exit 1
+          fi
+
+      - name: Create GitHub release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          tag="v${VERSION}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::release $tag already exists; refusing to overwrite"
+            exit 1
+          fi
+          gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$TARGET_SHA" \
+            --title "$tag (fork)" \
+            --notes "Fork-only release. Attached artifacts are the Debian (\`.deb\`) and Windows NSIS installers built at this exact SHA. Windows installers are unsigned. No npm, Homebrew, Scoop, or container channels were published." \
+            release-assets/*
+
+      - name: Summarize dry run
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "Dry run: validated artifact set for v${{ inputs.version }} at ${{ github.sha }}." >> "$GITHUB_STEP_SUMMARY"
+          ls -la release-assets >> "$GITHUB_STEP_SUMMARY"
