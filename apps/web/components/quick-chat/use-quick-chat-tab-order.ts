@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { createQueuedUserSettingsSyncWithResponse } from "@/lib/user-settings-sync";
@@ -117,6 +117,25 @@ export function useQuickChatTabOrder(
     },
     [appStore, ordered.order, persistOrder, workspaceId],
   );
+
+  // Persist a staged order that differs from the saved one. Creating a chat or
+  // terminal stages its reference in the optimistic order; without this it
+  // would be lost on reload and reconciliation would treat it as closed.
+  const lastRequestedOrder = useRef<string | null>(null);
+  useEffect(() => {
+    const optimistic = state.optimisticOrder;
+    if (!optimistic || optimistic.length === 0) return;
+    const persisted = state.persistedOrder;
+    const unchanged =
+      persisted !== undefined &&
+      optimistic.length === persisted.length &&
+      optimistic.every((reference, index) => reference === persisted[index]);
+    if (unchanged) return;
+    const key = optimistic.join("|");
+    if (lastRequestedOrder.current === key) return;
+    lastRequestedOrder.current = key;
+    persistOrder(optimistic);
+  }, [state.optimisticOrder, state.persistedOrder, persistOrder]);
 
   return {
     ...ordered,

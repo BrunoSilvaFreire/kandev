@@ -58,6 +58,27 @@ function upsertQuickChatSessionDraft(
   return true;
 }
 
+/**
+ * Records a conversation tab as open in the persisted mixed tab order. The
+ * order is the authoritative open-tab set for reconciliation, so a chat
+ * created here must appear in it or a later resync would treat it as closed.
+ * No-ops when the workspace has no order yet, where the baseline order applies.
+ */
+function trackOpenQuickChatTab(
+  quickChat: Draft<QuickChatState>,
+  workspaceId: string,
+  sessionId: string,
+  persistedOrder: string[] | undefined,
+): void {
+  if (isQuickChatSetupSessionId(sessionId)) return;
+  const base = quickChat.tabOrderByWorkspace[workspaceId] ?? persistedOrder;
+  if (!base) return;
+  const reference = `conversation:${sessionId}`;
+  quickChat.tabOrderByWorkspace[workspaceId] = base.includes(reference)
+    ? [...base]
+    : [...base, reference];
+}
+
 function persistRememberedSelection(get: ImmerGet): void {
   const quickChat = get().quickChat;
   persistQuickChatSelection(
@@ -224,6 +245,12 @@ function openQuickChat(set: ImmerSet, get: ImmerGet) {
       draft.quickChat.isOpen = true;
       draft.quickChat.activeSessionId = sessionId;
       draft.quickChat.activeKind = "conversation";
+      trackOpenQuickChatTab(
+        draft.quickChat,
+        workspaceId,
+        sessionId,
+        get().userSettings?.quickChatTabOrderByWorkspace?.[workspaceId],
+      );
       const session = draft.quickChat.sessions.find((item) => item.sessionId === sessionId);
       if (session) rememberSelectedSession(draft.quickChat, session);
       // Only a successful open clears the dots; a rejected cross-workspace open
@@ -257,6 +284,12 @@ function addQuickChatSession(set: ImmerSet, get: ImmerGet) {
         })
       )
         return;
+      trackOpenQuickChatTab(
+        draft.quickChat,
+        workspaceId,
+        sessionId,
+        get().userSettings?.quickChatTabOrderByWorkspace?.[workspaceId],
+      );
       if (!draft.quickChat.isOpen || !activeWorkspaceId || activeWorkspaceId === workspaceId) {
         draft.quickChat.activeSessionId = sessionId;
         draft.quickChat.activeKind = "conversation";
@@ -340,7 +373,10 @@ function syncQuickChatSessionsAction(set: ImmerSet, get: ImmerGet) {
       if (draft.quickChat.pendingOpen?.workspaceId !== workspaceId) {
         draft.quickChat.pendingOpen = null;
       }
-      draft.quickChat = reconcileQuickChatSessions(draft.quickChat, workspaceId, sessions);
+      const order =
+        draft.quickChat.tabOrderByWorkspace[workspaceId] ??
+        get().userSettings?.quickChatTabOrderByWorkspace?.[workspaceId];
+      draft.quickChat = reconcileQuickChatSessions(draft.quickChat, workspaceId, sessions, order);
       clearMissingRememberedSelections(draft.quickChat, workspaceId, sessions);
       draft.quickChat.selectionReadyByWorkspace[workspaceId] = true;
       resolvePendingOpen(

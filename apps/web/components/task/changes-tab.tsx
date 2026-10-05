@@ -13,6 +13,7 @@ import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-sta
 import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
 import { cn } from "@kandev/ui/lib/utils";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
+import { closeTargets } from "./tab-close-targets";
 import { autoActivateChangesPanel } from "./changes-panel-focus";
 import { useTranslation } from "react-i18next";
 
@@ -107,12 +108,19 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
     };
   }, []);
 
-  const handleCloseOthers = useCallback(() => {
-    const toClose = api.group.panels.filter(
-      (p) => p.id !== api.id && p.id !== "chat" && !p.id.startsWith("session:"),
-    );
-    for (const panel of toClose) containerApi.removePanel(panel);
-  }, [api, containerApi]);
+  const closePanels = useCallback(
+    (mode: "others" | "right") => {
+      const orderedIds = api.group.panels.map((panel) => panel.id);
+      for (const panelId of closeTargets(orderedIds, api.id, mode)) {
+        const panel = containerApi.getPanel(panelId);
+        if (panel) containerApi.removePanel(panel);
+      }
+    },
+    [api, containerApi],
+  );
+
+  const handleCloseOthers = useCallback(() => closePanels("others"), [closePanels]);
+  const handleCloseToRight = useCallback(() => closePanels("right"), [closePanels]);
 
   return (
     <ContextMenu>
@@ -131,6 +139,9 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
       <ContextMenuContent>
         <ContextMenuItem className="cursor-pointer" onSelect={handleCloseOthers}>
           {t("task:closeOthers")}
+        </ContextMenuItem>
+        <ContextMenuItem className="cursor-pointer" onSelect={handleCloseToRight}>
+          {t("task:closeTabsToRight")}
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

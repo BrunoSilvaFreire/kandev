@@ -43,6 +43,7 @@ function useQuickChatStore(workspaceId: string) {
       activateQuickTerminal: s.activateQuickTerminal,
       removeQuickTerminal: s.removeQuickTerminal,
       renameQuickChatSession: s.renameQuickChatSession,
+      setQuickChatInitialPrompt: s.setQuickChatInitialPrompt,
       openQuickChat: s.openQuickChat,
       applyAgentProfileRecentUse: s.applyAgentProfileRecentUse,
       agentProfiles: s.agentProfiles.items ?? [],
@@ -149,6 +150,7 @@ async function startQuickChatForAgent(
   agentId: string,
   store: QuickChatStore,
   repositories: QuickChatRepositoryInput[],
+  prompt?: string,
 ) {
   const agent = store.agentProfiles.find((p) => p.id === agentId);
   const sessionCount =
@@ -158,12 +160,19 @@ async function startQuickChatForAgent(
         (session.kind ?? "chat") === "chat" &&
         !isQuickChatSetupSessionId(session.sessionId),
     ).length + 1;
+  const trimmedPrompt = prompt?.trim() ?? "";
+  const isPassthrough = agent?.cli_passthrough === true;
+  // The opening prompt names the tab and task, matching the Config Chat flow.
   // i18n-exempt: persisted as the quick-chat task title, same contract as use-config-chat.ts.
-  const initialName = `${agent?.label || "Agent"} - Chat ${sessionCount}`;
+  const initialName =
+    trimmedPrompt.slice(0, 40) || `${agent?.label || "Agent"} - Chat ${sessionCount}`;
   const response = await startQuickChat(workspaceId, {
     agent_profile_id: agentId,
     title: initialName,
-    ...(store.agentGeneratedTaskTitles ? { auto_title: true } : {}),
+    ...(store.agentGeneratedTaskTitles && !trimmedPrompt ? { auto_title: true } : {}),
+    // Passthrough profiles have no composer-ready session, so the prompt must
+    // ride the start request; ACP profiles submit it after the session exists.
+    ...(isPassthrough && trimmedPrompt ? { prompt: trimmedPrompt } : {}),
     repositories: repositories.length > 0 ? repositories : undefined,
   });
   return {
@@ -171,6 +180,8 @@ async function startQuickChatForAgent(
     name: initialName,
     taskId: response.task_id,
     agentProfileId: response.agent_profile_id ?? agentId,
+    prompt: trimmedPrompt,
+    isPassthrough,
   };
 }
 
@@ -198,12 +209,18 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
   }, []);
 
   const handleSelectAgent = useCallback(
-    async (agentId: string, repositories: QuickChatRepositoryInput[] = []) => {
+    async (agentId: string, repositories: QuickChatRepositoryInput[] = [], prompt = "") => {
       const requestId = ++latestRequestId.current;
       const setupSessionId = store.activeSessionId;
       setPendingAgentId(agentId);
       try {
-        const result = await startQuickChatForAgent(workspaceId, agentId, store, repositories);
+        const result = await startQuickChatForAgent(
+          workspaceId,
+          agentId,
+          store,
+          repositories,
+          prompt,
+        );
         if (latestRequestId.current !== requestId) {
           // A newer pick superseded us — the backend already booted this
           // agent, so delete the orphan task. Best-effort: ignore failures.
@@ -226,6 +243,9 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
           result.taskId,
         );
         store.renameQuickChatSession(result.sessionId, result.name);
+        if (!result.isPassthrough && result.prompt) {
+          store.setQuickChatInitialPrompt(result.sessionId, result.prompt);
+        }
       } catch (error) {
         if (latestRequestId.current !== requestId) return;
         toast({
@@ -278,6 +298,24 @@ function useQuickChatRename(store: QuickChatStore) {
   );
 }
 
+function useQuickChatTerminalPersistence(store: QuickChatStore) {
+  const handleTerminalStateChange = useCallback(
+    (tabId: string, state: PtyTerminalState) => {
+      persistQuickTerminalState(store, tabId, state);
+    },
+    [store],
+  );
+
+  const handleTerminalDescriptorReady = useCallback(
+    (tabId: string, descriptor: QuickTerminalTab) => {
+      applyQuickTerminalDescriptor(store, tabId, descriptor);
+    },
+    [store],
+  );
+
+  return { handleTerminalStateChange, handleTerminalDescriptorReady };
+}
+
 function useQuickChatTabActions({
   workspaceId,
   sessions,
@@ -294,6 +332,9 @@ function useQuickChatTabActions({
     handleCloseTab,
     handleConfirmClose,
     handleCloseTerminal,
+    handleCloseOthers,
+    handleCloseToRight,
+    handleRequestDelete,
   } = useQuickChatCloseActions({
     workspaceId,
     store,
@@ -334,19 +375,8 @@ function useQuickChatTabActions({
     [resetPendingStarts, store, workspaceId],
   );
 
-  const handleTerminalStateChange = useCallback(
-    (tabId: string, state: PtyTerminalState) => {
-      persistQuickTerminalState(store, tabId, state);
-    },
-    [store],
-  );
-
-  const handleTerminalDescriptorReady = useCallback(
-    (tabId: string, descriptor: QuickTerminalTab) => {
-      applyQuickTerminalDescriptor(store, tabId, descriptor);
-    },
-    [store],
-  );
+  const { handleTerminalStateChange, handleTerminalDescriptorReady } =
+    useQuickChatTerminalPersistence(store);
 
   const handleSetupKindChange = useCallback(
     (kind: QuickChatSessionKind) => {
@@ -381,6 +411,9 @@ function useQuickChatTabActions({
     setActiveQuickChatSession,
     handleCloseTab,
     handleCloseTerminal,
+    handleCloseOthers,
+    handleCloseToRight,
+    handleRequestDelete,
     handleConfirmClose,
     handleRename,
   };

@@ -82,6 +82,7 @@ function makeAppState() {
     activateQuickTerminal: vi.fn(),
     removeQuickTerminal: vi.fn(),
     renameQuickChatSession: vi.fn(),
+    setQuickChatInitialPrompt: vi.fn(),
     openQuickChat: vi.fn(),
     applyAgentProfileRecentUse: vi.fn(),
     setQuickChatTabOrder: vi.fn(),
@@ -110,6 +111,7 @@ function makeStore(overrides: Partial<MockStore> = {}): MockStore {
     activateQuickTerminal: vi.fn(),
     removeQuickTerminal: vi.fn(),
     renameQuickChatSession: vi.fn(),
+    setQuickChatInitialPrompt: vi.fn(),
     openQuickChat: vi.fn(),
     applyAgentProfileRecentUse: vi.fn(),
     agentProfiles: [
@@ -313,7 +315,7 @@ describe("useQuickChatModal — setup lifecycle", () => {
 });
 
 describe("useQuickChatModal — persisted config lifecycle", () => {
-  it("deletes the backing task only after config-tab close is confirmed", async () => {
+  it("closes a config tab without deleting, and deletes only after confirmation", async () => {
     const configSessionId = "config-session";
     mockAppState.quickChat.sessions = [
       { sessionId: configSessionId, workspaceId: WORKSPACE_ID, kind: "config" },
@@ -325,10 +327,11 @@ describe("useQuickChatModal — persisted config lifecycle", () => {
 
     act(() => result.current.handleCloseTab(configSessionId));
     expect(mockDeleteTask).not.toHaveBeenCalled();
+    expect(mockAppState.removeQuickChatSession).toHaveBeenCalledWith(configSessionId);
 
+    act(() => result.current.handleRequestDelete(configSessionId));
     await act(async () => result.current.handleConfirmClose());
 
-    expect(mockAppState.removeQuickChatSession).toHaveBeenCalledWith(configSessionId);
     expect(mockDeleteTask).toHaveBeenCalledWith("config-task");
   });
 
@@ -343,10 +346,10 @@ describe("useQuickChatModal — persisted config lifecycle", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
 
-    act(() => result.current.handleCloseTab(configSessionId));
+    act(() => result.current.handleRequestDelete(configSessionId));
     await act(async () => result.current.handleConfirmClose());
 
-    expect(mockAppState.closeQuickChatSession).not.toHaveBeenCalled();
+    expect(mockAppState.removeQuickChatSession).not.toHaveBeenCalled();
     expect(mockToast).toHaveBeenCalledWith(expect.objectContaining({ variant: "error" }));
     consoleError.mockRestore();
   });
@@ -379,9 +382,9 @@ describe("useQuickChatModal — persisted config lifecycle", () => {
     const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
 
     act(() => result.current.handleCloseTab(SESSION_ONE_ID));
-    await act(async () => result.current.handleConfirmClose());
 
     expect(mockAppState.removeQuickChatSession).toHaveBeenCalledWith(SESSION_ONE_ID);
+    expect(mockDeleteTask).not.toHaveBeenCalled();
     expect(mockAppState.activateQuickTerminal).toHaveBeenCalledWith(TERMINAL_ONE_ID, WORKSPACE_ID);
   });
 

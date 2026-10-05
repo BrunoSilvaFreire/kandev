@@ -56,6 +56,9 @@ function QuickChatContent({
         activeTerminalTabId={quickChat.activeTerminalTabId}
         onTabChange={quickChat.setActiveQuickChatSession}
         onTabClose={quickChat.handleCloseTab}
+        onTabCloseOthers={quickChat.handleCloseOthers}
+        onTabCloseToRight={quickChat.handleCloseToRight}
+        onTabDeleteRequest={quickChat.handleRequestDelete}
         onNewChat={quickChat.handleNewChat}
         onNewTerminal={quickChat.handleNewTerminal}
         onTerminalActivate={quickChat.handleActivateTerminal}

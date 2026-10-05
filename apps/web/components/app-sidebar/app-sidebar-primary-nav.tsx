@@ -1,8 +1,13 @@
 "use client";
 
-import { IconHome, IconInbox, IconMessageCircle } from "@tabler/icons-react";
+import { useSyncExternalStore } from "react";
+import { IconGauge, IconHome, IconInbox, IconMessageCircle } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
+import {
+  getProviderUsageAttention,
+  subscribeProviderUsageAttention,
+} from "@/lib/state/provider-usage-attention";
 import { selectOfficeInboxCount } from "@/lib/state/slices/office/selectors";
 import {
   selectNeedsYouInboxCount,
@@ -93,7 +98,40 @@ export function AppSidebarFixedNav({ collapsed }: { collapsed: boolean }) {
           activity={quickChatActivity}
         />
       )}
+      <AppSidebarUsageItem collapsed={collapsed} />
     </>
+  );
+}
+
+export function AppSidebarUsageItem({ collapsed }: { collapsed: boolean }) {
+  const { t } = useTranslation();
+  const attention = useSyncExternalStore(
+    subscribeProviderUsageAttention,
+    getProviderUsageAttention,
+    () => false,
+  );
+  return (
+    <AppSidebarNavItem
+      icon={IconGauge}
+      label={t("usage:title")}
+      href="/usage"
+      collapsed={collapsed}
+      testId="sidebar-usage"
+      dot={attention}
+    />
+  );
+}
+
+export function AppSidebarQuickChatsItem({ collapsed }: { collapsed: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <AppSidebarNavItem
+      icon={IconMessageCircle}
+      label={t("sidebar:quickChats")}
+      href="/quick-chats"
+      collapsed={collapsed}
+      testId="sidebar-quick-chats"
+    />
   );
 }
 
@@ -106,6 +144,7 @@ export function AppSidebarPrimaryNav({
     <div className="flex flex-col gap-0.5">
       {showHome && <AppSidebarHomeItem collapsed={collapsed} />}
       <AppSidebarFixedNav collapsed={collapsed} />
+      <AppSidebarQuickChatsItem collapsed={collapsed} />
       {showNewTask && <AppSidebarNewTaskItem collapsed={collapsed} />}
     </div>
   );

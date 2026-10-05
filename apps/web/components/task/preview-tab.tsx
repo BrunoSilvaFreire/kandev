@@ -45,7 +45,10 @@ function PreviewTab(props: IDockviewPanelHeaderProps & { type: PreviewType }) {
   const { api, containerApi, type } = props;
   const promote = useDockviewStore((s) => s.promotePreviewToPinned);
   const onMouseDown = useMiddleClickClose(api, containerApi);
-  const { handleClose, handleCloseOthers } = useTabContextActions(api, containerApi);
+  const { handleClose, handleCloseOthers, handleCloseToRight } = useTabContextActions(
+    api,
+    containerApi,
+  );
   const handleMaximizeDblClick = useTabMaximizeOnDoubleClick(api);
   const isPromoted = (props.params as Record<string, unknown> | undefined)?.promoted === true;
 
@@ -87,6 +90,9 @@ function PreviewTab(props: IDockviewPanelHeaderProps & { type: PreviewType }) {
         <ContextMenuItem className="cursor-pointer" onSelect={handleCloseOthers}>
           {t("task:closeOthers")}
         </ContextMenuItem>
+        <ContextMenuItem className="cursor-pointer" onSelect={handleCloseToRight}>
+          {t("task:closeTabsToRight")}
+        </ContextMenuItem>
         {!isPromoted && (
           <>
             <ContextMenuSeparator />
@@ -118,7 +124,10 @@ export function PinnedDefaultTab(props: IDockviewPanelHeaderProps) {
   const { t } = useTranslation();
   const { api, containerApi } = props;
   const onMouseDown = useMiddleClickClose(api, containerApi);
-  const { handleClose, handleCloseOthers } = useTabContextActions(api, containerApi);
+  const { handleClose, handleCloseOthers, handleCloseToRight } = useTabContextActions(
+    api,
+    containerApi,
+  );
   const onDoubleClick = useTabMaximizeOnDoubleClick(api);
 
   return (
@@ -138,6 +147,9 @@ export function PinnedDefaultTab(props: IDockviewPanelHeaderProps) {
         </ContextMenuItem>
         <ContextMenuItem className="cursor-pointer" onSelect={handleCloseOthers}>
           {t("task:closeOthers")}
+        </ContextMenuItem>
+        <ContextMenuItem className="cursor-pointer" onSelect={handleCloseToRight}>
+          {t("task:closeTabsToRight")}
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

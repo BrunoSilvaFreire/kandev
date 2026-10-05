@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QuickChatSetup } from "./quick-chat-setup";
 
 let defaultAgentId = "";
+let promptValue = "";
 let agentProfiles: Array<{ id: string; enabled?: boolean }> = [
   { id: "agent-a" },
   { id: "agent-b" },
@@ -15,6 +16,7 @@ vi.mock("@/components/state-provider", () => ({
     selector({
       features: { dynamicAgentRouting: true },
       agentProfiles: { items: agentProfiles },
+      userSettings: { defaultUtilityAgentProfileId: null },
       workspaces: {
         items: [{ id: "workspace-1", default_agent_profile_id: defaultAgentId }],
       },
@@ -44,6 +46,14 @@ vi.mock("@/components/task-create-dialog-selectors", () => ({
       {value || "Select agent"}
     </button>
   ),
+  TaskFormInputs: ({ descriptionValueRef }: { descriptionValueRef: { current: unknown } }) => {
+    descriptionValueRef.current = {
+      getValue: () => promptValue,
+      setValue: () => {},
+      getAttachments: () => [],
+    };
+    return <textarea data-testid="quick-chat-initial-prompt" />;
+  },
 }));
 
 vi.mock("@/components/task-create-dialog-workspace-repo-chips", () => ({
@@ -80,6 +90,7 @@ const props = {
 
 beforeEach(() => {
   defaultAgentId = "";
+  promptValue = "";
   agentProfiles = [{ id: "agent-a" }, { id: "agent-b" }];
   vi.clearAllMocks();
 });
@@ -146,5 +157,25 @@ describe("QuickChatSetup default agent", () => {
     expect(screen.getByTestId(AGENT_SELECTOR_TEST_ID).textContent).toContain("Select agent");
     expect((screen.getByTestId("quick-chat-start") as HTMLButtonElement).disabled).toBe(true);
     expect(props.onStart).not.toHaveBeenCalled();
+  });
+
+  it("submits the optional initial prompt with the start action", () => {
+    defaultAgentId = "agent-a";
+    promptValue = "Investigate the flaky test";
+    render(<QuickChatSetup {...props} />);
+
+    fireEvent.click(screen.getByTestId("quick-chat-start"));
+
+    expect(props.onStart).toHaveBeenCalledWith("agent-a", [], "Investigate the flaky test");
+  });
+
+  it("starts without a prompt when the prompt is empty", () => {
+    defaultAgentId = "agent-a";
+    promptValue = "";
+    render(<QuickChatSetup {...props} />);
+
+    fireEvent.click(screen.getByTestId("quick-chat-start"));
+
+    expect(props.onStart).toHaveBeenCalledWith("agent-a", [], undefined);
   });
 });

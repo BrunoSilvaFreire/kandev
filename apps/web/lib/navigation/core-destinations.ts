@@ -27,9 +27,11 @@ import {
   IconBrandGitlab,
   IconChartBar,
   IconColumns,
+  IconGauge,
   IconHexagon,
   IconHome,
   IconList,
+  IconMessageCircle,
   IconSettings,
   IconTicket,
 } from "@tabler/icons-react";
@@ -121,6 +123,40 @@ export const APP_DESTINATIONS: Destination[] = [
       id: "nav-stats",
       labelKey: "common:commandGoToStats",
       keywordsKey: "common:commandGoToStatsKeywords",
+    },
+  },
+  {
+    id: "usage",
+    labelKey: "usage:title",
+    icon: IconGauge,
+    section: "insights",
+    href: "/usage",
+    // Desktop gets a bespoke primary-nav item between Inbox and New Task; the
+    // manifest entry gives the mobile menu and the command palette the same
+    // destination without duplicating it in the desktop sidebar.
+    surfaces: MENU_AND_PALETTE,
+    palette: {
+      id: "nav-usage",
+      labelKey: "usage:title",
+      keywordsKey: "usage:paletteKeywords",
+      href: "/usage",
+    },
+  },
+  {
+    id: "quickChats",
+    labelKey: "sidebar:quickChats",
+    icon: IconMessageCircle,
+    section: "insights",
+    href: "/quick-chats",
+    // Desktop gets a bespoke primary-nav item between Usage and New Task; the
+    // manifest entry gives the mobile menu and the command palette the same
+    // destination without duplicating it in the desktop sidebar.
+    surfaces: MENU_AND_PALETTE,
+    palette: {
+      id: "nav-quick-chats",
+      labelKey: "sidebar:quickChats",
+      keywordsKey: "sidebar:quickChatsKeywords",
+      href: "/quick-chats",
     },
   },
   {

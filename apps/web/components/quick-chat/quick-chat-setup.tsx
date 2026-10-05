@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconInfoCircle, IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
-import { AgentSelector } from "@/components/task-create-dialog-selectors";
+import { AgentSelector, TaskFormInputs } from "@/components/task-create-dialog-selectors";
+import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
 import { WorkspaceRepoChips } from "@/components/task-create-dialog-workspace-repo-chips";
 import { useRepositoriesState } from "@/components/task-create-dialog-repositories-state";
@@ -17,6 +18,7 @@ import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import type { Repository } from "@/lib/types/http";
 import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
 import { ConfigurationChatToggle } from "./configuration-chat-toggle";
+import { seedQuickChatAgentProfileId } from "./quick-chat-agent-seed";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 
@@ -24,7 +26,7 @@ type QuickChatSetupProps = {
   workspaceId: string;
   canCreateConfigurationChat: boolean;
   pendingAgentId: string | null;
-  onStart: (agentId: string, repositories: QuickChatRepositoryInput[]) => void;
+  onStart: (agentId: string, repositories: QuickChatRepositoryInput[], prompt?: string) => void;
   onCancel: () => void;
   onKindChange: (kind: QuickChatSessionKind) => void;
 };
@@ -227,34 +229,55 @@ function SetupFooter({
   );
 }
 
-export function QuickChatSetup({
+function PromptField({
   workspaceId,
-  canCreateConfigurationChat,
-  pendingAgentId,
-  onStart,
-  onCancel,
-  onKindChange,
-}: QuickChatSetupProps) {
+  disabled,
+  promptRef,
+  onSubmitShortcut,
+}: {
+  workspaceId: string;
+  disabled: boolean;
+  promptRef: React.RefObject<TaskFormInputsHandle | null>;
+  onSubmitShortcut: () => void;
+}) {
   const { t } = useTranslation();
-  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
-  const agentProfiles = useAppStore((state) => state.agentProfiles.items ?? []);
-  const defaultAgentId = useAppStore(
-    (state) =>
-      state.workspaces.items.find((workspace) => workspace.id === workspaceId)
-        ?.default_agent_profile_id ?? "",
+  const handleDescriptionChange = useCallback(() => {}, []);
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent) => {
+      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        onSubmitShortcut();
+      }
+    },
+    [onSubmitShortcut],
   );
-  const { agentProfileId, setAgentProfileId, hasSelectedEnabledProfile } =
-    useQuickChatAgentSelection(agentProfiles, defaultAgentId, dynamicRoutingEnabled);
-  const { repositories, isLoading } = useRepositories(workspaceId, true);
-  const repoState = useRepositoriesState();
-  const isStarting = pendingAgentId !== null;
-  const hasIncompleteRow = repoState.repositories.some((row) => !row.repositoryId || !row.branch);
-  const { canAddMore, addHint } = repositoryAddState(
-    t,
-    isLoading,
-    repositories.length,
-    repoState.repositories.length,
+  return (
+    <section className="space-y-2" aria-labelledby="quick-chat-prompt-label">
+      <div>
+        <h3 id="quick-chat-prompt-label" className="text-sm font-medium">
+          {t("chat:initialPrompt")}{" "}
+          <span className="font-normal text-muted-foreground">{t("chat:optional")}</span>
+        </h3>
+        <p id="quick-chat-prompt-help" className="text-xs text-muted-foreground">
+          {t("chat:initialPromptHelp")}
+        </p>
+      </div>
+      <TaskFormInputs
+        workspaceId={workspaceId}
+        isSessionMode
+        autoFocus={false}
+        initialDescription=""
+        onDescriptionChange={handleDescriptionChange}
+        descriptionValueRef={promptRef}
+        onKeyDown={handleKeyDown}
+        disabled={disabled}
+        placeholder={t("chat:initialPromptPlaceholder")}
+      />
+    </section>
   );
+}
+
+function useQuickChatSetupRepositories(repoState: ReturnType<typeof useRepositoriesState>) {
   const handleRepositoryChange = useCallback(
     (key: string, repositoryId: string) => {
       repoState.updateRepository(key, { repositoryId, localPath: undefined, branch: "" });
@@ -272,7 +295,59 @@ export function QuickChatSetup({
         .map((row) => ({ repository_id: row.repositoryId as string, base_branch: row.branch })),
     [repoState.repositories],
   );
+  return { handleRepositoryChange, handleBranchChange, selectedRepositories };
+}
+
+export function QuickChatSetup({
+  workspaceId,
+  canCreateConfigurationChat,
+  pendingAgentId,
+  onStart,
+  onCancel,
+  onKindChange,
+}: QuickChatSetupProps) {
+  const { t } = useTranslation();
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
+  const agentProfiles = useAppStore((state) => state.agentProfiles.items ?? []);
+  const defaultAgentId = useAppStore(
+    (state) =>
+      state.workspaces.items.find((workspace) => workspace.id === workspaceId)
+        ?.default_agent_profile_id ?? "",
+  );
+  const utilityAgentProfileId = useAppStore(
+    (state) => state.userSettings.defaultUtilityAgentProfileId,
+  );
+  const seededAgentId = useMemo(
+    () =>
+      seedQuickChatAgentProfileId({
+        agentProfiles,
+        utilityAgentProfileId,
+        workspaceDefaultAgentProfileId: defaultAgentId,
+        dynamicRoutingEnabled,
+      }),
+    [agentProfiles, utilityAgentProfileId, defaultAgentId, dynamicRoutingEnabled],
+  );
+  const { agentProfileId, setAgentProfileId, hasSelectedEnabledProfile } =
+    useQuickChatAgentSelection(agentProfiles, seededAgentId, dynamicRoutingEnabled);
+  const promptRef = useRef<TaskFormInputsHandle | null>(null);
+  const { repositories, isLoading } = useRepositories(workspaceId, true);
+  const repoState = useRepositoriesState();
+  const isStarting = pendingAgentId !== null;
+  const hasIncompleteRow = repoState.repositories.some((row) => !row.repositoryId || !row.branch);
+  const { canAddMore, addHint } = repositoryAddState(
+    t,
+    isLoading,
+    repositories.length,
+    repoState.repositories.length,
+  );
+  const { handleRepositoryChange, handleBranchChange, selectedRepositories } =
+    useQuickChatSetupRepositories(repoState);
   const startDisabled = !hasSelectedEnabledProfile || hasIncompleteRow || isStarting;
+  const handleStart = useCallback(() => {
+    if (!hasSelectedEnabledProfile) return;
+    const prompt = promptRef.current?.getValue().trim();
+    onStart(agentProfileId, selectedRepositories, prompt || undefined);
+  }, [agentProfileId, hasSelectedEnabledProfile, onStart, selectedRepositories]);
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-popover" data-testid="quick-chat-setup">
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-8 sm:py-8">
@@ -291,6 +366,12 @@ export function QuickChatSetup({
             disabled={isStarting}
             onChange={setAgentProfileId}
           />
+          <PromptField
+            workspaceId={workspaceId}
+            disabled={isStarting}
+            promptRef={promptRef}
+            onSubmitShortcut={handleStart}
+          />
           <RepositoryField
             workspaceId={workspaceId}
             repositories={repositories}
@@ -308,9 +389,7 @@ export function QuickChatSetup({
         isStarting={isStarting}
         startDisabled={startDisabled}
         onCancel={onCancel}
-        onStart={() => {
-          if (hasSelectedEnabledProfile) onStart(agentProfileId, selectedRepositories);
-        }}
+        onStart={handleStart}
       />
     </div>
   );

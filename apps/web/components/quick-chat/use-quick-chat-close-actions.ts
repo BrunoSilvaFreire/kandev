@@ -95,14 +95,42 @@ function useQuickChatSessionClose(
   const [sessionToClose, setSessionToClose] = useState<string | null>(null);
   const [replacementReference, setReplacementReference] = useState<string | null>(null);
 
-  const handleCloseTab = useCallback(
+  // Closing a tab never touches the server. It removes the chat from the
+  // persisted tab order and tombstones the local session so reconciliation
+  // does not re-add it. Deletion is a separate, confirmed action.
+  const closeTab = useCallback(
     (sessionId: string) => {
       resetPendingStarts();
+      const reference = conversationTabReference(sessionId);
+      const replacement =
+        activeTabReference === reference
+          ? (adjacentQuickChatTabReference(tabOrder, reference) ?? null)
+          : null;
       if (isQuickChatSetupSessionId(sessionId)) {
-        setReplacementReference(null);
         store.closeQuickChatSession(sessionId);
-        return;
+      } else {
+        store.removeQuickChatSession(sessionId);
       }
+      removeTabReference(reference);
+      if (replacement) onActivateTabReference(replacement);
+    },
+    [
+      activeTabReference,
+      onActivateTabReference,
+      removeTabReference,
+      resetPendingStarts,
+      store,
+      tabOrder,
+    ],
+  );
+
+  const handleCloseTab = useCallback((sessionId: string) => closeTab(sessionId), [closeTab]);
+
+  // Context-menu "Delete conversation": keep the tab until the user confirms.
+  const handleRequestDelete = useCallback(
+    (sessionId: string) => {
+      resetPendingStarts();
+      if (isQuickChatSetupSessionId(sessionId)) return;
       const reference = conversationTabReference(sessionId);
       setReplacementReference(
         activeTabReference === reference
@@ -111,7 +139,7 @@ function useQuickChatSessionClose(
       );
       setSessionToClose(sessionId);
     },
-    [activeTabReference, resetPendingStarts, store, tabOrder],
+    [activeTabReference, resetPendingStarts, tabOrder],
   );
 
   const handleConfirmClose = useCallback(async () => {
@@ -150,7 +178,13 @@ function useQuickChatSessionClose(
     toast,
   ]);
 
-  return { sessionToClose, setSessionToClose, handleCloseTab, handleConfirmClose };
+  return {
+    sessionToClose,
+    setSessionToClose,
+    handleCloseTab,
+    handleRequestDelete,
+    handleConfirmClose,
+  };
 }
 
 function useQuickTerminalClose(
@@ -245,5 +279,53 @@ export function useQuickChatCloseActions({
     navigation,
   );
 
-  return { ...sessionClose, handleCloseTerminal };
+  const closeConversationReference = useCallback(
+    (reference: string) => {
+      const sessionId = reference.slice("conversation:".length);
+      if (!sessionId) return;
+      if (isQuickChatSetupSessionId(sessionId)) store.closeQuickChatSession(sessionId);
+      else store.removeQuickChatSession(sessionId);
+      removeTabReference(reference);
+    },
+    [removeTabReference, store],
+  );
+
+  // Close Others / Close Tabs to the Right operate on conversation tabs; the
+  // target tab stays and becomes active when the previous active tab closed.
+  const closeTargetReferences = useCallback(
+    (sessionId: string, mode: "others" | "right") => {
+      resetPendingStarts();
+      const reference = conversationTabReference(sessionId);
+      const index = tabOrder.indexOf(reference);
+      if (index < 0) return;
+      const targets = (
+        mode === "others"
+          ? tabOrder.filter((item) => item !== reference)
+          : tabOrder.slice(index + 1)
+      ).filter((item) => item.startsWith("conversation:"));
+      const closed = new Set([reference, ...targets]);
+      for (const target of targets) closeConversationReference(target);
+      if (activeTabReference && closed.has(activeTabReference)) {
+        onActivateTabReference(reference);
+      }
+    },
+    [
+      activeTabReference,
+      closeConversationReference,
+      onActivateTabReference,
+      resetPendingStarts,
+      tabOrder,
+    ],
+  );
+
+  const handleCloseOthers = useCallback(
+    (sessionId: string) => closeTargetReferences(sessionId, "others"),
+    [closeTargetReferences],
+  );
+  const handleCloseToRight = useCallback(
+    (sessionId: string) => closeTargetReferences(sessionId, "right"),
+    [closeTargetReferences],
+  );
+
+  return { ...sessionClose, handleCloseTerminal, handleCloseOthers, handleCloseToRight };
 }

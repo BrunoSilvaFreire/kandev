@@ -31,6 +31,8 @@ type AppSidebarNavItemProps = {
   testId?: string;
   /** Optional extra classes for surface-specific spacing. */
   className?: string;
+  /** Show a small attention dot on the icon (e.g. a provider nearing quota). */
+  dot?: boolean;
 };
 
 type TriggerProps = {
@@ -111,6 +113,7 @@ export function AppSidebarNavItem({
   testId,
   className,
   activity = null,
+  dot = false,
 }: AppSidebarNavItemProps) {
   const pathname = usePathname();
   const active = isActive ?? isPathActive(pathname, href, exactMatch);
@@ -130,6 +133,12 @@ export function AppSidebarNavItem({
       <span className="relative flex">
         <Icon className="h-4 w-4 shrink-0" />
         <QuickChatActivityIndicator activity={activity} />
+        {dot && (
+          <span
+            className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-amber-500"
+            data-testid="sidebar-usage-dot"
+          />
+        )}
       </span>
       {!collapsed && (
         <>

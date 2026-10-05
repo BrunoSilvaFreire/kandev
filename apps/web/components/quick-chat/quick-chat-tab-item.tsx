@@ -15,6 +15,7 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@kandev/ui/context-menu";
 import {
@@ -153,6 +154,10 @@ type QuickChatTabItemProps = {
   kind?: QuickChatSessionKind;
   onActivate: () => void;
   onClose: () => void;
+  onCloseOthers?: () => void;
+  onCloseToRight?: () => void;
+  onDeleteConversation?: () => void;
+  onOpenFullPage?: () => void;
   onRename: (name: string) => void;
   onMoveLeft?: () => void;
   onMoveRight?: () => void;
@@ -161,7 +166,25 @@ type QuickChatTabItemProps = {
   dragProps?: QuickChatTabDragProps;
 };
 
-function RenameContextMenu({ children, onRename }: { children: ReactNode; onRename: () => void }) {
+const noop = () => {};
+
+function QuickChatTabContextMenu({
+  children,
+  onRename,
+  onClose,
+  onCloseOthers,
+  onCloseToRight,
+  onDeleteConversation,
+  onOpenFullPage,
+}: {
+  children: ReactNode;
+  onRename: () => void;
+  onClose: () => void;
+  onCloseOthers: () => void;
+  onCloseToRight: () => void;
+  onDeleteConversation: () => void;
+  onOpenFullPage?: () => void;
+}) {
   const { t } = useTranslation();
 
   return (
@@ -170,6 +193,28 @@ function RenameContextMenu({ children, onRename }: { children: ReactNode; onRena
       <ContextMenuContent>
         <ContextMenuItem className="min-h-11 cursor-pointer sm:min-h-7" onSelect={onRename}>
           {t("common:rename")}
+        </ContextMenuItem>
+        {onOpenFullPage && (
+          <ContextMenuItem className="min-h-11 cursor-pointer sm:min-h-7" onSelect={onOpenFullPage}>
+            {t("chat:openFullPage")}
+          </ContextMenuItem>
+        )}
+        <ContextMenuSeparator />
+        <ContextMenuItem className="min-h-11 cursor-pointer sm:min-h-7" onSelect={onClose}>
+          {t("common:close")}
+        </ContextMenuItem>
+        <ContextMenuItem className="min-h-11 cursor-pointer sm:min-h-7" onSelect={onCloseOthers}>
+          {t("task:closeOthers")}
+        </ContextMenuItem>
+        <ContextMenuItem className="min-h-11 cursor-pointer sm:min-h-7" onSelect={onCloseToRight}>
+          {t("task:closeTabsToRight")}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          className="min-h-11 cursor-pointer text-destructive sm:min-h-7"
+          onSelect={onDeleteConversation}
+        >
+          {t("chat:deleteConversation")}
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
@@ -307,38 +352,55 @@ function QuickChatTabActions({
   );
 }
 
+type QuickChatTabContextProps = {
+  onRename: () => void;
+  onClose: () => void;
+  onCloseOthers?: () => void;
+  onCloseToRight?: () => void;
+  onDeleteConversation?: () => void;
+  onOpenFullPage?: () => void;
+};
+
 type QuickChatTabContentProps = {
   isActive: boolean;
   editContainerRef: RefObject<HTMLDivElement | null>;
   bodyProps: QuickChatTabBodyProps;
   actionsProps: QuickChatTabActionsProps;
+  contextProps: QuickChatTabContextProps;
   dragProps?: QuickChatTabDragProps;
 };
+
+function quickChatTabClassName(isEditing: boolean, isActive: boolean, draggable: boolean): string {
+  let tabStateClassName = "text-muted-foreground hover:bg-muted";
+  if (isEditing) {
+    tabStateClassName =
+      "border border-primary bg-accent/40 text-foreground shadow-sm ring-1 ring-primary/30";
+  } else if (isActive) {
+    tabStateClassName = "bg-background text-foreground shadow-sm";
+  }
+  const dragClassName = draggable ? "cursor-grab active:cursor-grabbing" : "";
+  return `flex items-center gap-1 rounded whitespace-nowrap transition-colors ${tabStateClassName} ${dragClassName}`;
+}
 
 function QuickChatTabContent({
   isActive,
   editContainerRef,
   bodyProps,
   actionsProps,
+  contextProps,
   dragProps,
 }: QuickChatTabContentProps) {
-  let tabStateClassName = "text-muted-foreground hover:bg-muted";
-  if (bodyProps.isEditing) {
-    tabStateClassName =
-      "border border-primary bg-accent/40 text-foreground shadow-sm ring-1 ring-primary/30";
-  } else if (isActive) {
-    tabStateClassName = "bg-background text-foreground shadow-sm";
-  }
-
   const content = (
     <div
       ref={bodyProps.isEditing ? editContainerRef : dragProps?.setActivatorNodeRef}
       {...(bodyProps.isEditing ? {} : (dragProps?.attributes ?? {}))}
       {...(bodyProps.isEditing ? {} : (dragProps?.listeners ?? {}))}
       data-testid="quick-chat-tab"
-      className={`flex items-center gap-1 rounded whitespace-nowrap transition-colors ${tabStateClassName} ${
-        dragProps && !bodyProps.isEditing ? "cursor-grab active:cursor-grabbing" : ""
-      }`}
+      className={quickChatTabClassName(
+        bodyProps.isEditing,
+        isActive,
+        Boolean(dragProps) && !bodyProps.isEditing,
+      )}
     >
       <div className="flex items-center">
         <QuickChatTabBody {...bodyProps} />
@@ -348,7 +410,18 @@ function QuickChatTabContent({
   );
 
   if (!bodyProps.isRenameable) return content;
-  return <RenameContextMenu onRename={bodyProps.onStartEdit}>{content}</RenameContextMenu>;
+  return (
+    <QuickChatTabContextMenu
+      onRename={contextProps.onRename}
+      onClose={contextProps.onClose}
+      onCloseOthers={contextProps.onCloseOthers ?? contextProps.onClose}
+      onCloseToRight={contextProps.onCloseToRight ?? contextProps.onClose}
+      onDeleteConversation={contextProps.onDeleteConversation ?? noop}
+      onOpenFullPage={contextProps.onOpenFullPage}
+    >
+      {content}
+    </QuickChatTabContextMenu>
+  );
 }
 
 function useQuickChatTabRename({
@@ -447,6 +520,10 @@ export const QuickChatTabItem = memo(function QuickChatTabItem({
   kind = "chat",
   onActivate,
   onClose,
+  onCloseOthers,
+  onCloseToRight,
+  onDeleteConversation,
+  onOpenFullPage,
   onRename,
   onMoveLeft,
   onMoveRight,
@@ -493,6 +570,14 @@ export const QuickChatTabItem = memo(function QuickChatTabItem({
         canMoveLeft,
         canMoveRight,
         onClose,
+      }}
+      contextProps={{
+        onRename: handleStartEdit,
+        onClose,
+        onCloseOthers,
+        onCloseToRight,
+        onDeleteConversation,
+        onOpenFullPage,
       }}
       dragProps={dragProps}
     />

@@ -454,3 +454,42 @@ describe("removeQuickChatSessionsForTask", () => {
     expect(removeQuickChatSessionsForTask(before, "task-a")).toBe(before);
   });
 });
+
+describe("reconcileQuickChatSessions with a persisted tab order", () => {
+  it("does not re-add a server session that is absent from the open tab order", () => {
+    const before = state([]);
+
+    const after = reconcileQuickChatSessions(
+      before,
+      WS,
+      [chat("open"), chat("closed")],
+      ["conversation:open"],
+    );
+
+    expect(after.sessions.map((s) => s.sessionId)).toEqual(["open"]);
+    expect(after.tombstonedSessions["closed"]).toBeDefined();
+  });
+
+  it("keeps an open local tab even when the stored order is stale", () => {
+    const before = state([chat("local")]);
+
+    const after = reconcileQuickChatSessions(
+      before,
+      WS,
+      [chat("local"), chat("closed")],
+      ["conversation:other"],
+    );
+
+    expect(after.sessions.map((s) => s.sessionId)).toEqual(["local"]);
+    expect(after.tombstonedSessions["closed"]).toBeDefined();
+  });
+
+  it("admits every server session when no order has been stored", () => {
+    const before = state([]);
+
+    const after = reconcileQuickChatSessions(before, WS, [chat("a"), chat("b")]);
+
+    expect(after.sessions.map((s) => s.sessionId)).toEqual(["a", "b"]);
+    expect(after.tombstonedSessions).toEqual({});
+  });
+});

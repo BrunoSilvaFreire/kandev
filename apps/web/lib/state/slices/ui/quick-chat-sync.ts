@@ -123,32 +123,56 @@ export function reconcileQuickChatSessions(
   state: QuickChatState,
   workspaceId: string,
   serverSessions: QuickChatSession[],
+  openTabOrder?: string[],
 ): QuickChatState {
   const named = applyStoredQuickChatNames(serverSessions);
   const serverIds = new Set(named.map((session) => session.sessionId));
-  const knownIds = new Set([
-    ...state.sessions
+  const localIds = new Set(
+    state.sessions
       .filter((session) => session.workspaceId === workspaceId)
       .map((session) => session.sessionId),
-    ...Object.entries(state.sessionOwnership)
-      .filter(([, owner]) => owner.workspaceId === workspaceId)
-      .map(([sessionId]) => sessionId),
-  ]);
+  );
   const omittedIds = new Set(
-    [...knownIds].filter(
+    [...localIds].filter(
       (sessionId) => !serverIds.has(sessionId) && !isQuickChatSetupSessionId(sessionId),
     ),
   );
-  const clearedTombstones = Object.fromEntries(
-    Object.entries(state.tombstonedSessions).filter(
-      ([sessionId, tombstone]) =>
-        tombstone.workspaceId !== workspaceId || !serverIds.has(sessionId),
-    ),
+
+  // The persisted tab order is the set of open tabs when it exists. A server
+  // session that is not an open tab was closed by the user and must not be
+  // re-added on resync; the restorable list feeds the browse surface instead.
+  const openOrderIds =
+    openTabOrder === undefined
+      ? null
+      : new Set(
+          openTabOrder
+            .filter((reference) => reference.startsWith("conversation:"))
+            .map((reference) => reference.slice("conversation:".length))
+            .filter(Boolean),
+        );
+  const isOpen = (sessionId: string): boolean => {
+    if (isQuickChatSetupSessionId(sessionId)) return true;
+    if (localIds.has(sessionId)) return true;
+    return openOrderIds === null || openOrderIds.has(sessionId);
+  };
+  const withheldIds = new Set(
+    named.map((session) => session.sessionId).filter((sessionId) => !isOpen(sessionId)),
   );
+
+  // Keep tombstones for closed sessions so a late lifecycle event cannot
+  // re-open them; drop marks for sessions that are open again or gone.
+  const tombstones = { ...pruneTombstones(state.tombstonedSessions) };
+  for (const sessionId of localIds) delete tombstones[sessionId];
+  for (const sessionId of openOrderIds ?? []) delete tombstones[sessionId];
+  for (const sessionId of withheldIds) {
+    if (tombstones[sessionId]) continue;
+    tombstones[sessionId] = { workspaceId, tombstonedAt: new Date().toISOString() };
+  }
+
   const withoutOmitted = withLifecyclePruning(
-    { ...state, tombstonedSessions: clearedTombstones },
+    { ...state, tombstonedSessions: tombstones },
     omittedIds,
-    true,
+    false,
   );
   const otherWorkspaces = withoutOmitted.sessions.filter(
     (session) => session.workspaceId !== workspaceId,
@@ -165,7 +189,9 @@ export function reconcileQuickChatSessions(
   const sessions = [
     ...otherWorkspaces,
     ...survivors,
-    ...named.filter((session) => !survivorIds.has(session.sessionId)),
+    ...named.filter(
+      (session) => !survivorIds.has(session.sessionId) && !withheldIds.has(session.sessionId),
+    ),
     ...setupTabs,
   ];
   const next = withValidActiveSession(withoutOmitted, sessions);

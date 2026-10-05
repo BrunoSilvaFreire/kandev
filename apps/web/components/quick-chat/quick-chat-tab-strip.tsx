@@ -23,6 +23,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@kandev/ui/button";
 import { IconX } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
+import { useRouter } from "@/lib/routing/client-router";
 import { selectQuickChatSessionIsWorking } from "@/lib/state/slices/ui/quick-chat-activity-selectors";
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import type { QuickChatSession, QuickTerminalTab } from "@/lib/state/slices/ui/types";
@@ -53,6 +54,10 @@ function QuickChatConversationTab({
   isActive: boolean;
   onActivate: () => void;
   onClose: () => void;
+  onCloseOthers?: () => void;
+  onCloseToRight?: () => void;
+  onDeleteConversation?: () => void;
+  onOpenFullPage?: () => void;
   onRename: (name: string) => void;
   onMoveLeft?: () => void;
   onMoveRight?: () => void;
@@ -60,9 +65,13 @@ function QuickChatConversationTab({
   canMoveRight?: boolean;
   dragProps?: QuickChatTabDragProps;
 }) {
+  const router = useRouter();
   const isWorking = useAppStore((state) =>
     selectQuickChatSessionIsWorking(state, session.sessionId),
   );
+  const handleOpenFullPage = useCallback(() => {
+    if (session.taskId) router.push(`/quick-chats/${session.taskId}`);
+  }, [router, session.taskId]);
 
   return (
     <QuickChatTabItem
@@ -71,6 +80,7 @@ function QuickChatConversationTab({
       isWorking={!isQuickChatSetupSessionId(session.sessionId) && isWorking}
       kind={session.kind}
       dragProps={props.dragProps}
+      onOpenFullPage={props.onOpenFullPage ?? handleOpenFullPage}
     />
   );
 }
@@ -149,6 +159,9 @@ type QuickChatSortableTabItemProps = {
   canMoveRight: boolean;
   onTabChange: (sessionId: string) => void;
   onTabClose: (sessionId: string) => void;
+  onTabCloseOthers: (sessionId: string) => void;
+  onTabCloseToRight: (sessionId: string) => void;
+  onTabDeleteRequest: (sessionId: string) => void;
   onTerminalClose: (tabId: string) => void;
   onTerminalActivate: (tabId: string) => void;
   onRename: (sessionId: string, name: string) => void;
@@ -165,6 +178,9 @@ function QuickChatSortableTabItem({
   canMoveRight,
   onTabChange,
   onTabClose,
+  onTabCloseOthers,
+  onTabCloseToRight,
+  onTabDeleteRequest,
   onTerminalClose,
   onTerminalActivate,
   onRename,
@@ -174,6 +190,7 @@ function QuickChatSortableTabItem({
     <SortableQuickChatTab reference={reference}>
       {(dragProps) => {
         if (session) {
+          const isSetup = isQuickChatSetupSessionId(session.sessionId);
           return (
             <QuickChatConversationTab
               session={session}
@@ -181,6 +198,11 @@ function QuickChatSortableTabItem({
               isActive={isActive}
               onActivate={() => onTabChange(session.sessionId)}
               onClose={() => onTabClose(session.sessionId)}
+              onCloseOthers={() => onTabCloseOthers(session.sessionId)}
+              onCloseToRight={() => onTabCloseToRight(session.sessionId)}
+              onDeleteConversation={() =>
+                isSetup ? onTabClose(session.sessionId) : onTabDeleteRequest(session.sessionId)
+              }
               onRename={(nextName) => onRename(session.sessionId, nextName)}
               onMoveLeft={() => moveTab(reference, -1)}
               onMoveRight={() => moveTab(reference, 1)}
@@ -220,6 +242,9 @@ type QuickChatTabStripProps = {
   activeTerminalTabId: string | null;
   onTabChange: (sessionId: string) => void;
   onTabClose: (sessionId: string) => void;
+  onTabCloseOthers: (sessionId: string) => void;
+  onTabCloseToRight: (sessionId: string) => void;
+  onTabDeleteRequest: (sessionId: string) => void;
   onNewChat: () => void;
   onNewTerminal: () => void;
   onTerminalClose: (tabId: string) => void;
@@ -239,6 +264,9 @@ function QuickChatTabStrip({
   activeTerminalTabId,
   onTabChange,
   onTabClose,
+  onTabCloseOthers,
+  onTabCloseToRight,
+  onTabDeleteRequest,
   onNewChat,
   onNewTerminal,
   onTerminalClose,
@@ -276,6 +304,9 @@ function QuickChatTabStrip({
               canMoveRight={index < sortableOrder.length - 1}
               onTabChange={onTabChange}
               onTabClose={onTabClose}
+              onTabCloseOthers={onTabCloseOthers}
+              onTabCloseToRight={onTabCloseToRight}
+              onTabDeleteRequest={onTabDeleteRequest}
               onTerminalClose={onTerminalClose}
               onTerminalActivate={onTerminalActivate}
               onRename={onRename}
@@ -320,6 +351,9 @@ type QuickChatTabsProps = {
   activeTerminalTabId: string | null;
   onTabChange: (sessionId: string) => void;
   onTabClose: (sessionId: string) => void;
+  onTabCloseOthers: (sessionId: string) => void;
+  onTabCloseToRight: (sessionId: string) => void;
+  onTabDeleteRequest: (sessionId: string) => void;
   onNewChat: () => void;
   onNewTerminal: () => void;
   onTerminalClose: (tabId: string) => void;
@@ -339,6 +373,9 @@ export function QuickChatTabs({
   activeTerminalTabId,
   onTabChange,
   onTabClose,
+  onTabCloseOthers,
+  onTabCloseToRight,
+  onTabDeleteRequest,
   onNewChat,
   onNewTerminal,
   onTerminalClose,
@@ -388,6 +425,9 @@ export function QuickChatTabs({
             activeTerminalTabId={activeTerminalTabId}
             onTabChange={onTabChange}
             onTabClose={onTabClose}
+            onTabCloseOthers={onTabCloseOthers}
+            onTabCloseToRight={onTabCloseToRight}
+            onTabDeleteRequest={onTabDeleteRequest}
             onNewChat={onNewChat}
             onNewTerminal={onNewTerminal}
             onTerminalClose={onTerminalClose}

@@ -92,8 +92,16 @@ const LinearPageClient = lazy(() =>
 const StatsPageClient = lazy(() =>
   import("@/app/stats/stats-page-client").then((mod) => ({ default: mod.StatsPageClient })),
 );
+const UsagePageClient = lazy(() =>
+  import("@/app/usage/usage-page").then((mod) => ({ default: mod.UsagePageClient })),
+);
 const TasksPageClient = lazy(() =>
   import("@/app/tasks/tasks-page-client").then((mod) => ({ default: mod.TasksPageClient })),
+);
+const QuickChatsPageClient = lazy(() =>
+  import("@/app/quick-chats/quick-chats-page-client").then((mod) => ({
+    default: mod.QuickChatsPageClient,
+  })),
 );
 const AutomationDetailPage = lazy(() =>
   import("@/components/runs/automation-detail-page").then((mod) => ({
@@ -123,8 +131,11 @@ type SpaRoute =
       layout?: string | null;
       simple?: string;
       mode?: string;
+      surface?: "task" | "quick-chat";
+      panel?: string;
     }
   | { kind: "tasks" }
+  | { kind: "quickChats" }
   | { kind: "threads" }
   | { kind: "github" }
   | { kind: "gitlab" }
@@ -132,6 +143,7 @@ type SpaRoute =
   | { kind: "jira" }
   | { kind: "linear" }
   | { kind: "stats"; range?: RangeKey }
+  | { kind: "usage" }
   | { kind: "runs"; view?: string }
   | { kind: "runDetail"; automationId: string; tab?: string; runId?: string }
   | { kind: "canvas"; canvasId: string }
@@ -157,7 +169,8 @@ type DataBackedSpaRoute = Exclude<
       | "login"
       | "setup"
       | "invite"
-      | "threads";
+      | "threads"
+      | "quickChats";
   }
 >;
 
@@ -180,6 +193,7 @@ export function resolveSpaRoute(
 ): SpaRoute {
   const normalized = normalizePath(pathname);
   return (
+    resolveQuickChatDetailRoute(normalized, searchParams) ??
     resolveTaskDetailRoute(normalized, searchParams) ??
     resolveRunsRoute(normalized, searchParams) ??
     resolveTopLevelRoute(normalized, searchParams) ??
@@ -255,6 +269,28 @@ function resolveRunsRoute(normalized: string, searchParams: URLSearchParams): Sp
   };
 }
 
+function resolveQuickChatDetailRoute(
+  normalized: string,
+  searchParams: URLSearchParams,
+): SpaRoute | null {
+  const prefix = "/quick-chats/";
+  if (!normalized.startsWith(prefix)) return null;
+  const suffix = normalized.slice(prefix.length);
+  if (!suffix || suffix.includes("/")) return null;
+  const taskId = safeDecodePathSegment(suffix);
+  if (!taskId) return null;
+  return {
+    kind: "taskDetail",
+    taskId,
+    surface: "quick-chat",
+    sessionId: searchParams.get("sessionId") ?? undefined,
+    layout: searchParams.get("layout"),
+    simple: searchParams.get("simple") ?? undefined,
+    mode: searchParams.get("mode") ?? undefined,
+    panel: searchParams.get("panel") ?? undefined,
+  };
+}
+
 function resolveTaskDetailRoute(
   normalized: string,
   searchParams: URLSearchParams,
@@ -268,13 +304,21 @@ function resolveTaskDetailRoute(
     layout: searchParams.get("layout"),
     simple: searchParams.get("simple") ?? undefined,
     mode: searchParams.get("mode") ?? undefined,
+    panel: searchParams.get("panel") ?? undefined,
   };
+}
+
+function parseStatsRange(searchParams: URLSearchParams): RangeKey | undefined {
+  const range = searchParams.get("range");
+  return range && isRangeKey(range) ? range : undefined;
 }
 
 function resolveTopLevelRoute(normalized: string, searchParams: URLSearchParams): SpaRoute | null {
   switch (normalized) {
     case "/tasks":
       return { kind: "tasks" };
+    case "/quick-chats":
+      return { kind: "quickChats" };
     case "/threads":
       return { kind: "threads" };
     case "/github":
@@ -287,16 +331,16 @@ function resolveTopLevelRoute(normalized: string, searchParams: URLSearchParams)
       return { kind: "jira" };
     case "/linear":
       return { kind: "linear" };
+    case "/usage":
+      return { kind: "usage" };
     case "/login":
       return { kind: "login" };
     case "/setup":
       return { kind: "setup" };
     case "/invite":
       return { kind: "invite", token: searchParams.get("token") ?? undefined };
-    case "/stats": {
-      const range = searchParams.get("range");
-      return { kind: "stats", range: range && isRangeKey(range) ? range : undefined };
-    }
+    case "/stats":
+      return { kind: "stats", range: parseStatsRange(searchParams) };
     default:
       return null;
   }
@@ -365,8 +409,17 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
         layout={route.layout}
         simple={route.simple}
         mode={route.mode}
+        surface={route.surface}
+        panel={route.panel}
         initialData={routeData?.taskDetail}
       />
+    );
+  }
+  if (route.kind === "quickChats") {
+    return (
+      <Suspense fallback={<RouteLoading routeNameKey="sidebar:quickChats" />}>
+        <QuickChatsPageClient />
+      </Suspense>
     );
   }
   if (route.kind === "settings") {
@@ -545,7 +598,17 @@ function ExternalDataRoute({
     case "stats":
       return (
         <Suspense fallback={<RouteChunkLoading />}>
-          <StatsPageClient workspaceId={workspaceId} activeRange={route.range} initialError={null} />
+          <StatsPageClient
+            workspaceId={workspaceId}
+            activeRange={route.range}
+            initialError={null}
+          />
+        </Suspense>
+      );
+    case "usage":
+      return (
+        <Suspense fallback={<RouteChunkLoading />}>
+          <UsagePageClient />
         </Suspense>
       );
     case "runs":

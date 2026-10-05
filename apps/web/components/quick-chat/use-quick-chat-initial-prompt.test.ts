@@ -1,192 +1,88 @@
-import { act, renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getChatDraftText, setChatDraftText } from "@/lib/local-storage";
-import type {
-  ChatSubmitPayload,
-  ChatSubmitResult,
-} from "@/components/task/chat/chat-input-container";
-import { useQuickChatInitialPrompt } from "./use-quick-chat-initial-prompt";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { renderHook, act } from "@testing-library/react";
 
-const LAUNCH_PROMPT = "Start here";
+const mockStartQuickChat = vi.fn();
+const mockDeleteTask = vi.fn();
+const recordRecentUseMock = vi.fn();
+
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: vi.fn() }),
+}));
+
+vi.mock("@/lib/api/domains/workspace-api", () => ({
+  startQuickChat: (...args: unknown[]) => mockStartQuickChat(...args),
+}));
+
+vi.mock("@/lib/api/domains/kanban-api", () => ({
+  deleteTask: (...args: unknown[]) => mockDeleteTask(...args),
+}));
+
+vi.mock("@/lib/agent-profile-recent-use", () => ({
+  recordAgentProfileRecentUseBestEffort: (...args: unknown[]) => recordRecentUseMock(...args),
+}));
+
+import { useAgentSelection } from "./use-quick-chat-modal";
+
+const WORKSPACE_ID = "ws-1";
+const AGENT_ID = "agent-a";
+const PROMPT = "Investigate the flaky test";
+
+function makeStore(cliPassthrough: boolean) {
+  return {
+    agentProfiles: [
+      {
+        id: AGENT_ID,
+        label: "Agent A",
+        agent_id: "a",
+        agent_name: "Agent A",
+        cli_passthrough: cliPassthrough,
+      },
+    ],
+    sessions: [],
+    activeSessionId: "",
+    agentGeneratedTaskTitles: false,
+    openQuickChat: vi.fn(),
+    renameQuickChatSession: vi.fn(),
+    setQuickChatInitialPrompt: vi.fn(),
+    closeQuickChatSession: vi.fn(),
+    applyAgentProfileRecentUse: vi.fn(),
+  };
+}
 
 beforeEach(() => {
-  localStorage.clear();
-  sessionStorage.clear();
+  vi.clearAllMocks();
+  mockStartQuickChat.mockResolvedValue({ task_id: "task-a", session_id: "sess-a" });
 });
 
-describe("useQuickChatInitialPrompt draft recovery", () => {
-  it.each([false, true])(
-    "keeps a rejected launch as a manual draft without resending on remount (throws=%s)",
-    async (throws) => {
-      let pending: string | undefined = LAUNCH_PROMPT;
-      const submit = throws
-        ? vi.fn().mockRejectedValue(new Error("connection lost"))
-        : vi.fn().mockResolvedValue(false);
-      const onAttempted = () => {
-        pending = undefined;
-      };
-      const onRejected = vi.fn();
-      const mount = () =>
-        renderHook(() =>
-          useQuickChatInitialPrompt({
-            sessionId: "session-1",
-            taskId: "task-1",
-            prompt: pending,
-            blocked: false,
-            submit,
-            onAttempted,
-            onRejected,
-          }),
-        );
-      const first = mount();
-      await act(async () => {});
-      first.unmount();
-      const second = mount();
-      await act(async () => {});
+describe("useAgentSelection initial prompt", () => {
+  it("submits a provided prompt through the shared initial-prompt path for ACP agents", async () => {
+    const store = makeStore(false);
+    const { result } = renderHook(() => useAgentSelection(WORKSPACE_ID, store as never));
 
-      expect(submit).toHaveBeenCalledTimes(1);
-      expect(getChatDraftText("session-1")).toBe(LAUNCH_PROMPT);
-      expect(onRejected).toHaveBeenCalledWith("session-1", LAUNCH_PROMPT);
-      second.unmount();
-    },
-  );
+    await act(async () => {
+      await result.current.handleSelectAgent(AGENT_ID, [], PROMPT);
+    });
 
-  it("preserves a newer manual draft when automatic delivery settles", async () => {
-    let accept!: (value: boolean) => void;
-    const submit = vi.fn(
-      () =>
-        new Promise<boolean>((resolve) => {
-          accept = resolve;
-        }),
+    expect(store.setQuickChatInitialPrompt).toHaveBeenCalledWith("sess-a", PROMPT);
+    expect(mockStartQuickChat).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      expect.not.objectContaining({ prompt: expect.any(String) }),
     );
-    renderHook(() =>
-      useQuickChatInitialPrompt({
-        sessionId: "session-1",
-        taskId: "task-1",
-        prompt: LAUNCH_PROMPT,
-        blocked: false,
-        submit,
-      }),
-    );
-    await act(async () => {});
-    const recoveryDraft = getChatDraftText("session-1");
-    setChatDraftText("session-1", "manual follow-up");
-    await act(async () => accept(true));
-    expect(recoveryDraft).toBe(LAUNCH_PROMPT);
-    expect(getChatDraftText("session-1")).toBe("manual follow-up");
+    expect(store.renameQuickChatSession).toHaveBeenCalledWith("sess-a", PROMPT);
   });
 
-  it("keeps an attempted prompt bound to its original session submitter", async () => {
-    const firstSubmit = vi.fn().mockResolvedValue(true);
-    const nextSubmit = vi.fn().mockResolvedValue(true);
-    const view = renderHook(
-      ({ sessionId, submit, blocked }) =>
-        useQuickChatInitialPrompt({
-          sessionId,
-          taskId: "task-1",
-          prompt: LAUNCH_PROMPT,
-          submit,
-          blocked,
-        }),
-      { initialProps: { sessionId: "session-1", submit: firstSubmit, blocked: false } },
+  it("sends the prompt in the start request for passthrough agents", async () => {
+    const store = makeStore(true);
+    const { result } = renderHook(() => useAgentSelection(WORKSPACE_ID, store as never));
+
+    await act(async () => {
+      await result.current.handleSelectAgent(AGENT_ID, [], PROMPT);
+    });
+
+    expect(mockStartQuickChat).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      expect.objectContaining({ prompt: PROMPT }),
     );
-    view.rerender({ sessionId: "session-2", submit: nextSubmit, blocked: true });
-    await act(async () => {});
-    expect(firstSubmit).toHaveBeenCalledOnce();
-    expect(nextSubmit).not.toHaveBeenCalled();
-  });
-});
-
-describe("useQuickChatInitialPrompt admission", () => {
-  it("waits for migration and clears the launch prompt only after acceptance", async () => {
-    const submit = vi.fn().mockResolvedValue(true);
-    const onAccepted = vi.fn();
-    const view = renderHook(
-      ({ blocked }) =>
-        useQuickChatInitialPrompt({
-          sessionId: "session-1",
-          taskId: "task-1",
-          prompt: LAUNCH_PROMPT,
-          blocked,
-          submit,
-          onAccepted,
-        }),
-      { initialProps: { blocked: true } },
-    );
-
-    expect(submit).not.toHaveBeenCalled();
-    view.rerender({ blocked: false });
-    await act(async () => {});
-
-    expect(submit).toHaveBeenCalledWith({ message: LAUNCH_PROMPT });
-    expect(onAccepted).toHaveBeenCalledTimes(1);
-  });
-
-  it("preserves the launch prompt when delivery is rejected", async () => {
-    const submit = vi.fn().mockResolvedValue(false);
-    const onAccepted = vi.fn();
-    renderHook(() =>
-      useQuickChatInitialPrompt({
-        sessionId: "session-1",
-        taskId: "task-1",
-        prompt: LAUNCH_PROMPT,
-        blocked: false,
-        submit,
-        onAccepted,
-      }),
-    );
-    await act(async () => {});
-
-    expect(onAccepted).not.toHaveBeenCalled();
-  });
-
-  it("does not retry a rejected prompt when callback identities change", async () => {
-    const firstSubmit = vi.fn().mockResolvedValue(false);
-    const secondSubmit = vi.fn().mockResolvedValue(false);
-    const view = renderHook(
-      ({ submit }: { submit: (payload: ChatSubmitPayload) => ChatSubmitResult }) =>
-        useQuickChatInitialPrompt({
-          sessionId: "session-1",
-          taskId: "task-1",
-          prompt: LAUNCH_PROMPT,
-          blocked: false,
-          submit,
-        }),
-      { initialProps: { submit: firstSubmit } },
-    );
-    await act(async () => {});
-
-    view.rerender({ submit: secondSubmit });
-    await act(async () => {});
-
-    expect(firstSubmit).toHaveBeenCalledTimes(1);
-    expect(secondSubmit).not.toHaveBeenCalled();
-  });
-
-  it("does not retry a synchronously rejected prompt", async () => {
-    const firstSubmit: (payload: ChatSubmitPayload) => ChatSubmitResult = vi.fn(
-      (_payload: ChatSubmitPayload) => {
-        throw new Error("rejected before returning a promise");
-      },
-    );
-    const secondSubmit = vi.fn().mockResolvedValue(false);
-    const view = renderHook(
-      ({ submit }: { submit: (payload: ChatSubmitPayload) => ChatSubmitResult }) =>
-        useQuickChatInitialPrompt({
-          sessionId: "session-1",
-          taskId: "task-1",
-          prompt: LAUNCH_PROMPT,
-          blocked: false,
-          submit,
-        }),
-      { initialProps: { submit: firstSubmit } },
-    );
-    await act(async () => {});
-
-    view.rerender({ submit: secondSubmit });
-    await act(async () => {});
-
-    expect(firstSubmit).toHaveBeenCalledTimes(1);
-    expect(secondSubmit).not.toHaveBeenCalled();
+    expect(store.setQuickChatInitialPrompt).not.toHaveBeenCalled();
   });
 });

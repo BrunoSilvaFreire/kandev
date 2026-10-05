@@ -8,6 +8,7 @@ vi.mock("@kandev/ui/context-menu", () => ({
   ContextMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   ContextMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   ContextMenuContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  ContextMenuSeparator: () => null,
   ContextMenuItem: ({
     children,
     onSelect,
