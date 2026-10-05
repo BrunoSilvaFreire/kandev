@@ -152,4 +152,86 @@ test.describe("Session handoff", () => {
     expect(handoffSession?.agent_profile_id).toBe(profileB.id);
     expect(getSummarizeRequestCount()).toBe(1);
   });
+
+  test("handoff can move the task to a destination step", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const { profileA, profileB } = await createProfiles(apiClient);
+    await mockSummarizeUtility(testPage);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Session Handoff Move Task",
+      profileA.id,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return DONE_STATES.includes(sessions[0]?.state ?? "");
+        },
+        { timeout: 30_000, message: "Waiting for first session to finish" },
+      )
+      .toBe(true);
+
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    const session1Id = sessions[0].id;
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.openHandoffDialog(session1Id, profileB.id);
+
+    const handoffDialog = session.handoffDialog();
+    await expect(handoffDialog).toBeVisible({ timeout: 5_000 });
+    await handoffDialog.getByTestId("handoff-destination-step").click();
+    // Pick the first real destination under the default "Stay in current step".
+    const destinationOption = testPage.getByRole("option").nth(1);
+    await expect(destinationOption).toBeVisible({ timeout: 5_000 });
+    const targetName = ((await destinationOption.textContent()) ?? "").trim();
+    expect(targetName).not.toBe("");
+    await destinationOption.click();
+
+    await session.newSessionPromptInput().fill("/e2e:simple-message");
+    await session.newSessionStartButton().click();
+    await expect(handoffDialog).not.toBeVisible({ timeout: 15_000 });
+
+    // The move runs through the normal workflow transition path, so the task
+    // arrives at the chosen step.
+    await expect(testPage.getByTestId(`workflow-step-${targetName}`)).toHaveAttribute(
+      "aria-current",
+      "step",
+      { timeout: 30_000 },
+    );
+
+    // The move reused the handoff session as its destination: exactly one
+    // non-initiator session exists and it is primary. A freshly created third
+    // session, or the initiator becoming the destination, would fail here.
+    let handoffId: string | undefined;
+    await expect
+      .poll(
+        async () => {
+          const { sessions: after } = await apiClient.listTaskSessions(task.id);
+          const others = after.filter(({ id }) => id !== session1Id);
+          if (others.length !== 1) return `others:${others.length}`;
+          handoffId = others[0].id;
+          return others[0].is_primary ? "primary" : "not-primary";
+        },
+        { timeout: 30_000, message: "Waiting for the moved task to settle on the handoff session" },
+      )
+      .toBe("primary");
+    expect(handoffId).toBeDefined();
+    expect(handoffId).not.toBe(session1Id);
+  });
 });

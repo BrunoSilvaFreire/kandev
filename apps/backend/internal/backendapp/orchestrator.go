@@ -92,6 +92,8 @@ func provideOrchestrator(
 		cfg != nil && cfg.Features.ClaudeMidTurnSteering
 	serviceCfg.OfficeSessionIdentity =
 		cfg != nil && cfg.Features.OfficeSessionIdentity
+	serviceCfg.ColdCacheAutoHandoff =
+		cfg != nil && cfg.Features.ColdCacheAutoHandoff
 	sessionCapacityResolution, err := resolveSessionCapacityWithStore(
 		settingsStore, sessionCapacityEnvironment, log,
 	)
@@ -150,6 +152,7 @@ func provideOrchestrator(
 	}
 
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
+	orchestratorSvc.SetSessionUsageTotalsProvider(taskRepo.GetSessionUsageTotals)
 	orchestratorSvc.SetCanvasesEnabled(cfg != nil && cfg.Features.Canvases)
 	orchestratorSvc.SetAgentProfileRecentUseRecorder(userSvc)
 	if gitCredentialBroker != nil {

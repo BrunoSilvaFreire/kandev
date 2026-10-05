@@ -52,7 +52,7 @@ and siblings sharing a non-empty parent. Returns access_denied for unrelated tas
 self, ancestors, descendants in the same workspace, or siblings with a shared non-empty parent.`,
 			),
 			mcp.WithString("task_id", mcp.Description("Target task that owns the document. Defaults to the current task.")),
-			mcp.WithString("document_key", mcp.Required(), mcp.Description("Document key (e.g. 'spike', 'spec', 'notes').")),
+			mcp.WithString("document_key", mcp.Required(), mcp.Description("Document key. Custom keys are first-class; plan, spec, spike, notes, review, and handoff are conventions.")),
 		),
 		s.wrapHandler("get_task_document_kandev", s.getTaskDocumentHandler()),
 	)
@@ -61,7 +61,8 @@ self, ancestors, descendants in the same workspace, or siblings with a shared no
 			mcp.WithDescription(
 				`Create or update a document on a target task. Allowed for the current task itself or any
 ancestor (child→parent coordination writes). Sibling and descendant writes are denied — publish
-coordination docs to the shared parent. Reusing an existing document_key replaces that document (prior
+coordination docs to the shared parent. Custom document keys are first-class; plan, spec, spike, notes, review,
+and handoff are conventions. Reusing an existing document_key replaces that document (prior
 content is kept as revisions); use a new key (e.g. 'spike-2', 'notes-perf') for a separate document of
 the same type. Investigation/spike reports use document_key 'spike' with type 'spike'; the implementation
 plan belongs to the task-plan tools, not here.`,

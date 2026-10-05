@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { UsageTotals } from "@/lib/api/domains/usage-api";
 import type { Message, TaskSession } from "@/lib/types/http";
 
 const mocks = vi.hoisted(() => ({
   run: vi.fn(),
   clearError: vi.fn(),
   hook: { isRunning: false, error: null as string | null },
+  usage: { session: null as UsageTotals | null },
   state: {
     taskSessions: { items: {} as Record<string, TaskSession | undefined> },
     messages: { bySession: {} as Record<string, Message[] | undefined> },
@@ -19,6 +21,19 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof mocks.state) => unknown) => selector(mocks.state),
+}));
+
+vi.mock("@/hooks/domains/session/use-session-usage-inspector", () => ({
+  useSessionUsageInspector: () => ({
+    session: mocks.usage.session,
+    task: null,
+    lastPrompt: undefined,
+    status: "unknown",
+    expiresAt: null,
+    flags: null,
+    loading: false,
+    error: null,
+  }),
 }));
 
 vi.mock("@/hooks/domains/session/use-resume-with-handoff", async (importOriginal) => {
@@ -46,7 +61,29 @@ import { ResumeHandoffOffer } from "./resume-handoff-offer";
 const SESSION_ID = "session-1";
 const TASK_ID = "task-1";
 const OFFER_TEST_ID = "resume-handoff-offer";
+const ACTION_TEST_ID = "resume-handoff-action";
+const DRAFT_TEXT = "extra instructions";
 const OLD = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+
+function sessionTotals(lastEventAt: string | null): UsageTotals {
+  return {
+    scope: "session",
+    scope_id: SESSION_ID,
+    tokens_in: 10,
+    tokens_cached_read: 20,
+    tokens_cached_write: 0,
+    tokens_out: 5,
+    tokens_thought: 0,
+    tokens_total: 35,
+    cost_subcents: 100,
+    event_count: 3,
+    estimated_event_count: 0,
+    unpriced_event_count: 0,
+    output_tokens_complete: true,
+    first_event_at: lastEventAt,
+    last_event_at: lastEventAt,
+  };
+}
 
 function message(overrides: Partial<Message>): Message {
   return {
@@ -89,6 +126,8 @@ beforeEach(() => {
   mocks.state.sessionAgentctl.itemsBySessionId = {};
   mocks.state.userSettings.defaultUtilityAgentProfileId = "profile-1";
   mocks.state.userSettings.defaultUtilityAgentId = null;
+  mocks.usage.session = sessionTotals(OLD);
+  mocks.run.mockResolvedValue(true);
 });
 
 afterEach(cleanup);
@@ -163,7 +202,7 @@ describe("ResumeHandoffOffer", () => {
     renderOffer();
 
     expect(screen.getByTestId(OFFER_TEST_ID)).toBeTruthy();
-    expect(screen.getByTestId("resume-handoff-action")).toHaveProperty("disabled", true);
+    expect(screen.getByTestId(ACTION_TEST_ID)).toHaveProperty("disabled", true);
   });
 
   it("dismisses the offer and its error", () => {
@@ -180,23 +219,83 @@ describe("ResumeHandoffOffer", () => {
     expect(screen.queryByTestId(OFFER_TEST_ID)).toBeNull();
   });
 
-  it("hides the offer when the newest message is inside the cache window", () => {
+  it("hides the offer when the last usage event is inside the cache window", () => {
     setSession();
-    setMessages([message({ created_at: new Date().toISOString() })]);
+    setMessages([message({})]);
+    mocks.usage.session = sessionTotals(new Date().toISOString());
 
     renderOffer();
 
     expect(screen.queryByTestId(OFFER_TEST_ID)).toBeNull();
   });
+});
 
+describe("ResumeHandoffOffer - actions and draft handling", () => {
   it("runs the resume flow when the action is clicked", () => {
     setSession();
     setMessages([message({})]);
 
     renderOffer();
-    fireEvent.click(screen.getByTestId("resume-handoff-action"));
+    fireEvent.click(screen.getByTestId(ACTION_TEST_ID));
 
     expect(mocks.run).toHaveBeenCalledTimes(1);
+    expect(mocks.run).toHaveBeenCalledWith("");
+  });
+
+  it("displays draft hint when getDraft returns non-empty draft", () => {
+    setSession();
+    setMessages([message({})]);
+
+    render(
+      <ResumeHandoffOffer taskId={TASK_ID} sessionId={SESSION_ID} getDraft={() => DRAFT_TEXT} />,
+    );
+
+    expect(screen.getByTestId("resume-handoff-draft-hint")).toBeTruthy();
+    expect(screen.getByTestId("resume-handoff-draft-hint").textContent).toBe(
+      "task:resumeHandoffIncludesDraft",
+    );
+  });
+
+  it("passes draft to run and clears draft on success", async () => {
+    setSession();
+    setMessages([message({})]);
+    mocks.run.mockResolvedValue(true);
+    const clearDraft = vi.fn();
+
+    render(
+      <ResumeHandoffOffer
+        taskId={TASK_ID}
+        sessionId={SESSION_ID}
+        getDraft={() => DRAFT_TEXT}
+        clearDraft={clearDraft}
+      />,
+    );
+
+    await fireEvent.click(screen.getByTestId(ACTION_TEST_ID));
+
+    expect(mocks.run).toHaveBeenCalledWith(DRAFT_TEXT);
+    expect(clearDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not clear draft when run returns false", async () => {
+    setSession();
+    setMessages([message({})]);
+    mocks.run.mockResolvedValue(false);
+    const clearDraft = vi.fn();
+
+    render(
+      <ResumeHandoffOffer
+        taskId={TASK_ID}
+        sessionId={SESSION_ID}
+        getDraft={() => DRAFT_TEXT}
+        clearDraft={clearDraft}
+      />,
+    );
+
+    await fireEvent.click(screen.getByTestId(ACTION_TEST_ID));
+
+    expect(mocks.run).toHaveBeenCalledWith(DRAFT_TEXT);
+    expect(clearDraft).not.toHaveBeenCalled();
   });
 
   it("stays dismissed until a newer message re-arms the offer", () => {

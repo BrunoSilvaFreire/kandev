@@ -558,6 +558,15 @@ type FeaturesConfig struct {
 	// Windows (survival trades the platform's kill-on-job-close safeguard for
 	// an adoption handshake, which is untested there).
 	AgentSurvival bool `mapstructure:"agent_survival" json:"agentSurvival"`
+
+	// ColdCacheAutoHandoff gates the automatic resume-with-handoff that runs on
+	// workflow step entry when the reused session's provider cache is cold, and
+	// the handoff-to-a-new-session path when the most relevant session's
+	// provider quota is exhausted. It spends a cheap utility-model extraction,
+	// so it is a kill switch: disabling it restores the pre-continuation
+	// selection behavior (exhausted candidates excluded, cold sessions reused
+	// as-is). Off in e2e so tests never depend on a live extraction.
+	ColdCacheAutoHandoff bool `mapstructure:"cold_cache_auto_handoff" json:"coldCacheAutoHandoff"`
 }
 
 // LoggingConfig holds logging configuration.

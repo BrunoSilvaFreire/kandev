@@ -96,6 +96,10 @@ type Resolver struct {
 	// bundle without them degrades to an empty current version.
 	approvalReader   ApprovalSubjectReader
 	approvalConsumer ApprovalCommentConsumer
+	// continuationRecovery applies retry/continue decisions for system-authored
+	// continuation-recovery bundles. Nil is safe: such a bundle then fails
+	// closed and restores its claim so the user can retry.
+	continuationRecovery ContinuationRecoveryHandler
 }
 
 // NewResolver creates a Resolver.
@@ -128,6 +132,13 @@ func NewResolver(
 func (r *Resolver) SetApprovalSupport(reader ApprovalSubjectReader, consumer ApprovalCommentConsumer) {
 	r.approvalReader = reader
 	r.approvalConsumer = consumer
+}
+
+// SetContinuationRecoverySupport injects the handler that applies a
+// continuation-recovery decision. It is optional; when unset a recovery bundle
+// still resolves but fails closed (the claim is restored for a retry).
+func (r *Resolver) SetContinuationRecoverySupport(handler ContinuationRecoveryHandler) {
+	r.continuationRecovery = handler
 }
 
 // AuthorizeBundleAccess resolves a bundle's identity (M5) and authorizes the
@@ -250,6 +261,14 @@ func (r *Resolver) ResolveBundle(ctx context.Context, pendingID string, outcome 
 	}
 	approval, err := r.validateApprovalPhase(preClaimCtx, taskID, questions, msgs, outcome)
 	if err != nil {
+		if timeoutErr := classifyPreClaimError(ctx, preClaimCtx, clarificationResponsePhaseValidation, err); IsPreClaimTimeoutError(timeoutErr) {
+			r.logResponsePhase(pendingID, clarificationResponsePhaseValidation, validationStarted, responsePhaseOutcome(timeoutErr))
+			return nil, false, timeoutErr
+		}
+		r.logResponsePhase(pendingID, clarificationResponsePhaseValidation, validationStarted, "invalid")
+		return nil, false, err
+	}
+	if err := validateContinuationRecoveryBundle(questions, continuationRecoveryMetaFromMessages(msgs)); err != nil {
 		if timeoutErr := classifyPreClaimError(ctx, preClaimCtx, clarificationResponsePhaseValidation, err); IsPreClaimTimeoutError(timeoutErr) {
 			r.logResponsePhase(pendingID, clarificationResponsePhaseValidation, validationStarted, responsePhaseOutcome(timeoutErr))
 			return nil, false, timeoutErr
@@ -661,6 +680,15 @@ func (r *Resolver) deliverDetachedClarificationResponse(
 	deliveryErr error,
 ) error {
 	// Fallback path: entry not found (agent timed out, entry was cleaned up).
+	// A continuation-recovery bundle is system-authored and has no agent
+	// waiter: the decision (including a dismissal, treated as "continue") is
+	// applied by the orchestrator, never delivered to the agent as text. It is
+	// checked before the rejection no-op so a dismissed recovery question still
+	// gives the paused entry a way forward.
+	if meta := continuationRecoveryMetaFromMessages(claim.messages); meta != nil {
+		return r.deliverContinuationRecovery(ctx, pendingID, claim, meta, response)
+	}
+
 	// If the user rejected (clicked X to dismiss), they're discarding a stale
 	// overlay — not continuing the conversation. Treat as a no-op so we don't
 	// surprise them by resuming the agent with "User declined to answer".
@@ -711,6 +739,77 @@ func (r *Resolver) deliverDetachedClarificationResponse(
 	}
 	r.publishClarificationBundleUpdates(ctx, pendingID, finalized)
 	return nil
+}
+
+// deliverContinuationRecovery applies a retry/continue decision to the paused
+// continuation the bundle names. The orchestrator handler owns the effect; on
+// success the bundle is finalized without any agent delivery, and on failure
+// the claim is restored so the user can retry.
+func (r *Resolver) deliverContinuationRecovery(
+	ctx context.Context,
+	pendingID string,
+	claim *clarificationResponseClaim,
+	meta *ContinuationRecoveryMeta,
+	response *Response,
+) error {
+	taskID := claimBundleTaskID(claim.messages)
+	var (
+		decision string
+		err      error
+	)
+	if response.Rejected {
+		// A dismissed recovery question is not "discard the entry": treat it
+		// as "continue without handoff" so the paused step always has a way
+		// forward.
+		decision = ContinuationRecoveryDecisionContinue
+	} else {
+		decision, err = continuationRecoveryDecision(Outcome{
+			Answers:      response.Answers,
+			Rejected:     response.Rejected,
+			RejectReason: response.RejectReason,
+		})
+	}
+	if err == nil && r.continuationRecovery == nil {
+		err = errors.New("continuation recovery handler unavailable")
+	}
+	if err == nil {
+		// The user's HTTP request must not cancel a retry after it has begun:
+		// a client disconnect mid-sequence could otherwise reset the context
+		// without sending the prompt. Bound the detached work instead.
+		handlerCtx, cancel := context.WithTimeout(
+			context.WithoutCancel(ctx),
+			continuationRecoveryHandlerTimeout,
+		)
+		defer cancel()
+		err = r.continuationRecovery.ResolveContinuationRecovery(handlerCtx, taskID, meta.Stamp, decision)
+	}
+	if err != nil {
+		restored := r.restoreFailedClarificationClaim(ctx, pendingID, claim.terminalStatus, claim.messages)
+		r.logger.Error("failed to resolve continuation recovery",
+			zap.String("pending_id", pendingID), zap.Error(err))
+		if restored {
+			return errors.New("failed to resolve continuation recovery; response can be retried")
+		}
+		return errors.New("failed to resolve continuation recovery and recover pending state")
+	}
+	finalized, ok := r.finalizeClarificationResponseDelivery(ctx, pendingID, claim)
+	if !ok {
+		return errors.New("continuation recovery was applied, but delivery state could not be finalized")
+	}
+	r.publishClarificationBundleUpdates(ctx, pendingID, finalized)
+	r.logger.Info("continuation recovery resolved",
+		zap.String("pending_id", pendingID), zap.String("decision", decision))
+	return nil
+}
+
+// claimBundleTaskID returns the first non-empty task id on a claimed bundle.
+func claimBundleTaskID(messages []*taskmodels.Message) string {
+	for _, m := range messages {
+		if m != nil && m.TaskID != "" {
+			return m.TaskID
+		}
+	}
+	return ""
 }
 
 func (r *Resolver) confirmLiveClarificationResponseDelivery(

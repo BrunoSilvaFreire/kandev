@@ -124,6 +124,16 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Automatic handoff on cold-cache workflow step entry (fork). On in prod now
+  # that the D10 recovery question landed (increment I1); on in dev so the path
+  # stays exercised; off in e2e so tests never depend on a live utility-model
+  # extraction. It runs a cheap extraction without an explicit user action, so it
+  # stays a kill switch.
+  KANDEV_FEATURES_COLD_CACHE_AUTO_HANDOFF:
+    prod: "true"
+    dev:  "true"
+    e2e:  "false"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent

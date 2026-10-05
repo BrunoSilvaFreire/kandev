@@ -1196,6 +1196,11 @@ func (w *orchestratorWrapper) StartCreatedSessionWithPromptContextAndCanvasGuida
 	)
 }
 
+// ResumeWithHandoff extracts a facts-only handoff and resets context before sending the fresh prompt.
+func (w *orchestratorWrapper) ResumeWithHandoff(ctx context.Context, sessionID, instructions string) (orchestrator.ResumeHandoffResult, error) {
+	return w.svc.ResumeWithHandoff(ctx, sessionID, instructions)
+}
+
 type githubTaskIssueStoreAdapter struct {
 	svc *taskservice.Service
 }

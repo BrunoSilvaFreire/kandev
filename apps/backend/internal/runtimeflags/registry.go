@@ -235,6 +235,24 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.coldCacheAutoHandoff",
+			EnvVar:      "KANDEV_FEATURES_COLD_CACHE_AUTO_HANDOFF",
+			Kind:        KindFeature,
+			Label:       "Automatic handoff on cold-cache step entry",
+			Description: "On workflow step entry, reuses the most relevant session and, when its provider cache is cold, runs a resume-with-handoff before the entry prompt; when the provider quota is exhausted, extracts a handoff and starts a new session on an available profile.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskMedium,
+			RiskDescription: "Runs a cheap utility-model extraction automatically, so it spends tokens without an explicit user action. " +
+				"Disabling it restores the previous selection behavior: exhausted candidates are excluded up front and a cold reuse " +
+				"session is prompted as-is, without a handoff.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ColdCacheAutoHandoff },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ColdCacheAutoHandoff = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "debug.devMode",
 			EnvVar:      "KANDEV_DEBUG_DEV_MODE",
 			Kind:        KindDebug,

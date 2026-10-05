@@ -11,8 +11,9 @@ import {
   useResumeWithHandoff,
 } from "@/hooks/domains/session/use-resume-with-handoff";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
-import { CACHE_RECHECK_MS } from "@/lib/usage/efficiency";
-import { newestMessage, newestMessageAtMs } from "@/lib/usage/newest-message";
+import { useSessionUsageInspector } from "@/hooks/domains/session/use-session-usage-inspector";
+import { CACHE_RECHECK_MS, epochMillisFromWire } from "@/lib/usage/efficiency";
+import { newestMessage } from "@/lib/usage/newest-message";
 import type { Message } from "@/lib/types/http";
 
 const EMPTY_MESSAGES: Message[] = [];
@@ -22,13 +23,15 @@ type ResumeHandoffOfferProps = {
   sessionId: string | null;
   /** Receives the extracted handoff when the send failed after a reset. */
   onHandoffNotSent?: (handoff: string) => void;
+  getDraft?: () => string;
+  clearDraft?: () => void;
 };
 
 function isConversationMessage(message: Message): boolean {
   return message.type === "message" || message.type === "content";
 }
 
-function useResumeHandoffEligibility(sessionId: string | null, now: number) {
+function useResumeHandoffEligibility(taskId: string | null, sessionId: string | null, now: number) {
   const session = useAppStore((state) =>
     sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
   );
@@ -38,9 +41,12 @@ function useResumeHandoffEligibility(sessionId: string | null, now: number) {
   const agentctlStatus = useAppStore((state) =>
     sessionId ? state.sessionAgentctl.itemsBySessionId[sessionId]?.status : undefined,
   );
+  // Cache warmth is keyed on the newest usage-ledger event, so the offer reads
+  // the same session totals the usage inspector loads rather than messages.
+  const { session: usageTotals } = useSessionUsageInspector(taskId, sessionId, { enabled: true });
 
   const newest = useMemo(() => newestMessage(messages), [messages]);
-  const newestMessageAt = useMemo(() => newestMessageAtMs(messages), [messages]);
+  const lastUsageEventAt = epochMillisFromWire(usageTotals?.last_event_at);
   const hasAgentMessage = useMemo(
     () =>
       messages.some((message) => message.author_type !== "user" && isConversationMessage(message)),
@@ -59,7 +65,7 @@ function useResumeHandoffEligibility(sessionId: string | null, now: number) {
     isAgentBusy,
     hasLiveExecution,
     hasAgentMessage,
-    newestMessageAt,
+    lastUsageEventAt,
     now,
   });
   return {
@@ -72,6 +78,8 @@ export function ResumeHandoffOffer({
   taskId,
   sessionId,
   onHandoffNotSent,
+  getDraft,
+  clearDraft,
 }: ResumeHandoffOfferProps) {
   const { t } = useTranslation();
   const isUtilityConfigured = useIsUtilityConfigured();
@@ -86,8 +94,10 @@ export function ResumeHandoffOffer({
     return () => clearInterval(timer);
   }, []);
 
-  const { isCandidate, dismissalKey } = useResumeHandoffEligibility(sessionId, now);
+  const { isCandidate, dismissalKey } = useResumeHandoffEligibility(taskId, sessionId, now);
   const isDismissed = dismissalKey !== null && dismissedKey === dismissalKey;
+  const draft = getDraft ? getDraft().trim() : "";
+  const hasDraft = draft.length > 0;
 
   // Without a configured utility agent the extraction would always fail, so
   // the offer would only re-arm on every new message.
@@ -106,16 +116,30 @@ export function ResumeHandoffOffer({
       className="flex flex-col gap-2 rounded border border-border bg-muted/30 px-3 py-2"
     >
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <span className="min-w-0 flex-1 text-sm text-muted-foreground">
-          {t("task:resumeHandoffOffer")}
-        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="text-sm text-muted-foreground">{t("task:resumeHandoffOffer")}</span>
+          {hasDraft ? (
+            <span
+              data-testid="resume-handoff-draft-hint"
+              className="text-xs text-muted-foreground/80"
+            >
+              {t("task:resumeHandoffIncludesDraft")}
+            </span>
+          ) : null}
+        </div>
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
           <Button
             type="button"
             variant="default"
             data-testid="resume-handoff-action"
             className="min-h-11 w-full shrink-0 gap-1.5 cursor-pointer sm:min-h-7 sm:w-auto"
-            onClick={() => void run()}
+            onClick={async () => {
+              const text = getDraft ? getDraft() : "";
+              const success = await run(text);
+              if (success) {
+                clearDraft?.();
+              }
+            }}
             disabled={isRunning || !isCandidate}
           >
             {isRunning ? <GridSpinner className="h-3.5 w-3.5" /> : null}

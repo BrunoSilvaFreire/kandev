@@ -158,6 +158,7 @@ func TestCompletedSessionFollowUpOwnership(t *testing.T) {
 		"task-completed-ownership",
 		"profile-ownership",
 		"",
+		"",
 	)
 	require.NoError(t, err)
 	require.NotNil(t, reusable)

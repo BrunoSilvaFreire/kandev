@@ -10,6 +10,7 @@ describe("handoff-types", () => {
     expect(result).toEqual({
       selectedProfileId: "profile-b",
       contextValue: "blank",
+      targetStepId: null,
     });
   });
 });

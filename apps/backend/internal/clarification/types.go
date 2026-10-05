@@ -28,6 +28,31 @@ const (
 // ApprovalQuestionID is the fixed question id of an approval bundle.
 const ApprovalQuestionID = "approval"
 
+// ContinuationRecoveryQuestionID is the fixed question id of a
+// continuation-recovery bundle.
+const ContinuationRecoveryQuestionID = "continuation_recovery"
+
+// Continuation-recovery decisions. These are the stable option IDs of the
+// fixed recovery question.
+const (
+	ContinuationRecoveryDecisionRetry    = "retry"
+	ContinuationRecoveryDecisionContinue = "continue"
+)
+
+// ContinuationRecoveryMeta is the request-side metadata that marks a
+// clarification bundle as a continuation-recovery request. It is persisted
+// alongside the bundle's question so the resolver can hand the decision to the
+// orchestrator instead of delivering text to an agent.
+type ContinuationRecoveryMeta struct {
+	// Stamp is the CAS key of the pending_continuation record this bundle asks
+	// about. A resolution whose stamp no longer matches is a no-op.
+	Stamp string `json:"stamp"`
+	// Case names the paused continuation path (cold | unavailable | quota_pressure).
+	Case string `json:"case"`
+	// Reason names why it paused (extraction_failed | reset_failed | no_available_profile).
+	Reason string `json:"reason"`
+}
+
 // ApprovalMeta is the request-side metadata that marks a clarification bundle
 // as an approval request. It is persisted alongside the bundle's questions so
 // the resolver can render the subject's pending comments before claiming.
@@ -79,8 +104,13 @@ type Request struct {
 	// Approval, when set, marks this bundle as a request_approval_kandev
 	// approval request. The bundle still carries exactly one fixed question
 	// so existing chat/inbox rendering treats it as a normal bundle.
-	Approval  *ApprovalMeta `json:"approval,omitempty"`
-	CreatedAt time.Time     `json:"created_at"`
+	Approval *ApprovalMeta `json:"approval,omitempty"`
+	// ContinuationRecovery, when set, marks this bundle as a system-authored
+	// continuation-recovery request. It carries exactly one fixed question and
+	// has no agent waiter; the resolver forwards the decision to the
+	// orchestrator's recovery handler.
+	ContinuationRecovery *ContinuationRecoveryMeta `json:"continuation_recovery,omitempty"`
+	CreatedAt            time.Time                 `json:"created_at"`
 }
 
 // Answer represents the user's answer to a single question.
