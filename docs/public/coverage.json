@@ -352,12 +352,15 @@
       "stability": "stable",
       "docs": [
         "agents-and-profiles",
+        "usage",
         "configuration",
         "add-agent-cli"
       ],
       "sources": [
         "apps/backend/internal/profiles/profiles.go",
         "apps/backend/internal/backendapp/settings_operations.go",
+        "apps/backend/internal/providerusage/service.go",
+        "apps/backend/internal/agent/usage/client_antigravity.go",
         "apps/backend/internal/settingscatalog/catalog.go",
         "apps/backend/internal/mcp/handlers/settings_handlers.go",
         "apps/backend/internal/mcp/server/settings_tools.go",
@@ -366,6 +369,9 @@
       ],
       "tests": [
         "apps/backend/internal/profiles/profiles_test.go",
+        "apps/backend/internal/providerusage/store_test.go",
+        "apps/backend/internal/providerusage/estimate_test.go",
+        "apps/backend/internal/providerusage/handler_test.go",
         "apps/backend/internal/backendapp/settings_operations_test.go",
         "apps/backend/internal/mcp/handlers/settings_handlers_test.go",
         "apps/backend/internal/mcp/server/settings_tools_test.go",

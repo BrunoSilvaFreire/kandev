@@ -64,113 +64,6 @@ open class BackendBuildTask(name: String) : Task<NoInputs, NoOutputs>(name) {
 }
 
 /**
- * Packages the runtime bundle (embedded web assets + Go backend + agentctl helpers)
- * into dist/kandev. This is the shared build artifact consumed by both the desktop
- * shell and the systemd service, so neither has to depend on the other.
- */
-open class RuntimeBundleTask(name: String) : Task<NoInputs, NoOutputs>(name) {
-    val skip = property<Boolean> {
-        set(false)
-    }.withCLI("skip", "Skip rebuilding the runtime bundle if dist/kandev/bin/kandev already exists")
-
-    private fun executionPath(): String {
-        val userHome = System.getProperty("user.home") ?: ""
-        return listOf(
-            "$userHome/.local/share/mise/shims",
-            "$userHome/.cargo/bin",
-            "$userHome/.local/bin",
-            System.getenv("PATH") ?: ""
-        ).filter { it.isNotBlank() }.joinToString(":")
-    }
-
-    override suspend fun buildInputs(context: ExecutionContext) = NoInputs()
-    override fun buildOutputs() = NoOutputs()
-
-    override suspend fun execute(context: ExecutionContext, inputSet: NoInputs): ExecutionResult<NoOutputs> {
-        val launcherBin = File(context.projectDir.toFile(), "dist/kandev/bin/kandev")
-        if (skip.orNull() == true && launcherBin.exists()) {
-            return success()
-        }
-
-        return context.executeBash {
-            workingDir = context.projectDir.toString()
-            environment("PATH", executionPath())
-            command("bash")
-            args("-c", "make runtime-bundle")
-        }
-    }
-}
-
-/**
- * Stages the packaged runtime bundle (dist/kandev) into the Tauri resource layout at
- * apps/desktop/src-tauri/resources/kandev.
- */
-open class DesktopStageRuntimeTask(name: String) : Task<NoInputs, NoOutputs>(name) {
-    private fun executionPath(): String {
-        val userHome = System.getProperty("user.home") ?: ""
-        return listOf(
-            "$userHome/.local/share/mise/shims",
-            "$userHome/.cargo/bin",
-            "$userHome/.local/bin",
-            System.getenv("PATH") ?: ""
-        ).filter { it.isNotBlank() }.joinToString(":")
-    }
-
-    override suspend fun buildInputs(context: ExecutionContext) = NoInputs()
-    override fun buildOutputs() = NoOutputs()
-
-    override suspend fun execute(context: ExecutionContext, inputSet: NoInputs): ExecutionResult<NoOutputs> {
-        return context.executeBash {
-            workingDir = context.projectDir.toString()
-            environment("PATH", executionPath())
-            command("bash")
-            args("scripts/release/prepare-desktop-runtime.sh")
-        }
-    }
-}
-
-/**
- * Verifies that the desktop runtime resources are properly staged in
- * apps/desktop/src-tauri/resources/kandev, ensuring all required binaries
- * (kandev launcher and agentctl helpers) exist before packaging.
- */
-open class DesktopVerifyTask(name: String) : Task<NoInputs, NoOutputs>(name) {
-    override suspend fun buildInputs(context: ExecutionContext) = NoInputs()
-    override fun buildOutputs() = NoOutputs()
-
-    override suspend fun execute(context: ExecutionContext, inputSet: NoInputs): ExecutionResult<NoOutputs> {
-        val runtimeDir = File(context.projectDir.toFile(), "apps/desktop/src-tauri/resources/kandev")
-        val launcherBin = File(runtimeDir, "bin/kandev")
-
-        if (!launcherBin.exists()) {
-            return failure(
-                IllegalStateException(
-                    "Desktop runtime is missing at ${launcherBin.path}. " +
-                    "Run 'karto run desktop/runtime' first to prepare the runtime bundle."
-                )
-            )
-        }
-
-        val result = context.executeBash {
-            workingDir = context.projectDir.toString()
-            command("bash")
-            args("scripts/release/verify-desktop-runtime.sh", runtimeDir.absolutePath)
-        }
-
-        return when (result) {
-            is ExecutionResult.Failure -> failure(
-                IllegalStateException(
-                    "Desktop runtime verification failed. " +
-                    "Run 'karto run desktop/runtime' to refresh runtime binaries.",
-                    result.error
-                )
-            )
-            else -> result
-        }
-    }
-}
-
-/**
  * Builds the Tauri desktop bundle.
  * Defaults to '--bundles deb' for fast iteration, avoiding slow RPM compression.
  */
@@ -348,67 +241,6 @@ open class DesktopCleanTask(name: String) : Task<NoInputs, NoOutputs>(name) {
         }
 
         return success()
-    }
-}
-
-/**
- * Builds an optimized profiling build of the Tauri desktop application.
- * Retains native debug symbols (CARGO_PROFILE_RELEASE_DEBUG=true) and enables WebView devtools.
- * Skips .deb packaging (--no-bundle) for iteration speed.
- */
-open class ProfilingBuildTask(name: String) : Task<NoInputs, NoOutputs>(name) {
-    val rebuildRuntime = property<Boolean> {
-        set(false)
-    }.withCLI("rebuild-runtime", "Force rebuilding the Go runtime bundle before building desktop")
-
-    private fun executionPath(): String {
-        val userHome = System.getProperty("user.home") ?: ""
-        return listOf(
-            "$userHome/.local/share/mise/shims",
-            "$userHome/.cargo/bin",
-            "$userHome/.local/bin",
-            System.getenv("PATH") ?: ""
-        ).filter { it.isNotBlank() }.joinToString(":")
-    }
-
-    override suspend fun buildInputs(context: ExecutionContext) = NoInputs()
-    override fun buildOutputs() = NoOutputs()
-
-    override suspend fun execute(context: ExecutionContext, inputSet: NoInputs): ExecutionResult<NoOutputs> {
-        val runtimeDir = File(context.projectDir.toFile(), "apps/desktop/src-tauri/resources/kandev")
-        val launcherBin = File(runtimeDir, "bin/kandev")
-
-        if (rebuildRuntime.orNull() == true || !launcherBin.exists()) {
-            val stageResult = context.executeBash {
-                workingDir = context.projectDir.toString()
-                environment("PATH", executionPath())
-                command("bash")
-                args("-c", "make runtime-bundle && scripts/release/prepare-desktop-runtime.sh")
-            }
-            if (stageResult is ExecutionResult.Failure) {
-                return stageResult
-            }
-        }
-
-        val verifyResult = context.executeBash {
-            workingDir = context.projectDir.toString()
-            command("bash")
-            args("scripts/release/verify-desktop-runtime.sh", runtimeDir.absolutePath)
-        }
-        if (verifyResult is ExecutionResult.Failure) {
-            return verifyResult
-        }
-
-        return context.executeBash {
-            workingDir = context.projectDir.toString()
-            environment("PATH", executionPath())
-            environment("CARGO_PROFILE_RELEASE_DEBUG", "true")
-            command("bash")
-            args(
-                "-c",
-                "pnpm --filter @kandev/desktop exec tauri build --features desktop-runtime,devtools --no-bundle"
-            )
-        }
     }
 }
 
@@ -994,6 +826,45 @@ group("profiling") {
     excludeTasksFromGroupDefault(clean, backendCpu, backendHeap, report, taskPage)
 }
 
+/**
+ * Writes the systemd user-service feature-flag drop-in and reloads the manager.
+ *
+ * `kandev service install` regenerates kandev.service from a fixed template and
+ * would discard any flags edited into it, so runtime feature flags live in a
+ * drop-in instead. Both service/install and service/restart depend on this task,
+ * guaranteeing the flags are present before the service (re)starts.
+ */
+open class ServiceFeatureFlagsTask(name: String) : Task<NoInputs, NoOutputs>(name) {
+    override suspend fun buildInputs(context: ExecutionContext) = NoInputs()
+    override fun buildOutputs() = NoOutputs()
+
+    override suspend fun execute(context: ExecutionContext, inputSet: NoInputs): ExecutionResult<NoOutputs> {
+        val userHome = System.getProperty("user.home") ?: ""
+        val dropInDir = File(userHome, ".config/systemd/user/kandev.service.d")
+        val dropInFile = File(dropInDir, "10-kandev-flags.conf")
+
+        val contents = """
+            # managed by karto — runtime feature flags for kandev.service
+            # Regenerated by the service/install and service/restart karto tasks.
+            [Service]
+            Environment=KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING=true
+        """.trimIndent() + "\n"
+
+        dropInDir.mkdirs()
+        if (!dropInFile.exists() || dropInFile.readText() != contents) {
+            dropInFile.writeText(contents)
+            println("Wrote feature-flag drop-in: ${dropInFile.absolutePath}")
+        } else {
+            println("Feature-flag drop-in already current: ${dropInFile.absolutePath}")
+        }
+
+        return context.executeBash {
+            command("bash")
+            args("-c", "systemctl --user daemon-reload && echo 'Reloaded systemd user manager.'")
+        }
+    }
+}
+
 // ─── Service Pipeline ───────────────────────────────────────────
 group("service") {
     // The service runs the packaged runtime bundle directly from dist/kandev; it does
@@ -1002,8 +873,12 @@ group("service") {
         dependsOn("build/runtime")
     }
 
+    // Runtime feature flags are applied as a systemd drop-in so they survive the
+    // unit regeneration performed by `kandev service install`.
+    val flags = task<ServiceFeatureFlagsTask>("flags") {}
+
     val install = task<ServiceInstallTask>("install") {
-        dependsOn(setupHost)
+        dependsOn(setupHost, flags)
     }
 
     val start = task<ServiceControlTask>("start") {
@@ -1016,6 +891,7 @@ group("service") {
 
     val restart = task<ServiceControlTask>("restart") {
         action = "restart"
+        dependsOn(flags)
     }
 
     val status = task<ServiceControlTask>("status") {
@@ -1028,7 +904,7 @@ group("service") {
         action = "uninstall"
     }
 
-    excludeTasksFromGroupDefault(setupHost, stop, restart, logs, uninstall)
+    excludeTasksFromGroupDefault(setupHost, flags, stop, restart, logs, uninstall)
 }
 
 // ─── Data Pipeline ──────────────────────────────────────────────

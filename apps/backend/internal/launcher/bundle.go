@@ -26,7 +26,14 @@ type agentctlRemoteHelper struct {
 	MustBeSigned bool
 }
 
-var requiredAgentctlRemoteHelpers = []agentctlRemoteHelper{
+// agentctlRemoteHelpers is the known set of remote helpers a bundle may carry for
+// SSH/Docker/Sprites executors. They are optional: a host-only bundle built by
+// `karto` (or a hand-assembled one) is valid with only the native launcher and
+// agentctl, and a remote executor targeting a platform whose helper is absent
+// fails at launch instead. Every helper that IS present is still validated, so a
+// corrupt or unsigned darwin/arm64 helper cannot slip through just because the
+// others are missing.
+var agentctlRemoteHelpers = []agentctlRemoteHelper{
 	{Name: "agentctl-linux-amd64", Label: "agentctl linux/amd64 helper"},
 	{Name: "agentctl-linux-arm64", Label: "agentctl linux/arm64 helper"},
 	{Name: "agentctl-darwin-arm64", Label: "agentctl darwin/arm64 helper", MustBeSigned: true},
@@ -100,10 +107,13 @@ func validateRuntimeBundle(dir, source string) (runtimeBundle, error) {
 	if !exists(agentctl) {
 		return runtimeBundle{}, fmt.Errorf("agentctl binary not found in bundle at %s", agentctl)
 	}
-	for _, helper := range requiredAgentctlRemoteHelpers {
+	for _, helper := range agentctlRemoteHelpers {
 		path := filepath.Join(dir, "bin", helper.Name)
 		if !exists(path) {
-			return runtimeBundle{}, fmt.Errorf("%s not found in bundle at %s", helper.Label, path)
+			// Remote helpers are optional: a host-only bundle ships just the
+			// native launcher and agentctl. A remote executor whose platform
+			// helper is missing reports that at launch.
+			continue
 		}
 		if helper.MustBeSigned {
 			signed, ok := machoHasCodeSignature(path)

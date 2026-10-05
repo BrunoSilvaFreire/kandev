@@ -434,9 +434,13 @@ kandev --version
 
 Remove `--omit=optional` from npm configuration for this install. On unsupported targets, use a supported machine or remote environment; do not point `KANDEV_BUNDLE_DIR` at a bundle from another platform.
 
-### A required binary or remote helper is missing
+### A required binary is missing
 
-Reinstall or upgrade the whole package. Runtime validation intentionally fails when `kandev`, `agentctl`, or a required Linux/macOS remote helper is absent. Mixing archives or pruning package files produces this error.
+Reinstall or upgrade the whole package. Runtime validation fails when the native `kandev` launcher or
+`agentctl` is absent, or when a remote `agentctl` helper that *is* present is unusable (an unsigned
+darwin/arm64 helper is rejected). Remote helpers are optional: a host-only bundle ships only the
+host's helper, and a remote executor whose platform helper is absent reports that when it launches.
+Mixing archives or pruning `kandev`/`agentctl` produces the validation error.
 
 ### The requested port is already in use
 

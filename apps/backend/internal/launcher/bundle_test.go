@@ -32,20 +32,26 @@ func TestValidateRuntimeBundleRejectsMissingLauncher(t *testing.T) {
 	}
 }
 
-func TestValidateRuntimeBundleRejectsMissingRemoteHelper(t *testing.T) {
+func TestValidateRuntimeBundleAcceptsHostOnlyBundle(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "bin", "kandev"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl"))
+
+	if _, err := validateRuntimeBundle(dir, "test"); err != nil {
+		t.Fatalf("host-only bundle (no remote helpers) should be accepted: %v", err)
+	}
+}
+
+func TestValidateRuntimeBundleAcceptsPartialRemoteHelpers(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "bin", "kandev"))
 	writeFile(t, filepath.Join(dir, "bin", "agentctl"))
 	writeFile(t, filepath.Join(dir, "bin", "agentctl-linux-amd64"))
 	writeFile(t, filepath.Join(dir, "bin", "agentctl-linux-arm64"))
 	writeFile(t, filepath.Join(dir, "bin", "agentctl-darwin-amd64"))
-
-	_, err := validateRuntimeBundle(dir, "test")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if got, want := err.Error(), "agentctl darwin/arm64 helper not found"; !strings.Contains(got, want) {
-		t.Fatalf("error = %q, want substring %q", got, want)
+	// darwin/arm64 intentionally absent.
+	if _, err := validateRuntimeBundle(dir, "test"); err != nil {
+		t.Fatalf("partial remote-helper set should be accepted: %v", err)
 	}
 }
 
@@ -149,9 +155,9 @@ func writeMachO(t *testing.T, path string, signed bool) {
 	}
 }
 
-func TestRequiredAgentctlRemoteHelpers(t *testing.T) {
-	got := make([]string, 0, len(requiredAgentctlRemoteHelpers))
-	for _, helper := range requiredAgentctlRemoteHelpers {
+func TestAgentctlRemoteHelpers(t *testing.T) {
+	got := make([]string, 0, len(agentctlRemoteHelpers))
+	for _, helper := range agentctlRemoteHelpers {
 		got = append(got, helper.Name)
 	}
 	want := []string{
@@ -277,7 +283,7 @@ func TestResolveRuntimeBundleReportsBothLookupsInError(t *testing.T) {
 
 func writeRemoteAgentctlHelpers(t *testing.T, dir string) {
 	t.Helper()
-	for _, helper := range requiredAgentctlRemoteHelpers {
+	for _, helper := range agentctlRemoteHelpers {
 		path := filepath.Join(dir, "bin", helper.Name)
 		// MustBeSigned helpers now fail closed on an unparsable artifact, so a
 		// plain stub no longer passes validation — write a signed Mach-O.
