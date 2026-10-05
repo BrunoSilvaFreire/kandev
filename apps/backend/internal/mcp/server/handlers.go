@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kandev/kandev/internal/clarification"
+	clarificationprotocol "github.com/kandev/kandev/internal/clarification/protocol"
 	taskcontract "github.com/kandev/kandev/internal/task/contract"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -920,12 +920,12 @@ func (s *Server) requestApprovalHandler() server.ToolHandlerFunc {
 			return errResult, nil
 		}
 
-		question := clarification.ApprovalQuestion(title)
+		question := clarificationprotocol.ApprovalQuestion(title)
 		payload := map[string]interface{}{
 			"session_id": s.sessionID,
-			questionsArg: []clarification.Question{question},
+			questionsArg: []clarificationprotocol.Question{question},
 			"context":    summary,
-			"approval": &clarification.ApprovalMeta{
+			"approval": &clarificationprotocol.ApprovalMeta{
 				Subject:     subject,
 				DocumentKey: documentKey,
 				Title:       title,
@@ -944,8 +944,8 @@ const approvalTitleRuneCap = 60
 
 func validateApprovalRequestArgs(subject, documentKey, title, summary string) *mcp.CallToolResult {
 	switch subject {
-	case clarification.ApprovalSubjectTaskPlan:
-	case clarification.ApprovalSubjectDocument:
+	case clarificationprotocol.ApprovalSubjectTaskPlan:
+	case clarificationprotocol.ApprovalSubjectDocument:
 		if strings.TrimSpace(documentKey) == "" {
 			return mcp.NewToolResultError("document_key is required when subject is \"document\"")
 		}

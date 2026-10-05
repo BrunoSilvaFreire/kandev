@@ -6,27 +6,29 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/clarification/protocol"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
-// Approval subjects supported by request_approval_kandev. A subject names
-// what the user is being asked to approve.
+// Approval wire helpers are owned by the dependency-free protocol package so
+// that lightweight clients (agentctl's MCP server) can build approval requests
+// without importing this package's task-service coupling.
 const (
-	ApprovalSubjectTaskPlan = "task_plan"
-	ApprovalSubjectDocument = "document"
+	ApprovalSubjectTaskPlan = protocol.ApprovalSubjectTaskPlan
+	ApprovalSubjectDocument = protocol.ApprovalSubjectDocument
 )
 
-// Approval decisions. These are the stable option IDs of the fixed approval
-// question, so older clients that render the bundle as a normal single
-// question still produce a valid outcome.
+// Approval decisions are the stable option IDs of the fixed approval question,
+// so older clients that render the bundle as a normal single question still
+// produce a valid outcome.
 const (
-	ApprovalDecisionApprove = "approve"
-	ApprovalDecisionRevise  = "revise"
-	ApprovalDecisionReject  = "reject"
+	ApprovalDecisionApprove = protocol.ApprovalDecisionApprove
+	ApprovalDecisionRevise  = protocol.ApprovalDecisionRevise
+	ApprovalDecisionReject  = protocol.ApprovalDecisionReject
 )
 
 // ApprovalQuestionID is the fixed question id of an approval bundle.
-const ApprovalQuestionID = "approval"
+const ApprovalQuestionID = protocol.ApprovalQuestionID
 
 // ContinuationRecoveryQuestionID is the fixed question id of a
 // continuation-recovery bundle.
@@ -56,12 +58,7 @@ type ContinuationRecoveryMeta struct {
 // ApprovalMeta is the request-side metadata that marks a clarification bundle
 // as an approval request. It is persisted alongside the bundle's questions so
 // the resolver can render the subject's pending comments before claiming.
-type ApprovalMeta struct {
-	Subject          string `json:"subject"` // ApprovalSubjectTaskPlan | ApprovalSubjectDocument
-	DocumentKey      string `json:"document_key,omitempty"`
-	Title            string `json:"title"`
-	VersionAtRequest string `json:"version_at_request,omitempty"`
-}
+type ApprovalMeta = protocol.ApprovalMeta
 
 // ApprovalOutcome is the response-side payload filled by the resolver when it
 // resolves an approval bundle. It carries the decision, the user's free-text
@@ -78,20 +75,10 @@ type ApprovalOutcome struct {
 }
 
 // Option represents a single choice option for a question.
-type Option struct {
-	ID          string `json:"option_id"`
-	Label       string `json:"label"`       // Concise 1-5 words
-	Description string `json:"description"` // Explanation of the option
-}
+type Option = protocol.Option
 
 // Question represents a single question with multiple choice options.
-type Question struct {
-	ID              string   `json:"id"`
-	Title           string   `json:"title"`   // Short label (max 12 chars)
-	Prompt          string   `json:"prompt"`  // Full question text
-	Options         []Option `json:"options"` // 2-6 options
-	AllowCustomText *bool    `json:"allow_custom_text,omitempty"`
-}
+type Question = protocol.Question
 
 // Request represents a clarification request from an agent. A request bundles
 // one or more questions; the agent stays blocked until every question has been

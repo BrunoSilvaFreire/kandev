@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kandev/kandev/internal/clarification/protocol"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
@@ -34,20 +35,7 @@ type ApprovalCommentConsumer interface {
 // ApprovalQuestion returns the fixed single question of an approval bundle.
 // The option IDs are the stable decisions the resolver records.
 func ApprovalQuestion(title string) Question {
-	label := strings.TrimSpace(title)
-	if label == "" {
-		label = "Approval"
-	}
-	return Question{
-		ID:     ApprovalQuestionID,
-		Title:  truncateRunes(label, 12),
-		Prompt: label,
-		Options: []Option{
-			{ID: ApprovalDecisionApprove, Label: "Approve", Description: "Accept the subject as-is."},
-			{ID: ApprovalDecisionRevise, Label: "Revise", Description: "Send feedback or plan comments for another revision."},
-			{ID: ApprovalDecisionReject, Label: "Reject", Description: "Stop without accepting the subject."},
-		},
-	}
+	return protocol.ApprovalQuestion(title)
 }
 
 // IsApprovalBundle reports whether msgs belong to an approval request.
@@ -327,12 +315,4 @@ func appendApprovalBlock(summary string, approval *ApprovalOutcome) string {
 		return block
 	}
 	return summary + "\n\n" + block
-}
-
-func truncateRunes(s string, n int) string {
-	runes := []rune(s)
-	if len(runes) <= n {
-		return s
-	}
-	return string(runes[:n])
 }
