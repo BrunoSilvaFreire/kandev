@@ -32,6 +32,12 @@ type messageListRepo struct {
 	paginatedOptions []models.ListMessagesOptions
 	searchOptions    []models.SearchMessagesOptions
 	hasMore          bool
+
+	taskSearchCalls   int
+	taskSearchOptions []models.SearchTaskMessagesOptions
+	taskSearchHits    []*models.TaskMessageSearchHit
+	taskSearchHasMore bool
+	taskSearchErr     error
 }
 
 func (r *messageListRepo) ListMessages(context.Context, string) ([]*models.Message, error) {
@@ -67,6 +73,17 @@ func (r *messageListRepo) SearchMessages(
 	return []*models.Message{
 		{ID: "msg-1", TaskSessionID: "sess-b", Content: "hello world", TurnID: "turn-1"},
 	}, nil
+}
+
+func (r *messageListRepo) SearchTaskMessages(
+	_ context.Context, _ string, opts models.SearchTaskMessagesOptions,
+) ([]*models.TaskMessageSearchHit, bool, error) {
+	r.taskSearchCalls++
+	r.taskSearchOptions = append(r.taskSearchOptions, opts)
+	if r.taskSearchErr != nil {
+		return nil, false, r.taskSearchErr
+	}
+	return r.taskSearchHits, r.taskSearchHasMore, nil
 }
 
 func newMessageListHandlers(t *testing.T, repo *messageListRepo) *MessageHandlers {

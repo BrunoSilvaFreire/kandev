@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { AgentLogo } from "@/components/agent-logo";
+import { useAppStore } from "@/components/state-provider";
 import type { MessageSearchHit } from "@/lib/api/domains/session-api";
 import { useTranslation } from "react-i18next";
 
@@ -16,6 +17,14 @@ type SessionSearchHitsProps = {
   agentLabel?: string | null;
   /** Agent registry slug (e.g. "claude-code") used to fetch the profile logo. */
   agentName?: string | null;
+  /** True when the search spans the whole task, enabling cross-session rows. */
+  taskScoped?: boolean;
+  /** The session whose chat is currently shown; other session hits activate it. */
+  currentSessionId?: string | null;
+  hasMore?: boolean;
+  onLoadMore?: () => void;
+  /** Fill the parent instead of the fixed desktop popover size (phone surface). */
+  fullHeight?: boolean;
 };
 
 function formatTime(iso: string): string {
@@ -33,6 +42,21 @@ function formatTime(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+/** Resolve a turn-start step id to its display name from the workflow store.
+ *  The id is the authority; an unresolvable (removed) step stays unlabeled. */
+function useStepName(stepId: string | null | undefined): string | null {
+  return useAppStore((state) => {
+    if (!stepId) return null;
+    const active = state.kanban.steps.find((step) => step.id === stepId);
+    if (active) return active.title;
+    for (const snapshot of Object.values(state.kanbanMulti.snapshots)) {
+      const match = snapshot?.steps.find((step) => step.id === stepId);
+      if (match) return match.title;
+    }
+    return null;
+  });
 }
 
 function HighlightedSnippet({ text, query }: { text: string; query: string }) {
@@ -98,6 +122,38 @@ function HitAuthor({
   );
 }
 
+/** Session + turn-start step provenance line for a task-scope hit. */
+function HitMeta({
+  hit,
+  currentSessionId,
+}: {
+  hit: MessageSearchHit;
+  currentSessionId?: string | null;
+}) {
+  const { t } = useTranslation();
+  const stepName = useStepName(hit.workflow_step_id);
+  const crossSession = Boolean(
+    currentSessionId && hit.session_id && hit.session_id !== currentSessionId,
+  );
+  const sessionLabel = hit.session_name || hit.session_id;
+  return (
+    <div className="mb-0.5 flex items-center gap-1.5 truncate text-[0.6875rem] text-muted-foreground">
+      {sessionLabel && (
+        <span className="truncate">{t("task:sourceSession", { name: sessionLabel })}</span>
+      )}
+      {stepName && <span className="truncate">{t("task:sourceStep", { name: stepName })}</span>}
+      {crossSession && (
+        <span
+          className="shrink-0 rounded-sm bg-primary/10 px-1 font-medium text-primary"
+          data-testid={`search-hit-cross-session-${hit.id}`}
+        >
+          {t("task:searchOpenSession")}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function SessionSearchHits({
   hits,
   query,
@@ -106,11 +162,24 @@ export function SessionSearchHits({
   isSearching,
   agentLabel,
   agentName,
+  taskScoped = false,
+  currentSessionId,
+  hasMore = false,
+  onLoadMore,
+  fullHeight = false,
 }: SessionSearchHitsProps) {
   const { t } = useTranslation();
   if (!query.trim()) return null;
   return (
-    <div className="w-[28rem] max-h-80 overflow-auto rounded-md border border-border bg-background shadow-lg text-xs">
+    <div
+      data-testid="session-search-hits"
+      className={cn(
+        "overflow-auto rounded-md border border-border bg-background shadow-lg text-xs",
+        fullHeight
+          ? "h-full w-full rounded-none border-0 shadow-none"
+          : "max-h-80 w-[28rem] max-w-[calc(100vw-1rem)]",
+      )}
+    >
       {isSearching && hits.length === 0 && (
         <div className="p-3 text-muted-foreground">{t("task:searching")}</div>
       )}
@@ -123,10 +192,11 @@ export function SessionSearchHits({
           type="button"
           onClick={() => onSelect(hit.id)}
           className={cn(
-            "w-full text-left px-3 py-2 border-b border-border last:border-0 cursor-pointer hover:bg-muted/50",
+            "w-full text-left px-3 py-2 border-b border-border last:border-0 cursor-pointer hover:bg-muted/50 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11",
             activeHitId === hit.id && "bg-muted",
           )}
         >
+          {taskScoped && <HitMeta hit={hit} currentSessionId={currentSessionId} />}
           <div className="flex items-center justify-between gap-2 mb-0.5">
             <HitAuthor authorType={hit.author_type} agentLabel={agentLabel} agentName={agentName} />
             <span className="text-[0.6875rem] text-muted-foreground/70 shrink-0">
@@ -138,6 +208,16 @@ export function SessionSearchHits({
           </div>
         </button>
       ))}
+      {taskScoped && hasMore && (
+        <button
+          type="button"
+          onClick={onLoadMore}
+          className="w-full cursor-pointer px-3 py-2 text-center text-primary hover:bg-muted/50"
+          data-testid="search-load-more"
+        >
+          {t("task:searchLoadMore")}
+        </button>
+      )}
     </div>
   );
 }

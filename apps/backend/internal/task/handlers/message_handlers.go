@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -30,6 +31,7 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/previewfeedbacktx"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/task/searchcursor"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -72,6 +74,10 @@ type resumeAndPromptOrchestrator interface {
 		planMode bool,
 		attachments []v1.MessageAttachment,
 	) (*orchestrator.PromptResult, error)
+}
+
+type resumeHandoffOrchestrator interface {
+	ResumeWithHandoff(ctx context.Context, sessionID, instructions string) (orchestrator.ResumeHandoffResult, error)
 }
 
 // AtomicQueuedPromptCoordinator exposes admission limits and committed prompt delivery.
@@ -276,6 +282,7 @@ func (h *MessageHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/agent-sessions/:id/messages", h.httpListMessages)
 	api.GET("/task-sessions/:id/messages", h.httpListMessages) // Alias for SSR compatibility
 	api.GET("/task-sessions/:id/messages/:message_id/shell-output", h.httpGetShellOutput)
+	api.POST("/task-sessions/:id/resume-with-handoff", h.httpResumeWithHandoff)
 }
 
 func (h *MessageHandlers) httpGetShellOutput(c *gin.Context) {
@@ -332,6 +339,78 @@ func (h *MessageHandlers) httpGetShellOutput(c *gin.Context) {
 		UpdatedAt: message.UpdatedAt,
 		Output:    output,
 	})
+}
+
+const maxResumeHandoffBodyBytes = 32 * 1024 // 32 KiB
+
+func (h *MessageHandlers) httpResumeWithHandoff(c *gin.Context) {
+	sessionID := strings.TrimSpace(c.Param("id"))
+	if sessionID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+
+	instructions, ok := bindResumeHandoffBody(c)
+	if !ok {
+		return
+	}
+
+	runner, ok := h.orchestrator.(resumeHandoffOrchestrator)
+	if !ok || runner == nil {
+		h.logger.Error("resume with handoff orchestrator not available")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "orchestrator unavailable"})
+		return
+	}
+
+	result, err := runner.ResumeWithHandoff(c.Request.Context(), sessionID, instructions)
+	if err != nil {
+		h.writeResumeHandoffError(c, sessionID, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+func bindResumeHandoffBody(c *gin.Context) (string, bool) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxResumeHandoffBodyBytes)
+
+	var req struct {
+		Instructions string `json:"instructions"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		if c.Request.ContentLength > maxResumeHandoffBodyBytes {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "payload too large"})
+			return "", false
+		}
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "payload too large"})
+			return "", false
+		}
+		if !errors.Is(err, io.EOF) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+			return "", false
+		}
+	}
+	return req.Instructions, true
+}
+
+func (h *MessageHandlers) writeResumeHandoffError(c *gin.Context, sessionID string, err error) {
+	switch {
+	case service.IsForbidden(err):
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+	case errors.Is(err, repoerrors.ErrTaskNotFound), errors.Is(err, sql.ErrNoRows), strings.Contains(err.Error(), "session not found"):
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+	case errors.Is(err, orchestrator.ErrSessionNotEligible):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "not_eligible", "error_code": "not_eligible"})
+	case errors.Is(err, orchestrator.ErrProviderUnavailable):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "provider_unavailable", "error_code": "provider_unavailable"})
+	case errors.Is(err, orchestrator.ErrExtractionFailed), errors.Is(err, orchestrator.ErrResumeHandoffEmpty):
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "extraction_failed", "error_code": "extraction_failed"})
+	default:
+		h.logger.Error("resume with handoff failed", zap.String("session_id", sessionID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resume with handoff"})
+	}
 }
 
 func (h *MessageHandlers) registerWS(dispatcher *ws.Dispatcher) {
@@ -1850,9 +1929,12 @@ type wsListMessagesRequest struct {
 }
 
 type wsSearchMessagesRequest struct {
-	TaskSessionID string `json:"session_id"`
-	Query         string `json:"query"`
-	Limit         int    `json:"limit"`
+	TaskSessionID   string `json:"session_id"`
+	TaskID          string `json:"task_id"`
+	ActiveSessionID string `json:"active_session_id"`
+	Query           string `json:"query"`
+	Limit           int    `json:"limit"`
+	Cursor          string `json:"cursor"`
 }
 
 const messageSnippetRadius = 60
@@ -1928,6 +2010,13 @@ func (h *MessageHandlers) wsSearchMessages(ctx context.Context, msg *ws.Message)
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
+	if req.TaskSessionID != "" && req.TaskID != "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"exactly one of session_id or task_id is required", nil)
+	}
+	if req.TaskID != "" {
+		return h.wsSearchTaskMessages(ctx, msg, req)
+	}
 	if req.TaskSessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
@@ -1953,6 +2042,90 @@ func (h *MessageHandlers) wsSearchMessages(ctx context.Context, msg *ws.Message)
 		})
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.SearchMessagesResponse{Hits: hits, Total: len(hits)})
+}
+
+// wsSearchTaskMessages serves task-scoped search: one global active-first
+// keyset order, with an opaque cursor bound to the exact request.
+func (h *MessageHandlers) wsSearchTaskMessages(
+	ctx context.Context,
+	msg *ws.Message,
+	req wsSearchMessagesRequest,
+) (*ws.Message, error) {
+	query := strings.TrimSpace(req.Query)
+	if query == "" {
+		return ws.NewResponse(msg.ID, msg.Action, dto.SearchMessagesResponse{Hits: []dto.MessageSearchHit{}, Total: 0})
+	}
+	binding := searchcursor.Binding{
+		TaskID:          req.TaskID,
+		ActiveSessionID: req.ActiveSessionID,
+		Query:           query,
+	}
+	var cursor *models.SearchTaskMessagesCursor
+	if strings.TrimSpace(req.Cursor) != "" {
+		decoded, err := searchcursor.Decode(req.Cursor, binding)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid search cursor", nil)
+		}
+		cursor = &models.SearchTaskMessagesCursor{
+			Bucket: decoded.Bucket, Key: decoded.Key, ID: decoded.ID,
+		}
+	}
+
+	hits, hasMore, err := h.service.SearchTaskMessages(
+		ctx, req.TaskID, req.ActiveSessionID, query, req.Limit, cursor,
+	)
+	if err != nil {
+		h.logger.Error("failed to search task messages", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to search messages", nil)
+	}
+	out := make([]dto.MessageSearchHit, 0, len(hits))
+	for _, hit := range hits {
+		out = append(out, taskSearchHitToDTO(hit, query))
+	}
+	resp := dto.SearchMessagesResponse{Hits: out, Total: len(out)}
+	if hasMore && len(hits) > 0 {
+		last := hits[len(hits)-1]
+		resp.HasMore = true
+		resp.NextCursor = searchcursor.Encode(binding, searchcursor.Cursor{
+			Bucket: activeFirstBucket(last.Message.TaskSessionID, req.ActiveSessionID),
+			Key:    last.OrderKey,
+			ID:     last.Message.ID,
+		})
+	}
+	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+// activeFirstBucket is 0 for the active session and 1 for every other session.
+func activeFirstBucket(sessionID, activeSessionID string) int {
+	if activeSessionID != "" && sessionID == activeSessionID {
+		return 0
+	}
+	return 1
+}
+
+// taskSearchHitToDTO maps one enriched hit to the wire shape. The step id is
+// present only when the owning turn carried the immutable stamp.
+func taskSearchHitToDTO(hit *models.TaskMessageSearchHit, query string) dto.MessageSearchHit {
+	message := hit.Message
+	out := dto.MessageSearchHit{
+		ID:         message.ID,
+		TurnID:     message.TurnID,
+		AuthorType: string(message.AuthorType),
+		Type:       string(message.Type),
+		Snippet:    buildSnippet(message.Content, query),
+		CreatedAt:  message.CreatedAt,
+		SessionID:  message.TaskSessionID,
+	}
+	if hit.Session != nil {
+		out.SessionID = hit.Session.ID
+		out.SessionName = hit.Session.Name
+		out.AgentProfileID = hit.Session.AgentProfileID
+	}
+	if hit.WorkflowStepID != "" {
+		stepID := hit.WorkflowStepID
+		out.WorkflowStepID = &stepID
+	}
+	return out
 }
 
 // wsListMessages handles a WebSocket request for a message page.
