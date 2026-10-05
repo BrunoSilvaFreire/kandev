@@ -102,6 +102,7 @@ func RegisterRoutes(
 	g.POST("/tasks", seedTaskHandler(repo, log))
 	g.POST("/task-sessions", seedTaskSessionHandler(repo, eventBus, log))
 	g.DELETE("/task-sessions/:id", deleteTaskSessionHandler(repo, eventBus, log))
+	g.POST("/session-routes", seedSessionRouteHandler(repo, log))
 	g.POST("/messages", seedMessageHandler(repo, taskSvc, eventBus, log))
 	g.PATCH("/messages/:id", updateMessageHandler(repo, eventBus, log))
 	g.DELETE("/messages/:id", deleteMessageHandler(repo, eventBus, log))
@@ -316,6 +317,59 @@ type seedTaskSessionRequest struct {
 
 type seedTaskSessionResponse struct {
 	SessionID string `json:"session_id"`
+}
+
+type seedSessionRouteRequest struct {
+	TaskID                    string  `json:"task_id"`
+	DestinationWorkflowStepID string  `json:"destination_workflow_step_id"`
+	DestinationSessionID      *string `json:"destination_session_id"`
+	SourceSessionID           *string `json:"source_session_id"`
+	AgentProfileID            string  `json:"agent_profile_id"`
+	Outcome                   string  `json:"outcome"`
+	Reason                    string  `json:"reason"`
+	WorkflowStepTransitionID  *int64  `json:"workflow_step_transition_id"`
+}
+
+// seedSessionRouteHandler seeds a task_session_routes ledger row so specs can
+// exercise route attribution (routed profile, outcome/reason, Open on the
+// persisted destination) without a real session-routing run.
+func seedSessionRouteHandler(repo *sqliterepo.Repository, log *logger.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req seedSessionRouteRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON: " + err.Error()})
+			return
+		}
+		if req.TaskID == "" || req.DestinationWorkflowStepID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "task_id and destination_workflow_step_id are required"})
+			return
+		}
+		outcome := req.Outcome
+		if outcome == "" {
+			outcome = string(models.RoutingOutcomeCreated)
+		}
+		reason := req.Reason
+		if reason == "" {
+			reason = string(models.RoutingReasonNoReusableCandidate)
+		}
+		route := &models.TaskSessionRoute{
+			TaskID:                    req.TaskID,
+			DestinationWorkflowStepID: req.DestinationWorkflowStepID,
+			DestinationSessionID:      req.DestinationSessionID,
+			SourceSessionID:           req.SourceSessionID,
+			AgentProfileID:            req.AgentProfileID,
+			Outcome:                   models.RoutingOutcome(outcome),
+			Reason:                    models.RoutingReason(reason),
+			WorkflowStepTransitionID:  req.WorkflowStepTransitionID,
+			CorrelationID:             "e2e-" + uuid.NewString(),
+		}
+		if err := repo.RecordSessionRoute(c.Request.Context(), route); err != nil {
+			log.Error("test harness: record session route failed", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusCreated, gin.H{"id": route.ID})
+	}
 }
 
 func seedTaskSessionHandler(repo *sqliterepo.Repository, eventBus bus.EventBus, log *logger.Logger) gin.HandlerFunc {

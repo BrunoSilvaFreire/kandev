@@ -15,7 +15,7 @@ import (
 // scans into a *models.TaskSessionRoute.
 const sessionRouteSelectCols = `id, task_id, destination_workflow_step_id,
 	source_session_id, destination_session_id, agent_profile_id,
-	start_policy, end_policy, outcome, reason,
+	start_policy, end_policy, outcome, reason, decision_detail,
 	workflow_step_transition_id, correlation_id, created_at`
 
 // RecordSessionRoute appends one durable routing decision to the task
@@ -37,13 +37,13 @@ func (r *Repository) RecordSessionRoute(ctx context.Context, route *models.TaskS
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_routes
 			(`+sessionRouteSelectCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT DO NOTHING
 	`),
 		route.ID, route.TaskID, route.DestinationWorkflowStepID,
 		nullableStringPtr(route.SourceSessionID), nullableStringPtr(route.DestinationSessionID),
 		route.AgentProfileID, route.StartPolicy, route.EndPolicy,
-		string(route.Outcome), string(route.Reason),
+		string(route.Outcome), string(route.Reason), nullableStringPtr(route.DecisionDetail),
 		nullableInt64Ptr(route.WorkflowStepTransitionID), route.CorrelationID, route.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("record session route: %w", err)
@@ -69,18 +69,19 @@ func (r *Repository) ListTaskSessionRoutes(ctx context.Context, taskID string) (
 	var out []*models.TaskSessionRoute
 	for rows.Next() {
 		route := &models.TaskSessionRoute{}
-		var sourceSession, destinationSession sql.NullString
+		var sourceSession, destinationSession, decisionDetail sql.NullString
 		var transitionID sql.NullInt64
 		if err := rows.Scan(
 			&route.ID, &route.TaskID, &route.DestinationWorkflowStepID,
 			&sourceSession, &destinationSession, &route.AgentProfileID,
-			&route.StartPolicy, &route.EndPolicy, &route.Outcome, &route.Reason,
+			&route.StartPolicy, &route.EndPolicy, &route.Outcome, &route.Reason, &decisionDetail,
 			&transitionID, &route.CorrelationID, &route.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan task session route: %w", err)
 		}
 		route.SourceSessionID = nullStringPtr(sourceSession)
 		route.DestinationSessionID = nullStringPtr(destinationSession)
+		route.DecisionDetail = nullStringPtr(decisionDetail)
 		if transitionID.Valid {
 			value := transitionID.Int64
 			route.WorkflowStepTransitionID = &value

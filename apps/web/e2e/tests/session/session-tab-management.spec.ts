@@ -103,7 +103,7 @@ function starInTab(session: SessionPage, sessionId: string) {
 }
 
 test.describe("Session tab management — close behavior", () => {
-  test("tab close button shows delete confirmation and removes session on confirm", async ({
+  test("tab close button closes the tab without deleting the session", async ({
     testPage,
     apiClient,
     seedData,
@@ -114,7 +114,7 @@ test.describe("Session tab management — close behavior", () => {
       testPage,
       apiClient,
       seedData,
-      "Tab Close Deletes Session",
+      "Tab Close Keeps Session",
     );
 
     await session.sessionTabBySessionId(session1Id).click();
@@ -122,25 +122,17 @@ test.describe("Session tab management — close behavior", () => {
 
     await session.sessionTabCloseButton(session1Id).click();
 
-    const dialog = session.alertDialog();
-    await expect(dialog).toBeVisible({ timeout: 5_000 });
-    await expect(dialog).toContainText("Delete session?");
-    await dialog.getByRole("button", { name: "Delete" }).click();
-    await expect(
-      testPage.getByTestId("toast-message").filter({ hasText: "Deleting session" }),
-    ).toHaveCount(0);
-
+    // Closing never opens a confirmation and never deletes anything.
+    await expect(session.alertDialog()).toHaveCount(0);
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 15_000 });
     await expect(session.sessionTabBySessionId(session2Id)).toBeVisible();
-    await expect(
-      testPage.getByText("Deleting session successful", { exact: false }),
-    ).not.toBeVisible();
 
+    // The server still lists the closed session.
     const { sessions } = await apiClient.listTaskSessions(task.id);
-    expect(sessions.map((s) => s.id)).toEqual([session2Id]);
+    expect(sessions.map((s) => s.id).sort()).toEqual([session1Id, session2Id].sort());
   });
 
-  test("tab close button delete confirmation can be cancelled", async ({
+  test("context-menu delete confirmation can be cancelled", async ({
     testPage,
     apiClient,
     seedData,
@@ -151,17 +143,15 @@ test.describe("Session tab management — close behavior", () => {
       testPage,
       apiClient,
       seedData,
-      "Tab Close Cancel Delete",
+      "Tab Menu Cancel Delete",
     );
 
-    await session.sessionTabBySessionId(session1Id).click();
-    await expect(session.sessionTabCloseButton(session1Id)).toBeVisible({ timeout: 5_000 });
-    await session.sessionTabCloseButton(session1Id).click();
-
-    const dialog = session.alertDialog();
-    await expect(dialog).toBeVisible({ timeout: 5_000 });
-    await dialog.getByRole("button", { name: "Cancel" }).click();
-    await expect(dialog).not.toBeVisible({ timeout: 5_000 });
+    await session.sessionTabBySessionId(session1Id).click({ button: "right" });
+    await session.contextMenuItem("Delete").click();
+    const confirmation = testPage.getByTestId("session-delete-confirm-popover");
+    await expect(confirmation).toBeVisible({ timeout: 5_000 });
+    await confirmation.getByRole("button", { name: "Cancel" }).click();
+    await expect(confirmation).not.toBeVisible({ timeout: 5_000 });
 
     await expect(session.sessionTabBySessionId(session1Id)).toBeVisible();
     const { sessions } = await apiClient.listTaskSessions(task.id);

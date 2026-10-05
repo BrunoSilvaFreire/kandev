@@ -26,14 +26,17 @@ import { useTranslation } from "react-i18next";
 import { SessionDeleteDescription } from "./session-delete-description";
 
 /** Lifecycle callbacks the context menu needs from the owning tab.
- * `handleCloseOthers` is dockview-specific (closing sibling panels) and has
- * no equivalent where tabs are a plain session switcher, so it's optional —
- * omitting it hides the Close Others item entirely. */
+ * `handleClose`, `handleCloseOthers`, and `handleCloseToRight` are
+ * dockview-specific (closing sibling panels) and have no equivalent where tabs
+ * are a plain session switcher, so they're optional — omitting them hides those
+ * items entirely. None of them deletes the underlying session. */
 export type SessionTabMenuActions = {
   handleSetPrimary: () => void;
   handleStop: () => void;
   handleResume: () => void;
+  handleClose?: () => void;
   handleCloseOthers?: () => void;
+  handleCloseToRight?: () => void;
 };
 
 export function DeleteSessionDialog({
@@ -150,6 +153,24 @@ export function SessionContextMenuItems({
   const { t } = useTranslation();
   return (
     <ContextMenuContent>
+      {actions.handleClose && (
+        <>
+          <ContextMenuItem className="cursor-pointer" onSelect={actions.handleClose}>
+            {t("task:close")}
+          </ContextMenuItem>
+          {actions.handleCloseOthers && (
+            <ContextMenuItem className="cursor-pointer" onSelect={actions.handleCloseOthers}>
+              {t("task:closeOthers")}
+            </ContextMenuItem>
+          )}
+          {actions.handleCloseToRight && (
+            <ContextMenuItem className="cursor-pointer" onSelect={actions.handleCloseToRight}>
+              {t("task:closeTabsToRight")}
+            </ContextMenuItem>
+          )}
+          <ContextMenuSeparator />
+        </>
+      )}
       <ContextMenuItem className="cursor-pointer" onSelect={onStartRename}>
         {t("task:rename2")}
       </ContextMenuItem>
@@ -195,14 +216,6 @@ export function SessionContextMenuItems({
         <>
           <ContextMenuSeparator />
           <HandoffContextMenuSub taskId={taskId} onSelectProfile={onHandoffProfile} />
-        </>
-      )}
-      {actions.handleCloseOthers && (
-        <>
-          <ContextMenuSeparator />
-          <ContextMenuItem className="cursor-pointer" onSelect={actions.handleCloseOthers}>
-            {t("task:closeOthers")}
-          </ContextMenuItem>
         </>
       )}
     </ContextMenuContent>

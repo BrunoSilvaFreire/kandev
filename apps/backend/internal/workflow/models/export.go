@@ -25,10 +25,13 @@ type WorkflowExport struct {
 }
 
 // AgentProfilePortable stores enough agent profile info for cross-workspace matching.
+// Dynamic carries a Dynamic Profile descriptor for a generated or user-authored
+// dynamic profile; it is nil for concrete profiles.
 type AgentProfilePortable struct {
-	AgentName string `json:"agent_name" yaml:"agent_name"`
-	Model     string `json:"model,omitempty" yaml:"model,omitempty"`
-	Mode      string `json:"mode,omitempty" yaml:"mode,omitempty"`
+	AgentName string                       `json:"agent_name" yaml:"agent_name"`
+	Model     string                       `json:"model,omitempty" yaml:"model,omitempty"`
+	Mode      string                       `json:"mode,omitempty" yaml:"mode,omitempty"`
+	Dynamic   *DynamicAgentProfilePortable `json:"dynamic,omitempty" yaml:"dynamic,omitempty"`
 }
 
 // AgentProfileResolver resolves an agent profile ID to its portable representation.

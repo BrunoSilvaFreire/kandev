@@ -28,6 +28,10 @@ import {
 import { StepCircleIndicator } from "./workflow-step-marker";
 import { useTranslation } from "react-i18next";
 import { StepDisclosureMoveControls } from "./workflow-step-disclosure-move-controls";
+import { StepVisitSessionList } from "./step-visit-session-list";
+import type { StepVisitSession } from "@/lib/api/domains/task-activity-api";
+
+type StepVisits = Readonly<Record<string, StepVisitSession[]>>;
 
 /** Move callback shared by every compact-disclosure surface. A revealed,
  * filled options draft rides along as one-shot `entry_options`. */
@@ -60,6 +64,9 @@ type MinimalWorkflowStepperProps = {
   onMove: DisclosureMove;
   progressByStepId?: Readonly<Record<string, WorkflowStepProgress>>;
   agentLabelsByProfileId?: Readonly<Record<string, string>>;
+  /** Destination sessions per step, shared with the header transition summary. */
+  visits?: StepVisits;
+  onOpenSession?: (sessionId: string) => void;
   /** Notified whenever the disclosure surface opens or closes. */
   onDisclosureOpenChange?: (open: boolean) => void;
 };
@@ -77,6 +84,8 @@ export function MinimalWorkflowStepper({
   onMove,
   progressByStepId = EMPTY_PROGRESS_BY_STEP_ID,
   agentLabelsByProfileId = EMPTY_AGENT_LABELS_BY_PROFILE_ID,
+  visits,
+  onOpenSession,
   onDisclosureOpenChange,
 }: MinimalWorkflowStepperProps) {
   const { t } = useTranslation();
@@ -118,6 +127,8 @@ export function MinimalWorkflowStepper({
       onMove={onMove}
       progressByStepId={progressByStepId}
       agentLabelsByProfileId={agentLabelsByProfileId}
+      visits={visits}
+      onOpenSession={onOpenSession}
       onDisclosureOpenChange={onDisclosureOpenChange}
     />
   );
@@ -208,6 +219,8 @@ function CompactWorkflowStepDisclosure({
   onMove,
   progressByStepId,
   agentLabelsByProfileId,
+  visits,
+  onOpenSession,
   onDisclosureOpenChange,
 }: {
   sortedSteps: Step[];
@@ -220,6 +233,8 @@ function CompactWorkflowStepDisclosure({
   onMove: DisclosureMove;
   progressByStepId: Readonly<Record<string, WorkflowStepProgress>>;
   agentLabelsByProfileId: Readonly<Record<string, string>>;
+  visits?: StepVisits;
+  onOpenSession?: (sessionId: string) => void;
   onDisclosureOpenChange?: (open: boolean) => void;
 }) {
   const usesTouchDrawer = useTouchDrawer();
@@ -259,6 +274,8 @@ function CompactWorkflowStepDisclosure({
       isTouchSurface={usesTouchDrawer}
       progressByStepId={progressByStepId}
       agentLabelsByProfileId={agentLabelsByProfileId}
+      visits={visits}
+      onOpenSession={onOpenSession}
       onMove={handleDisclosureMove}
     />
   );
@@ -406,6 +423,8 @@ function StepDisclosureBody({
   isTouchSurface,
   progressByStepId,
   agentLabelsByProfileId,
+  visits,
+  onOpenSession,
   onMove,
 }: {
   sortedSteps: Step[];
@@ -417,6 +436,8 @@ function StepDisclosureBody({
   isTouchSurface: boolean;
   progressByStepId: Readonly<Record<string, WorkflowStepProgress>>;
   agentLabelsByProfileId: Readonly<Record<string, string>>;
+  visits?: StepVisits;
+  onOpenSession?: (sessionId: string) => void;
   onMove: DisclosureMove;
 }) {
   return (
@@ -456,6 +477,8 @@ function StepDisclosureBody({
             progress={progressByStepId[step.id]}
             agentLabelsByProfileId={agentLabelsByProfileId}
             onMove={onMove}
+            visits={visits}
+            onOpenSession={onOpenSession}
           />
         );
       })}
@@ -485,6 +508,8 @@ function StepDisclosureRow({
   progress,
   agentLabelsByProfileId,
   onMove,
+  visits,
+  onOpenSession,
 }: {
   step: Step;
   isCurrent: boolean;
@@ -499,6 +524,8 @@ function StepDisclosureRow({
   progress?: WorkflowStepProgress;
   agentLabelsByProfileId: Readonly<Record<string, string>>;
   onMove: DisclosureMove;
+  visits?: StepVisits;
+  onOpenSession?: (sessionId: string) => void;
 }) {
   const { t } = useTranslation();
   const heading = (
@@ -554,6 +581,12 @@ function StepDisclosureRow({
           testId={`workflow-step-progress-${step.id}`}
         />
       )}
+      <StepVisitSessionList
+        sessions={visits?.[step.id] ?? []}
+        onOpenSession={onOpenSession}
+        testIdPrefix={`workflow-step-disclosure-session-${step.id}`}
+        className="pl-6"
+      />
     </div>
   );
 }

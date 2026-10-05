@@ -9,7 +9,7 @@ describe("SessionTabCloseAction", () => {
     const onClose = vi.fn();
     render(<SessionTabCloseAction sessionId="s1" isDeleting={false} onClose={onClose} />);
 
-    const button = screen.getByRole("button", { name: "Delete session" });
+    const button = screen.getByRole("button", { name: "Close" });
     expect((button as HTMLButtonElement).disabled).toBe(false);
     expect(button.getAttribute("aria-busy")).toBe("false");
     expect(screen.queryByRole("status")).toBeNull();
@@ -23,7 +23,7 @@ describe("SessionTabCloseAction", () => {
     const onClose = vi.fn();
     render(<SessionTabCloseAction sessionId="s1" isDeleting onClose={onClose} />);
 
-    const button = screen.getByRole("button", { name: "Delete session" });
+    const button = screen.getByRole("button", { name: "Close" });
     expect((button as HTMLButtonElement).disabled).toBe(true);
     expect(button.getAttribute("aria-busy")).toBe("true");
     const spinner = screen.getByRole("status");

@@ -32,6 +32,26 @@ vi.mock("@/hooks/domains/sidebar/use-sidebar-task-prefs", () => ({
   useSidebarTaskPrefs: () => prefs,
 }));
 
+vi.mock("@/components/state-provider", () => ({
+  // Zustand v5 hands the selector straight to React as `getSnapshot`. React calls
+  // it more than once per render and requires a cached result, otherwise it warns
+  // ("The result of getSnapshot should be cached") and forces an infinite render
+  // loop. Asserting stability here fails the test if the store selector projects
+  // a fresh value (for example, `toRepositoryGroups(...)`) on every call.
+  useAppStore: (selector: (state: unknown) => unknown) => {
+    const state = {
+      repositorySets: {
+        itemsByWorkspaceId: { workspaceId: [{ id: "set-1", name: "Set 1", repositories: [] }] },
+      },
+      workspaces: { activeId: "workspaceId" },
+    };
+    const first = selector(state);
+    const second = selector(state);
+    expect(Object.is(first, second)).toBe(true);
+    return first;
+  },
+}));
+
 import { useGroupedSidebarView } from "./task-session-sidebar-grouped-view";
 
 function task(id: string, workflowId: string): TaskSwitcherItem {

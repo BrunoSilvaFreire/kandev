@@ -149,6 +149,17 @@ type workflowMovePreviewInput struct {
 	AgentResolver            AgentFamilyResolver
 	EntryOptions             *workflowmove.EntryOptions
 	Notices                  []WorkflowMovePreviewNotice
+	ReuseHint                reuseHint
+}
+
+type reuseHint struct {
+	DestinationStepID  string
+	StepOwnerSessionID string
+	Exhausted          func(*models.TaskSession) bool
+	// DesignatedSessionID is the user-designated step primary (D7). It outranks
+	// profile matching, the exit author and freshness when selecting a reuse
+	// candidate.
+	DesignatedSessionID string
 }
 
 // PreviewWorkflowMove resolves a manual move without reserving a route,
@@ -216,6 +227,11 @@ func (s *Service) resolveWorkflowMovePreviewInput(
 		}
 	}
 
+	destStepID := ""
+	if destination != nil {
+		destStepID = destination.ID
+	}
+
 	input := workflowMovePreviewInput{
 		TaskID:                   request.TaskID,
 		WorkflowStepID:           request.WorkflowStepID,
@@ -229,6 +245,7 @@ func (s *Service) resolveWorkflowMovePreviewInput(
 		SessionlessLaunchAllowed: workflowmove.ShouldAutoStartAgent(destination, request.EntryOptions),
 		AgentResolver:            s.agentFamilyResolver,
 		EntryOptions:             request.EntryOptions,
+		ReuseHint:                s.buildReuseHint(ctx, request.TaskID, destStepID),
 	}
 	if source != nil {
 		input.SourceEndPolicy = s.resolveStepProfileSessionEndPolicy(source)
@@ -528,6 +545,9 @@ func previewProfileRecipient(input workflowMovePreviewInput) (*models.TaskSessio
 		}
 		return nil, WorkflowMovePreviewOutcomeUnknown
 	}
+	if designated := previewDesignatedSession(input); designated != nil {
+		return designated, WorkflowMovePreviewOutcomeReuseOther
+	}
 	if input.SourceSession != nil && shouldKeepCurrentWorkflowStepSession(
 		input.TargetProfileID,
 		input.SourceSession.AgentProfileID,
@@ -536,7 +556,11 @@ func previewProfileRecipient(input workflowMovePreviewInput) (*models.TaskSessio
 		return input.SourceSession, WorkflowMovePreviewOutcomeReuseCurrent
 	}
 	if input.StartPolicy == models.WorkflowProfileSessionStartPolicyReuse {
-		if reusable := previewReusableSession(input.Sessions, input.TargetProfileID, sessionID(input.SourceSession)); reusable != nil {
+		hint := input.ReuseHint
+		if hint.DestinationStepID == "" && input.Destination != nil {
+			hint.DestinationStepID = input.Destination.ID
+		}
+		if reusable := previewReusableSession(input.Sessions, input.TargetProfileID, sessionID(input.SourceSession), hint); reusable != nil {
 			return reusable, WorkflowMovePreviewOutcomeReuseOther
 		}
 	}
@@ -550,28 +574,95 @@ func previewSessionlessRecipient(input workflowMovePreviewInput) (*models.TaskSe
 	return nil, WorkflowMovePreviewOutcomeCreateNew
 }
 
-func previewReusableSession(sessions []*models.TaskSession, profileID, excludeID string) *models.TaskSession {
-	return selectReusableWorkflowSession(sessions, profileID, excludeID)
+func previewReusableSession(sessions []*models.TaskSession, profileID, excludeID string, hint reuseHint) *models.TaskSession {
+	return selectReusableWorkflowSession(sessions, profileID, excludeID, hint)
+}
+
+// previewDesignatedSession resolves the user-designated step primary that the
+// live step entry would reuse. It returns nil when the designation is absent,
+// equals the current session, or is excluded (terminal, completion follow-up,
+// or an exhausted provider).
+func previewDesignatedSession(input workflowMovePreviewInput) *models.TaskSession {
+	if input.ReuseHint.DesignatedSessionID == "" {
+		return nil
+	}
+	candidate := selectReusableWorkflowSession(input.Sessions, "", sessionID(input.SourceSession), input.ReuseHint)
+	if candidate == nil || candidate.ID == sessionID(input.SourceSession) {
+		return nil
+	}
+	return candidate
 }
 
 // selectReusableWorkflowSession is the pure candidate selector shared by the
-// preview and the side-effecting workflow switch path. Both paths must reject
-// terminal and completion-follow-up conversations in the same way.
-func selectReusableWorkflowSession(sessions []*models.TaskSession, profileID, excludeID string) *models.TaskSession {
-	if profileID == "" {
+// preview and the side-effecting workflow switch path. It excludes terminal,
+// completion-follow-up, and exhausted sessions, and prioritizes the destination
+// step's previous owner and creator before falling back to the most recently
+// updated session.
+func selectReusableWorkflowSession(
+	sessions []*models.TaskSession,
+	profileID, excludeID string,
+	hint reuseHint,
+) *models.TaskSession {
+	if profileID == "" && hint.DesignatedSessionID == "" {
 		return nil
 	}
 	var best *models.TaskSession
 	for _, session := range sessions {
-		if session == nil || session.ID == excludeID || session.AgentProfileID != profileID ||
-			models.IsCompletionFollowUpSession(session.Metadata) || isTerminalSessionState(session.State) {
+		if !isReusableCandidate(session, profileID, excludeID, hint) {
 			continue
 		}
-		if best == nil || session.UpdatedAt.After(best.UpdatedAt) {
+		if isBetterReusableSession(session, best, hint) {
 			best = session
 		}
 	}
 	return best
+}
+
+func isReusableCandidate(session *models.TaskSession, profileID, excludeID string, hint reuseHint) bool {
+	if session == nil || session.ID == excludeID {
+		return false
+	}
+	// A user designation is honored regardless of the step's profile (D7).
+	if hint.DesignatedSessionID == "" || session.ID != hint.DesignatedSessionID {
+		if session.AgentProfileID != profileID {
+			return false
+		}
+	}
+	if models.IsCompletionFollowUpSession(session.Metadata) || isTerminalSessionState(session.State) {
+		return false
+	}
+	if hint.Exhausted != nil && hint.Exhausted(session) {
+		return false
+	}
+	return true
+}
+
+func isBetterReusableSession(candidate, currentBest *models.TaskSession, hint reuseHint) bool {
+	if currentBest == nil {
+		return true
+	}
+	if hint.DesignatedSessionID != "" {
+		isDesignatedCand := candidate.ID == hint.DesignatedSessionID
+		isDesignatedBest := currentBest.ID == hint.DesignatedSessionID
+		if isDesignatedCand != isDesignatedBest {
+			return isDesignatedCand
+		}
+	}
+	if hint.StepOwnerSessionID != "" {
+		isOwnerCand := candidate.ID == hint.StepOwnerSessionID
+		isOwnerBest := currentBest.ID == hint.StepOwnerSessionID
+		if isOwnerCand != isOwnerBest {
+			return isOwnerCand
+		}
+	}
+	if hint.DestinationStepID != "" {
+		isCreatedCand := candidate.WorkflowStepIDAtCreation == hint.DestinationStepID
+		isCreatedBest := currentBest.WorkflowStepIDAtCreation == hint.DestinationStepID
+		if isCreatedCand != isCreatedBest {
+			return isCreatedCand
+		}
+	}
+	return candidate.UpdatedAt.After(currentBest.UpdatedAt)
 }
 
 func previewCurrentSession(sessions []*models.TaskSession) *models.TaskSession {

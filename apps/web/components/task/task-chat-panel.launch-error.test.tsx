@@ -29,6 +29,7 @@ const priorTranscriptMessage = {
 
 const appStoreState = {
   connection: { status: "connected" },
+  tasks: { activeTaskId: "task-1", activeSessionId: SESSION_ID, setActiveSession: () => {} },
   kanbanMulti: { snapshots: {} },
   kanban: { workflowId: null, tasks: [], steps: [] },
   workflows: { items: [] },

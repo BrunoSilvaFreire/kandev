@@ -20,6 +20,7 @@ import {
   shouldPreserveActivePanel,
 } from "./dockview-session-tab-activation";
 import { anchorIncomingSessionPanel, ensureSessionPanel } from "./dockview-session-handoff";
+import { getEnvClosedSessionIds, setEnvClosedSessionIds } from "@/lib/dockview-closed-sessions";
 import { t } from "@/lib/i18n";
 
 const debug = createDebugLogger("dockview:session-tabs");
@@ -523,6 +524,17 @@ export function runAutoSessionTabEffect(
 
   const { tid, currentSessionIds } = resolveCurrentSessionIds(appStore);
 
+  // A session tab the user closed stays closed until reopened, even though the
+  // session still exists. The mark is per env and cleaned as sessions die.
+  const envId = useDockviewStore.getState().currentLayoutEnvId;
+  const currentIdSet = new Set<string>(currentSessionIds);
+  const closedIds = getEnvClosedSessionIds(envId).filter((id) => currentIdSet.has(id));
+  setEnvClosedSessionIds(envId, closedIds);
+  const closedIdSet = new Set(closedIds);
+  const openSessionIds = currentSessionIds.filter(
+    (id) => id === effectiveSessionId || !closedIdSet.has(id),
+  );
+
   logAutoSessionTabEffectEntry(api, effectiveSessionId, tid, currentSessionIds, refs);
 
   if (shouldRebuildDefaultForPendingSession(api, effectiveSessionId, currentSessionIds)) {
@@ -535,7 +547,7 @@ export function runAutoSessionTabEffect(
   reconcileRemovedSessionPanels(
     api,
     refs.sessionTabCreatedRef.current,
-    currentSessionIds,
+    openSessionIds,
     effectiveSessionId ?? "",
   );
 
@@ -549,7 +561,7 @@ export function runAutoSessionTabEffect(
     shouldSkipPanelEnsure(
       api,
       effectiveSessionId,
-      currentSessionIds,
+      openSessionIds,
       refs.sessionTabCreatedRef.current,
     )
   ) {
@@ -614,7 +626,7 @@ export function runAutoSessionTabEffect(
 
   const siblingsCreated = ensureSiblingPanels(
     api,
-    currentSessionIds,
+    openSessionIds,
     effectiveSessionId,
     siblingAnchor,
     refs.sessionTabCreatedRef.current,

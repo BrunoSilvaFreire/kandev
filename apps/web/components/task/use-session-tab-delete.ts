@@ -3,53 +3,42 @@
 import { useCallback, useState } from "react";
 import type { RemoveSessionOptions } from "@/hooks/domains/session/use-session-actions";
 
-type DeleteOrigin = "tab" | "menu" | null;
 type SetConfirmDelete = (open: boolean) => void;
 type HandleDelete = (options?: RemoveSessionOptions) => Promise<boolean>;
 
+/**
+ * Delete confirmation state for a session tab's context menu.
+ *
+ * Closing a tab no longer deletes its session (`use-tab-context-actions` owns
+ * close), so this hook only drives the explicit Delete action: the confirmation
+ * popover reports its open state and, on confirm, runs the delete with the
+ * default toast feedback.
+ */
 export function useSessionTabDelete(
   setConfirmDelete: SetConfirmDelete,
   handleDelete: HandleDelete,
 ) {
-  const [deleteOrigin, setDeleteOrigin] = useState<DeleteOrigin>(null);
-  const [isDeletingFromTab, setIsDeletingFromTab] = useState(false);
-
-  const handleCloseTab = useCallback(() => {
-    setDeleteOrigin("tab");
-    setConfirmDelete(true);
-  }, [setConfirmDelete]);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const handleDeleteDialogOpenChange = useCallback(
     (open: boolean) => {
       setConfirmDelete(open);
-      if (!open) setDeleteOrigin(null);
     },
     [setConfirmDelete],
   );
 
   const handleConfirmDelete = useCallback(async () => {
-    const isTabDelete = deleteOrigin === "tab";
-    if (isTabDelete) setIsDeletingFromTab(true);
-
+    setIsDeleting(true);
     try {
-      await handleDelete({ feedback: isTabDelete ? "inline" : "toast" });
+      await handleDelete({ feedback: "toast" });
     } finally {
-      if (isTabDelete) setIsDeletingFromTab(false);
-      setDeleteOrigin(null);
+      setIsDeleting(false);
     }
-  }, [deleteOrigin, handleDelete]);
+  }, [handleDelete]);
 
   const handleMenuDelete = useCallback(() => {
-    setDeleteOrigin("menu");
     setConfirmDelete(true);
   }, [setConfirmDelete]);
 
-  return {
-    deleteOrigin,
-    handleCloseTab,
-    handleDeleteDialogOpenChange,
-    handleConfirmDelete,
-    handleMenuDelete,
-    isDeletingFromTab,
-  };
+  return { handleDeleteDialogOpenChange, handleConfirmDelete, handleMenuDelete, isDeleting };
 }

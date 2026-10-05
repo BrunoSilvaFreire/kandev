@@ -22,7 +22,7 @@ export function SessionTabCloseAction({
       type="button"
       className="session-tab-close-action dv-default-tab-action inline-flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded p-0 text-muted-foreground"
       data-testid={`session-tab-close-${sessionId}`}
-      aria-label={t("common:deleteSession")}
+      aria-label={t("common:close")}
       aria-busy={isDeleting}
       disabled={isDeleting}
       onPointerDown={(event) => {

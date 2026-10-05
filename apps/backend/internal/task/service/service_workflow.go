@@ -1064,13 +1064,10 @@ func (s *Service) promoteSameStepQueuedTask(ctx context.Context, candidate *mode
 		skipped[candidate.ID] = struct{}{}
 		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 	}
-	ctx, err := s.attachPendingEntryRoute(ctx, candidate, targetStep, nil)
-	if err != nil {
-		s.logger.Warn("failed to freeze tagged step entry profile for queued promotion",
-			zap.String("task_id", candidate.ID), zap.Error(err))
-		skipped[candidate.ID] = struct{}{}
-		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
-	}
+	// Same-step WIP admission is not a new entry: from and to are the same
+	// step, so no task_step_transitions row is written and the route frozen at
+	// genesis must stand. Re-running selection here would re-rank a committed
+	// entry and could strand the task on a transient attachment failure.
 	supported, claimed, err := promoteQueuedTaskAtomically(ctx, s.tasks, candidate, fromStepID, targetStep.ID, targetStep.WIPLimit)
 	if supported {
 		return s.finishAtomicQueuedPromotion(ctx, candidate, targetStep, position, skipped, claimed, err, oldState)

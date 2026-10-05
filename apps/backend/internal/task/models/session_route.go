@@ -31,6 +31,8 @@ const (
 	RoutingReasonNoReusableCandidate       RoutingReason = "no_reusable_candidate"
 	RoutingReasonExactModelIncompatibility RoutingReason = "exact_model_incompatibility"
 	RoutingReasonSelectedCandidateTerminal RoutingReason = "selected_candidate_terminal"
+	RoutingReasonStepPrimary               RoutingReason = "step_primary"
+	RoutingReasonUnavailableHandoff        RoutingReason = "unavailable_handoff"
 )
 
 // TaskSessionRoute is one durable row in the task session-route ledger. Unlike
@@ -51,7 +53,10 @@ type TaskSessionRoute struct {
 	EndPolicy                 string         `json:"end_policy,omitempty" db:"end_policy"`
 	Outcome                   RoutingOutcome `json:"outcome" db:"outcome"`
 	Reason                    RoutingReason  `json:"reason" db:"reason"`
-	WorkflowStepTransitionID  *int64         `json:"workflow_step_transition_id,omitempty" db:"workflow_step_transition_id"`
+	// DecisionDetail is optional closed-key JSON with the inputs the decision
+	// constructors knew beyond outcome+reason. Nullable: legacy rows read NULL.
+	DecisionDetail           *string `json:"decision_detail,omitempty" db:"decision_detail"`
+	WorkflowStepTransitionID *int64  `json:"workflow_step_transition_id,omitempty" db:"workflow_step_transition_id"`
 	// CorrelationID makes the write idempotent: recording the same routing
 	// decision twice for one task is a no-op.
 	CorrelationID string    `json:"correlation_id,omitempty" db:"correlation_id"`

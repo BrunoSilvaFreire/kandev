@@ -548,4 +548,89 @@ describe("useSessionLaunchSubmit", () => {
     expect(mockActivateSession).not.toHaveBeenCalled();
     expect(mockSetIsCreating).toHaveBeenLastCalledWith(false);
   });
+
+  it("runs onLaunched after activating the session and before closing", async () => {
+    const promptRef = createPromptRef("hello");
+    const order: string[] = [];
+    const mockSetActiveSession = vi.fn();
+    const mockActivateSession = vi.fn(() => order.push("activate"));
+    const mockSetIsCreating = vi.fn();
+    const mockOnClose = vi.fn(() => order.push("close"));
+    const promotePrimary = vi.fn(async () => {
+      order.push("promote");
+      return true;
+    });
+    const onLaunched = vi.fn(async (sessionId: string) => {
+      order.push(`launch:${sessionId}`);
+    });
+
+    const { result } = renderHook(() =>
+      useSessionLaunchSubmit({
+        promptRef,
+        taskId: TASK_ID,
+        selectedProfileId: PROFILE_ID,
+        profileExplicit: true,
+        executorId: EXECUTOR_ID,
+        contextValue: "blank",
+        initialPrompt: null,
+        agentProfiles: [AGENT_PROFILE_A],
+        onClose: mockOnClose,
+        toast: mockToast,
+        setActiveSession: mockSetActiveSession,
+        activateSession: mockActivateSession,
+        setIsCreating: mockSetIsCreating,
+        promotePrimary,
+        onLaunched,
+      }),
+    );
+
+    await act(async () => {
+      await result.current({ preventDefault: vi.fn() } as unknown as FormEvent);
+    });
+
+    expect(order).toEqual(["promote", "activate", `launch:${SESSION_ID}`, "close"]);
+  });
+
+  it("keeps the session but skips the move when promotion fails", async () => {
+    const promptRef = createPromptRef("hello");
+    const order: string[] = [];
+    const mockSetActiveSession = vi.fn();
+    const mockActivateSession = vi.fn(() => order.push("activate"));
+    const mockSetIsCreating = vi.fn();
+    const mockOnClose = vi.fn(() => order.push("close"));
+    const promotePrimary = vi.fn(async () => {
+      order.push("promote");
+      return false;
+    });
+    const onLaunched = vi.fn(async () => {
+      order.push("move");
+    });
+
+    const { result } = renderHook(() =>
+      useSessionLaunchSubmit({
+        promptRef,
+        taskId: TASK_ID,
+        selectedProfileId: PROFILE_ID,
+        profileExplicit: true,
+        executorId: EXECUTOR_ID,
+        contextValue: "blank",
+        initialPrompt: null,
+        agentProfiles: [AGENT_PROFILE_A],
+        onClose: mockOnClose,
+        toast: mockToast,
+        setActiveSession: mockSetActiveSession,
+        activateSession: mockActivateSession,
+        setIsCreating: mockSetIsCreating,
+        promotePrimary,
+        onLaunched,
+      }),
+    );
+
+    await act(async () => {
+      await result.current({ preventDefault: vi.fn() } as unknown as FormEvent);
+    });
+
+    expect(order).toEqual(["promote", "activate", "close"]);
+    expect(onLaunched).not.toHaveBeenCalled();
+  });
 });

@@ -473,3 +473,43 @@ func TestRoutingProvenance_TaskSessionRoutes_CRUD_And_FKBehavior(t *testing.T) {
 		t.Fatalf("destination_session_id = %v, want %s", routesAfterSessDelete[0].DestinationSessionID, destSessID)
 	}
 }
+
+// TestSessionRouteDecisionDetailRoundTrip proves decision_detail is a nullable
+// additive column: legacy rows read NULL and enriched rows survive verbatim.
+func TestSessionRouteDecisionDetailRoundTrip(t *testing.T) {
+	repo := newRoutingProvenanceTestRepo(t)
+	ctx := context.Background()
+	seedTestTask(t, repo, "task-detail")
+
+	legacy := &models.TaskSessionRoute{
+		ID: "route-legacy", TaskID: "task-detail", DestinationWorkflowStepID: "step-b",
+		Outcome: models.RoutingOutcomeCreated, Reason: models.RoutingReasonNoReusableCandidate,
+	}
+	if err := repo.RecordSessionRoute(ctx, legacy); err != nil {
+		t.Fatalf("record legacy route: %v", err)
+	}
+	detail := `{"start_policy":"new"}`
+	enriched := &models.TaskSessionRoute{
+		ID: "route-enriched", TaskID: "task-detail", DestinationWorkflowStepID: "step-b",
+		Outcome: models.RoutingOutcomeCreated, Reason: models.RoutingReasonForcedNewPolicy,
+		DecisionDetail: &detail,
+	}
+	if err := repo.RecordSessionRoute(ctx, enriched); err != nil {
+		t.Fatalf("record enriched route: %v", err)
+	}
+
+	rows, err := repo.ListTaskSessionRoutes(ctx, "task-detail")
+	if err != nil {
+		t.Fatalf("list routes: %v", err)
+	}
+	byID := map[string]*models.TaskSessionRoute{}
+	for _, row := range rows {
+		byID[row.ID] = row
+	}
+	if byID["route-legacy"].DecisionDetail != nil {
+		t.Fatalf("legacy route decision_detail = %v, want NULL", byID["route-legacy"].DecisionDetail)
+	}
+	if byID["route-enriched"].DecisionDetail == nil || *byID["route-enriched"].DecisionDetail != detail {
+		t.Fatalf("enriched decision_detail = %v, want %q", byID["route-enriched"].DecisionDetail, detail)
+	}
+}

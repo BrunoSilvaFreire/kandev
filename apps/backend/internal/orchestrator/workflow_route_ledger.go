@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -30,8 +31,7 @@ func (s *Service) recordWorkflowRouteDecision(
 	sourceSession *models.TaskSession,
 	destination *models.TaskSession,
 	step *wfmodels.WorkflowStep,
-	outcome models.RoutingOutcome,
-	reason models.RoutingReason,
+	decision workflowRouteDecision,
 	startPolicy string,
 	endPolicy string,
 	entryIDs ...int64,
@@ -58,8 +58,9 @@ func (s *Service) recordWorkflowRouteDecision(
 		AgentProfileID:            destination.AgentProfileID,
 		StartPolicy:               startPolicy,
 		EndPolicy:                 endPolicy,
-		Outcome:                   outcome,
-		Reason:                    reason,
+		Outcome:                   decision.Outcome,
+		Reason:                    decision.Reason,
+		DecisionDetail:            nullableDecisionDetail(decision.Detail),
 		WorkflowStepTransitionID:  latestEntryTransitionID(ctx, s, taskID, entryIDs...),
 		CorrelationID:             fmt.Sprintf("workflow-route:%s:%s:%s:%s", taskID, step.ID, entryIdentity, destination.ID),
 		CreatedAt:                 time.Now().UTC(),
@@ -68,10 +69,19 @@ func (s *Service) recordWorkflowRouteDecision(
 		s.logger.Warn("failed to record workflow session route decision",
 			zap.String("task_id", taskID),
 			zap.String("step_id", step.ID),
-			zap.String("outcome", string(outcome)),
-			zap.String("reason", string(reason)),
+			zap.String("outcome", string(decision.Outcome)),
+			zap.String("reason", string(decision.Reason)),
 			zap.Error(err))
 	}
+}
+
+// nullableDecisionDetail keeps an empty detail out of the payload so legacy
+// rows and detail-less decisions share one NULL representation.
+func nullableDecisionDetail(detail string) *string {
+	if detail == "" {
+		return nil
+	}
+	return &detail
 }
 
 // latestEntryTransitionID resolves the immutable step-transition ledger id that
@@ -99,6 +109,29 @@ func latestEntryTransitionID(ctx context.Context, s *Service, taskID string, ent
 type workflowRouteDecision struct {
 	Outcome models.RoutingOutcome
 	Reason  models.RoutingReason
+	// Detail is optional closed-key JSON the route ledger stores verbatim.
+	Detail string
+}
+
+// routeDecisionDetail is the closed set of decision inputs stored in
+// decision_detail. Every field is optional; an all-empty detail serializes to
+// an empty string and is stored as NULL.
+type routeDecisionDetail struct {
+	CandidateSessionID string `json:"candidate_session_id,omitempty"`
+	CandidateState     string `json:"candidate_state,omitempty"`
+	RequiredModel      string `json:"required_model,omitempty"`
+	CandidateModel     string `json:"candidate_model,omitempty"`
+	StartPolicy        string `json:"start_policy,omitempty"`
+	Fitness            string `json:"fitness,omitempty"`
+	SourceSessionID    string `json:"source_session_id,omitempty"`
+}
+
+func marshalDecisionDetail(detail routeDecisionDetail) string {
+	encoded, err := json.Marshal(detail)
+	if err != nil || string(encoded) == "{}" {
+		return ""
+	}
+	return string(encoded)
 }
 
 // The constructors below name each committed routing decision once. Callers
@@ -109,8 +142,28 @@ func decisionReusedCurrentSession() workflowRouteDecision {
 	return workflowRouteDecision{Outcome: models.RoutingOutcomeReused, Reason: models.RoutingReasonReusedCurrentSession}
 }
 
-func decisionReusedExisting() workflowRouteDecision {
-	return workflowRouteDecision{Outcome: models.RoutingOutcomeReused, Reason: models.RoutingReasonReusedExisting}
+func decisionReusedExisting(candidateSessionID, candidateState string) workflowRouteDecision {
+	return workflowRouteDecision{
+		Outcome: models.RoutingOutcomeReused,
+		Reason:  models.RoutingReasonReusedExisting,
+		Detail:  marshalDecisionDetail(routeDecisionDetail{CandidateSessionID: candidateSessionID, CandidateState: candidateState}),
+	}
+}
+
+func decisionStepPrimary(candidateSessionID, fitness string) workflowRouteDecision {
+	return workflowRouteDecision{
+		Outcome: models.RoutingOutcomeReused,
+		Reason:  models.RoutingReasonStepPrimary,
+		Detail:  marshalDecisionDetail(routeDecisionDetail{CandidateSessionID: candidateSessionID, Fitness: fitness}),
+	}
+}
+
+func decisionUnavailableHandoff(sourceSessionID, fitness string) workflowRouteDecision {
+	return workflowRouteDecision{
+		Outcome: models.RoutingOutcomeCreated,
+		Reason:  models.RoutingReasonUnavailableHandoff,
+		Detail:  marshalDecisionDetail(routeDecisionDetail{SourceSessionID: sourceSessionID, Fitness: fitness}),
+	}
 }
 
 func decisionReusedExplicitTarget() workflowRouteDecision {
@@ -121,18 +174,30 @@ func decisionCreatedExplicitTarget() workflowRouteDecision {
 	return workflowRouteDecision{Outcome: models.RoutingOutcomeCreated, Reason: models.RoutingReasonExplicitTarget}
 }
 
-func decisionForcedNewPolicy() workflowRouteDecision {
-	return workflowRouteDecision{Outcome: models.RoutingOutcomeCreated, Reason: models.RoutingReasonForcedNewPolicy}
+func decisionForcedNewPolicy(startPolicy string) workflowRouteDecision {
+	return workflowRouteDecision{
+		Outcome: models.RoutingOutcomeCreated,
+		Reason:  models.RoutingReasonForcedNewPolicy,
+		Detail:  marshalDecisionDetail(routeDecisionDetail{StartPolicy: startPolicy}),
+	}
 }
 
 func decisionNoReusableCandidate() workflowRouteDecision {
 	return workflowRouteDecision{Outcome: models.RoutingOutcomeCreated, Reason: models.RoutingReasonNoReusableCandidate}
 }
 
-func decisionExactModelIncompatibility() workflowRouteDecision {
-	return workflowRouteDecision{Outcome: models.RoutingOutcomeCreated, Reason: models.RoutingReasonExactModelIncompatibility}
+func decisionExactModelIncompatibility(requiredModel, candidateModel string) workflowRouteDecision {
+	return workflowRouteDecision{
+		Outcome: models.RoutingOutcomeCreated,
+		Reason:  models.RoutingReasonExactModelIncompatibility,
+		Detail:  marshalDecisionDetail(routeDecisionDetail{RequiredModel: requiredModel, CandidateModel: candidateModel}),
+	}
 }
 
-func decisionSelectedCandidateTerminal() workflowRouteDecision {
-	return workflowRouteDecision{Outcome: models.RoutingOutcomeCreated, Reason: models.RoutingReasonSelectedCandidateTerminal}
+func decisionSelectedCandidateTerminal(candidateSessionID, candidateState string) workflowRouteDecision {
+	return workflowRouteDecision{
+		Outcome: models.RoutingOutcomeCreated,
+		Reason:  models.RoutingReasonSelectedCandidateTerminal,
+		Detail:  marshalDecisionDetail(routeDecisionDetail{CandidateSessionID: candidateSessionID, CandidateState: candidateState}),
+	}
 }

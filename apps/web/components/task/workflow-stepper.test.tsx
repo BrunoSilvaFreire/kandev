@@ -140,6 +140,7 @@ vi.mock("@/hooks/use-toolbar-collapsed", () => ({
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof appStoreState) => unknown) => selector(appStoreState),
+  useAppStoreApi: () => ({ getState: () => appStoreState }),
 }));
 vi.mock("@/lib/state/context-files-store", () => ({
   useContextFilesStore: () => vi.fn(),

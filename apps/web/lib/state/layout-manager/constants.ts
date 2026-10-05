@@ -30,6 +30,12 @@ export const PROMPT_HISTORY_PANEL_ID = "prompt-history";
 /** Task-wide per-agent usage/cost breakdown panel. */
 export const USAGE_PANEL_ID = "usage";
 
+/** Metadata-only task document catalog panel. */
+export const DOCUMENTS_PANEL_ID = "documents";
+
+/** Paginated durable task activity timeline panel. */
+export const TASK_HISTORY_PANEL_ID = "task-history";
+
 /** Canonical single-instance panels supported by reusable layout profiles. */
 export const REUSABLE_PANEL_IDS = [
   "chat",
@@ -43,6 +49,8 @@ export const REUSABLE_PANEL_IDS = [
   "todos",
   PROMPT_HISTORY_PANEL_ID,
   USAGE_PANEL_ID,
+  DOCUMENTS_PANEL_ID,
+  TASK_HISTORY_PANEL_ID,
 ] as const;
 export type ReusablePanelId = (typeof REUSABLE_PANEL_IDS)[number];
 
@@ -61,6 +69,8 @@ export const KNOWN_PANEL_IDS = new Set([
   DEV_SERVER_PANEL_ID,
   PROMPT_HISTORY_PANEL_ID,
   USAGE_PANEL_ID,
+  DOCUMENTS_PANEL_ID,
+  TASK_HISTORY_PANEL_ID,
 ]);
 
 /** Components whose panels are structural and should survive filterEphemeral,
@@ -79,6 +89,8 @@ export const STRUCTURAL_COMPONENTS = new Set([
   // name (see lib/state/layout-manager/plugin-panels.ts) — structural
   // regardless of which plugin registered it.
   "plugin-panel",
+  DOCUMENTS_PANEL_ID,
+  TASK_HISTORY_PANEL_ID,
 ]);
 
 /**
@@ -159,6 +171,16 @@ export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id"> & { titleKey
     component: USAGE_PANEL_ID,
     title: "Usage",
     titleKey: "task:panelUsage",
+  },
+  [DOCUMENTS_PANEL_ID]: {
+    component: DOCUMENTS_PANEL_ID,
+    title: "Documents",
+    titleKey: "task:panelDocuments",
+  },
+  [TASK_HISTORY_PANEL_ID]: {
+    component: TASK_HISTORY_PANEL_ID,
+    title: "Task History",
+    titleKey: "task:panelTaskHistory",
   },
 };
 

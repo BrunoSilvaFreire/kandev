@@ -560,12 +560,20 @@ type MessageSearchHit struct {
 	Type       string    `json:"type"`
 	Snippet    string    `json:"snippet"`
 	CreatedAt  time.Time `json:"created_at"`
+	// Task-scope enrichment. Empty/omitted for a session-scoped search.
+	SessionID      string  `json:"session_id,omitempty"`
+	SessionName    string  `json:"session_name,omitempty"`
+	AgentProfileID string  `json:"agent_profile_id,omitempty"`
+	WorkflowStepID *string `json:"workflow_step_id"`
 }
 
-// SearchMessagesResponse contains hits from a session message search.
+// SearchMessagesResponse contains hits from a session or task message search.
 type SearchMessagesResponse struct {
 	Hits  []MessageSearchHit `json:"hits"`
 	Total int                `json:"total"`
+	// HasMore/NextCursor are populated only by task-scoped keyset pagination.
+	HasMore    bool   `json:"has_more,omitempty"`
+	NextCursor string `json:"next_cursor,omitempty"`
 }
 
 type TurnDTO struct {

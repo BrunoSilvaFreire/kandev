@@ -4,6 +4,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -45,6 +46,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionSessionStop, h.wsStopSession)
 	d.RegisterFunc(ws.ActionSessionDelete, h.wsDeleteSession)
 	d.RegisterFunc(ws.ActionSessionSetPrimary, h.wsSetPrimarySession)
+	d.RegisterFunc(ws.ActionSessionSetStepPrimary, h.wsSetStepPrimarySession)
 	d.RegisterFunc(ws.ActionSessionSetPlanMode, h.wsSetPlanMode)
 	d.RegisterFunc(ws.ActionSessionRename, h.wsRenameSession)
 	d.RegisterFunc(ws.ActionSessionRouteAction, h.wsRouteAction)
@@ -600,6 +602,35 @@ func (h *Handlers) wsSetPrimarySession(ctx context.Context, msg *ws.Message) (*w
 	if err := h.service.SetPrimarySession(ctx, req.SessionID); err != nil {
 		h.logger.Error("failed to set primary session", zap.String("session_id", req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to set primary session: "+err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
+}
+
+type wsSetStepPrimarySessionRequest struct {
+	SessionID string `json:"session_id"`
+	StepID    string `json:"step_id"`
+}
+
+// wsSetStepPrimarySession designates a primary session for a specific workflow step.
+func (h *Handlers) wsSetStepPrimarySession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsSetStepPrimarySessionRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	req.SessionID = strings.TrimSpace(req.SessionID)
+	req.StepID = strings.TrimSpace(req.StepID)
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if req.StepID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "step_id is required", nil)
+	}
+	if err := h.service.SetStepPrimarySession(ctx, req.SessionID, req.StepID); err != nil {
+		h.logger.Error("failed to set step primary session",
+			zap.String("session_id", req.SessionID),
+			zap.String("step_id", req.StepID),
+			zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to set step primary session: "+err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
 }

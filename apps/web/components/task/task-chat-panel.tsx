@@ -531,10 +531,12 @@ function SessionSearchOverlay({
   search,
   agentLabel,
   agentName,
+  currentSessionId,
 }: {
   search: ReturnType<typeof useSessionSearch>;
   agentLabel: string | null;
   agentName: string | null;
+  currentSessionId: string | null;
 }) {
   const currentIdx = search.activeHitId
     ? search.hits.findIndex((h) => h.id === search.activeHitId)
@@ -551,31 +553,55 @@ function SessionSearchOverlay({
     const prev = search.hits[prevIdx];
     if (prev) search.setActiveHit(prev.id);
   }, [search, currentIdx, total]);
+  const { isMobile } = useResponsiveBreakpoint();
   if (!search.isOpen) return null;
+  const searchBar = (
+    <PanelSearchBar
+      className="static"
+      value={search.query}
+      onChange={search.setQuery}
+      onNext={handleNext}
+      onPrev={handlePrev}
+      onClose={search.close}
+      matchInfo={{ current: currentIdx >= 0 ? currentIdx + 1 : 0, total }}
+      isLoading={search.isSearching}
+      // Session search already debounces in useDebouncedSearch; skip the
+      // bar's debounce so we don't stack 150ms + 180ms per keystroke.
+      debounceMs={0}
+    />
+  );
+  const hitsList = (
+    <SessionSearchHits
+      hits={search.hits}
+      query={search.query}
+      activeHitId={search.activeHitId}
+      onSelect={search.setActiveHit}
+      isSearching={search.isSearching}
+      agentLabel={agentLabel}
+      agentName={agentName}
+      taskScoped={search.taskScoped}
+      currentSessionId={currentSessionId}
+      hasMore={search.hasMore}
+      onLoadMore={search.loadMore}
+      fullHeight={isMobile}
+    />
+  );
+  if (isMobile) {
+    return (
+      <div
+        className="fixed inset-0 z-40 flex flex-col bg-background"
+        style={{ height: "100dvh" }}
+        data-testid="task-search-surface"
+      >
+        <div className="shrink-0 border-b border-border p-2">{searchBar}</div>
+        <div className="min-h-0 flex-1 overflow-hidden">{hitsList}</div>
+      </div>
+    );
+  }
   return (
     <div className="absolute top-2 right-2 z-20 flex flex-col items-end gap-1">
-      <PanelSearchBar
-        className="static"
-        value={search.query}
-        onChange={search.setQuery}
-        onNext={handleNext}
-        onPrev={handlePrev}
-        onClose={search.close}
-        matchInfo={{ current: currentIdx >= 0 ? currentIdx + 1 : 0, total }}
-        isLoading={search.isSearching}
-        // Session search already debounces in useDebouncedSearch; skip the
-        // bar's debounce so we don't stack 150ms + 180ms per keystroke.
-        debounceMs={0}
-      />
-      <SessionSearchHits
-        hits={search.hits}
-        query={search.query}
-        activeHitId={search.activeHitId}
-        onSelect={search.setActiveHit}
-        isSearching={search.isSearching}
-        agentLabel={agentLabel}
-        agentName={agentName}
-      />
+      {searchBar}
+      {hitsList}
     </div>
   );
 }
@@ -1224,7 +1250,27 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     },
     [messageListRef],
   );
-  const search = useSessionSearch(resolvedSessionId, loadMoreRaw, navigateSearchHit);
+  const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
+  const setActiveSession = useAppStore((s) => s.setActiveSession);
+  const activateSession = useCallback(
+    (sessionId: string) => {
+      if (activeTaskId) setActiveSession(activeTaskId, sessionId);
+    },
+    [activeTaskId, setActiveSession],
+  );
+  const searchTaskScope = useMemo(
+    () =>
+      activeTaskId
+        ? { taskId: activeTaskId, activeSessionId: resolvedSessionId ?? null, activateSession }
+        : undefined,
+    [activeTaskId, resolvedSessionId, activateSession],
+  );
+  const search = useSessionSearch(
+    resolvedSessionId,
+    loadMoreRaw,
+    navigateSearchHit,
+    searchTaskScope,
+  );
   const { label: agentLabel, name: agentName } = useSessionAgentIdentity(resolvedSessionId);
   usePanelSearch({
     containerRef: panelRef,
@@ -1325,7 +1371,12 @@ export const TaskChatPanel = memo(function TaskChatPanel({
             {t("task:loading")}
           </div>
         )}
-        <SessionSearchOverlay search={search} agentLabel={agentLabel} agentName={agentName} />
+        <SessionSearchOverlay
+          search={search}
+          agentLabel={agentLabel}
+          agentName={agentName}
+          currentSessionId={resolvedSessionId ?? null}
+        />
       </PanelBody>
       <ComposerFooterAllocation>
         {!isArchived && (

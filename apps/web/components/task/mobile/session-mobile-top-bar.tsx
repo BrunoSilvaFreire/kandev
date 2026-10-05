@@ -16,6 +16,7 @@ import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { linkToTaskOverview } from "@/lib/links";
 import { AppNavSheet } from "@/components/navigation/app-nav-sheet";
+import { MobileWorkflowTransitionButton } from "./mobile-workflow-transition-button";
 import { useTranslation } from "react-i18next";
 
 type SessionMobileTopBarProps = {
@@ -251,6 +252,7 @@ function MobileTopBarActions({
         />
       )}
       {showApproveButton && onApprove && <ApproveButton onApprove={onApprove} />}
+      <MobileWorkflowTransitionButton taskId={taskId ?? null} />
       <AppNavSheet onOpenTaskViews={onTaskPickerClick} />
     </div>
   );

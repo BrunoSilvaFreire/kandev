@@ -32,6 +32,16 @@ vi.mock("@kandev/ui/context-menu", () => ({
 
 import { ContextMenuTab } from "./tab-context-menu";
 
+const BROWSER = "browser";
+const SESSION = "session:abc";
+const TERMINAL = "terminal";
+const FILES = "files";
+const CHAT = "chat";
+const BUTTON = "button";
+const CLOSE = "Close";
+const CLOSE_OTHERS = "Close Others";
+const CLOSE_TO_RIGHT = "Close Tabs to the Right";
+
 type Panel = { id: string };
 
 function makeProps(panelId: string, groupPanels: string[], params?: Record<string, unknown>) {
@@ -52,44 +62,48 @@ describe("ContextMenuTab", () => {
   afterEach(() => cleanup());
 
   it("closes its own panel from the menu", () => {
-    const { props, removePanel } = makeProps("browser", ["chat", "browser", "terminal"]);
+    const { props, removePanel } = makeProps(BROWSER, [CHAT, BROWSER, TERMINAL]);
     render(<ContextMenuTab {...props} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole(BUTTON, { name: CLOSE }));
 
     expect(removePanel).toHaveBeenCalledTimes(1);
-    expect(removePanel).toHaveBeenCalledWith({ id: "browser" });
+    expect(removePanel).toHaveBeenCalledWith({ id: BROWSER });
   });
 
-  it("closes siblings but spares the chat and session panels", () => {
-    const { props, removePanel } = makeProps("browser", [
-      "chat",
-      "session:abc",
-      "browser",
-      "terminal",
-      "files",
-    ]);
+  it("closes siblings but spares only the chat panel", () => {
+    const { props, removePanel } = makeProps(BROWSER, [CHAT, SESSION, BROWSER, TERMINAL, FILES]);
     render(<ContextMenuTab {...props} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Close Others" }));
+    fireEvent.click(screen.getByRole(BUTTON, { name: CLOSE_OTHERS }));
 
     expect(removePanel.mock.calls.map(([panel]) => (panel as Panel).id)).toEqual([
-      "terminal",
-      "files",
+      SESSION,
+      TERMINAL,
+      FILES,
     ]);
+  });
+
+  it("closes only the tabs to the right of the target", () => {
+    const { props, removePanel } = makeProps(SESSION, [CHAT, SESSION, TERMINAL, FILES]);
+    render(<ContextMenuTab {...props} />);
+
+    fireEvent.click(screen.getByRole(BUTTON, { name: CLOSE_TO_RIGHT }));
+
+    expect(removePanel.mock.calls.map(([panel]) => (panel as Panel).id)).toEqual([TERMINAL, FILES]);
   });
 
   it("renders panel-injected items alongside the close actions", () => {
     const onSelect = vi.fn();
-    const { props } = makeProps("browser", ["browser"], {
+    const { props } = makeProps(BROWSER, [BROWSER], {
       contextMenuItems: [{ label: "Reload", onSelect }],
     });
     render(<ContextMenuTab {...props} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    fireEvent.click(screen.getByRole(BUTTON, { name: "Reload" }));
 
     expect(onSelect).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Close Others" })).toBeTruthy();
+    expect(screen.getByRole(BUTTON, { name: CLOSE })).toBeTruthy();
+    expect(screen.getByRole(BUTTON, { name: CLOSE_OTHERS })).toBeTruthy();
   });
 });

@@ -79,6 +79,11 @@ type ServiceConfig struct {
 	// office session creation path, and pre-existing duplicate rows are
 	// deliberately retained and resolved by selection.
 	OfficeSessionIdentity bool
+
+	// ColdCacheAutoHandoff enables an automatic resume-with-handoff on workflow
+	// step entry when the reused session's provider prompt cache is cold. It
+	// spends a cheap utility-model extraction, so it is a kill switch.
+	ColdCacheAutoHandoff bool
 }
 
 // AttachmentReader is the narrow attachment-store seam needed when the
@@ -500,6 +505,7 @@ type sessionExecutorStore interface {
 	// rows for (taskID, workflowStepID) — the recorded entry count that backs
 	// the {step_entry_number} prompt placeholder (REQ-TWS-001).
 	CountStepEntries(ctx context.Context, taskID, workflowStepID string) (int, error)
+	LatestStepExitSessionID(ctx context.Context, taskID, fromStepID string) (string, error)
 	// Git snapshots and commits
 	GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
 	CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
@@ -1487,6 +1493,14 @@ type Service struct {
 	dynamicSuccessorCancel  context.CancelFunc
 	dynamicSuccessorStopped bool
 	dynamicSuccessorWorkers sync.WaitGroup
+
+	// sessionlessRunner executes sessionless utility prompts (e.g. resume handoff extraction).
+	sessionlessRunner SessionlessPromptRunner
+
+	// sessionUsageTotals reads a session's usage-event aggregate, used to decide
+	// whether the provider's prompt cache is cold. Nil means "unknown", which is
+	// never treated as cold.
+	sessionUsageTotals func(ctx context.Context, sessionID string) (*models.TaskUsageTotals, error)
 }
 
 func (s *Service) officeStallDependencies() (
@@ -2400,6 +2414,20 @@ type ClarificationCanceller interface {
 // SetClarificationCanceller sets the canceller for turn and terminal-session cleanup.
 func (s *Service) SetClarificationCanceller(c ClarificationCanceller) {
 	s.clarificationCanceller = c
+}
+
+// SessionlessPromptRunner executes a prompt through a sessionless utility agent.
+type SessionlessPromptRunner func(ctx context.Context, utilityAgentID, conversationHistory string) (string, error)
+
+// SetSessionlessUtilityRunner configures the runner used to invoke sessionless utility agents.
+func (s *Service) SetSessionlessUtilityRunner(runner SessionlessPromptRunner) {
+	s.sessionlessRunner = runner
+}
+
+// SetSessionUsageTotalsProvider configures the reader used to decide whether a
+// session's provider prompt cache is cold. Nil leaves warmth unknown.
+func (s *Service) SetSessionUsageTotalsProvider(provider func(ctx context.Context, sessionID string) (*models.TaskUsageTotals, error)) {
+	s.sessionUsageTotals = provider
 }
 
 // initWorkflowEngine creates the workflow engine with store and callbacks.

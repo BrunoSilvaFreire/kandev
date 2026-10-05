@@ -31,7 +31,10 @@ export function ContextMenuTab(props: IDockviewPanelHeaderProps) {
   const { t } = useTranslation();
   const { api, containerApi } = props;
   const onDoubleClick = useTabMaximizeOnDoubleClick(api);
-  const { handleClose, handleCloseOthers } = useTabContextActions(api, containerApi);
+  const { handleClose, handleCloseOthers, handleCloseToRight } = useTabContextActions(
+    api,
+    containerApi,
+  );
 
   const extraItems: TabContextMenuItem[] =
     (props.params as TabContextMenuParams | undefined)?.contextMenuItems ?? [];
@@ -60,6 +63,9 @@ export function ContextMenuTab(props: IDockviewPanelHeaderProps) {
         </ContextMenuItem>
         <ContextMenuItem className="cursor-pointer" onSelect={handleCloseOthers}>
           {t("task:closeOthers")}
+        </ContextMenuItem>
+        <ContextMenuItem className="cursor-pointer" onSelect={handleCloseToRight}>
+          {t("task:closeTabsToRight")}
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

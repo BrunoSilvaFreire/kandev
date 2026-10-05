@@ -32,6 +32,7 @@ const mockState = {
   features: { dynamicAgentRouting: true },
   kanban: {
     workflowId: null,
+    steps: [],
     tasks: [{ id: "task-1", title: "Task title" }],
   },
   kanbanMulti: { snapshots: {} },

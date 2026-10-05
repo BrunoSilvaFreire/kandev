@@ -294,6 +294,8 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskDocumentsCatalog, h.wsListTaskDocumentsCatalog)
 	dispatcher.RegisterFunc(ws.ActionTaskDocumentGet, h.wsGetTaskDocument)
 	dispatcher.RegisterFunc(ws.ActionTaskDocumentRevisionsList, h.wsListTaskDocumentRevisions)
+	dispatcher.RegisterFunc(ws.ActionTaskActivityList, h.wsListTaskActivity)
+	dispatcher.RegisterFunc(ws.ActionTaskTransitionCounts, h.wsTaskTransitionCounts)
 	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackList, h.wsListTaskPreviewFeedback)
 	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackCreate, h.wsCreateTaskPreviewFeedback)
 	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackUpdate, h.wsUpdateTaskPreviewFeedback)

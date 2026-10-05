@@ -48,6 +48,7 @@ import type {
 import { useTranslation } from "react-i18next";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 import type { TaskCanvasesLoadStatus } from "@/hooks/domains/task/use-task-canvases";
+import { surfaceCapabilities, type AppSurface } from "@/lib/surface/surface-capabilities";
 
 export type TaskPageInnerProps = {
   task: Task | null;
@@ -72,6 +73,7 @@ export type TaskPageInnerProps = {
   onTaskUnarchived: (taskId: string) => void;
   taskCanvases?: Canvas[];
   taskCanvasesStatus?: TaskCanvasesLoadStatus;
+  surface?: AppSurface;
 };
 
 type RemoteExecutorStatus = {
@@ -312,12 +314,15 @@ function useTaskPageDerivedProps({
   onTaskUnarchived,
   taskCanvases,
   taskCanvasesStatus,
+  surface = "task",
 }: TaskPageInnerProps) {
   const workspaceRepositories = useAppStore((state) =>
     selectWorkspaceRepositories(state.repositories.itemsByWorkspaceId, task?.workspace_id),
   );
   const taskProps = resolveTaskProps(task, repository, workspaceRepositories);
   const actionsMenuBoardRow = useTaskActionsMenuBoardRow(task);
+  // Task-only actions (move, handoff, state) have no meaning on a Quick Chat.
+  const taskActionsEnabled = surfaceCapabilities(surface).taskActions;
   const remote = resolveRemoteExecutor(resumption.sessionStatus as RemoteExecutorStatus | null);
   const embeddedVscode = useEmbeddedVscodeSupport(effectiveSessionId, resumption.sessionStatus);
   const activeSessionMetadata = useAppStore((state) =>
@@ -337,7 +342,7 @@ function useTaskPageDerivedProps({
   const topBarProps = buildTaskTopBarProps({
     task,
     taskProps,
-    actionsMenuBoardRow,
+    actionsMenuBoardRow: taskActionsEnabled ? actionsMenuBoardRow : null,
     workflowSteps,
     showDebugOverlay,
     onToggleDebugOverlay,
@@ -369,6 +374,7 @@ function useTaskPageDerivedProps({
 export function TaskPageInner(props: TaskPageInnerProps) {
   const { effectiveSessionId, task, merged, sessionPanel, archivedValue, isMobile, ensureSession } =
     props;
+  const pullRequestsEnabled = surfaceCapabilities(props.surface ?? "task").pullRequests;
   const [taskMoveError, setTaskMoveError] = useState<unknown>(null);
   const clearTaskMoveError = useCallback(() => setTaskMoveError(null), []);
   const reportTaskMoveError = useCallback((error: unknown) => setTaskMoveError(error), []);
@@ -404,8 +410,8 @@ export function TaskPageInner(props: TaskPageInnerProps) {
               isPassthrough={sessionPanel.isSessionPassthrough}
               isTaskArchived={archivedValue.isArchived}
             />
-            <TaskPRShortcut taskId={taskProps.taskId} />
-            <TaskDebugOverlay entries={debugEntries} />
+            {pullRequestsEnabled && <TaskPRShortcut taskId={taskProps.taskId} />}
+            <TaskDebugOverlay entries={debugEntries} />{" "}
             {!isMobile && (
               <TaskTopBar
                 {...topBarProps}

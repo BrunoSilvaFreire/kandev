@@ -48,8 +48,18 @@ instead of claiming that a session will be created. The shared
 `workflowmove.ShouldAutoStartAgent` predicate keeps this projection aligned
 with the no-session execution path.
 
-Preserve terminal-session exclusion, explicit target identity, deterministic
-candidate ordering, and same-profile/new behavior. A zero-session task is
+Preserve terminal-session and completion-follow-up exclusion, explicit target identity,
+and same-profile/new behavior. When choosing among eligible same-profile nonterminal
+candidates, `selectReusableWorkflowSession` applies relevance-aware ordering:
+1. **Exclude exhausted candidates:** Sessions whose concrete execution profile has known
+   quota remaining <= 0 are excluded from reuse; if all candidates are exhausted, selection
+   falls through to create a fresh session so dynamic routing can select a provider with capacity.
+2. **Step author first:** The session that last exited the destination step (latest
+   `task_step_transitions` row where `from_workflow_step_id = destination` with non-null `session_id`).
+3. **Step creator next:** Sessions created for the destination step (`WorkflowStepIDAtCreation == destination`).
+4. **Freshness tie-breaker:** The session with the most recent `UpdatedAt`.
+
+A zero-session task is
 reported through the existing launch decision; if that decision cannot be
 resolved without provisioning, return unknown rather than ensuring a session.
 Dynamic profile selection without a concrete recipient reports its profile and

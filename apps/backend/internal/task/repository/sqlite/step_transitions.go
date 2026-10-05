@@ -301,6 +301,25 @@ func (r *Repository) CountStepEntries(ctx context.Context, taskID, stepID string
 	return count, nil
 }
 
+// LatestStepExitSessionID returns the session_id that last exited fromStepID
+// for taskID in task_step_transitions, ignoring transitions with a null session_id.
+// It returns "" when no row matches or when taskID or fromStepID is empty.
+func (r *Repository) LatestStepExitSessionID(ctx context.Context, taskID, fromStepID string) (string, error) {
+	if taskID == "" || fromStepID == "" {
+		return "", nil
+	}
+	const query = `SELECT session_id FROM task_step_transitions WHERE task_id = ? AND from_workflow_step_id = ? AND session_id IS NOT NULL ORDER BY occurred_at DESC, id DESC LIMIT 1`
+	var sessionID string
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), taskID, fromStepID).Scan(&sessionID)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("latest step exit session id: %w", err)
+	}
+	return sessionID, nil
+}
+
 // formatEntryID converts recordStepTransition's ledger identifier into the
 // step-entry requirement's entry identity string (AC-OFFICE-STEP-ENTRY-
 // 001.2, .7). id 0 means recordStepTransition was a no-op — dispatchStepEntry

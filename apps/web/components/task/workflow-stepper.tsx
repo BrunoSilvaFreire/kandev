@@ -34,6 +34,7 @@ import {
   useWorkflowStepProgress,
   type WorkflowStepProgress,
 } from "@/hooks/domains/kanban/use-workflow-step-progress";
+import { useStepVisitSessions } from "./use-step-visit-sessions";
 import { sortWorkflowStepsByPosition } from "@/lib/kanban/workflow-step-order";
 import { useTranslation } from "react-i18next";
 import {
@@ -49,6 +50,7 @@ import {
 import { StepCircleIndicator } from "./workflow-step-marker";
 import { useHoverPopover } from "@/components/integrations/use-hover-popover";
 import { WorkflowMovePreviewDisclosure } from "./workflow-move-preview";
+import { StepVisitSessionList } from "./step-visit-session-list";
 
 type Step = WorkflowStepperStep;
 
@@ -96,6 +98,7 @@ const WorkflowStepper = memo(function WorkflowStepper({
 
   const [openStepId, setOpenStepId] = useState<string | null>(null);
   const sortedSteps = useMemo(() => sortWorkflowStepsByPosition(steps), [steps]);
+  const { sessionsByStep, onOpenSession } = useStepVisitSessions(taskId);
 
   const currentIndex = useMemo(
     () => sortedSteps.findIndex((s) => s.id === currentStepId),
@@ -125,6 +128,8 @@ const WorkflowStepper = memo(function WorkflowStepper({
           onMove={handleMove}
           progressByStepId={progressByStepId}
           agentLabelsByProfileId={agentLabelsByProfileId}
+          visits={sessionsByStep}
+          onOpenSession={onOpenSession}
         />
       ) : (
         <>
@@ -327,6 +332,8 @@ function StepHoverContent({
   onReturnFocus: () => void;
 }) {
   const { t } = useTranslation();
+  const { sessionsByStep, onOpenSession } = useStepVisitSessions(taskId);
+  const visitedSessions = sessionsByStep[step.id] ?? [];
   const stepDetails = (
     <div className="flex w-full flex-col items-center gap-1.5">
       {progress && (
@@ -374,6 +381,15 @@ function StepHoverContent({
         <div className="text-[11px] text-muted-foreground">{t("task:currentStep")}</div>
       )}
       {!canMove && stepDetails}
+      {visitedSessions.length > 0 && (
+        <div className="w-56 border-t pt-1.5">
+          <StepVisitSessionList
+            sessions={visitedSessions}
+            onOpenSession={onOpenSession}
+            testIdPrefix={`workflow-step-hover-session-${step.id}`}
+          />
+        </div>
+      )}
     </PopoverContent>
   );
 }

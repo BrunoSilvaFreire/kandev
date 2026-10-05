@@ -25,6 +25,8 @@ import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import { EnvironmentBadges, ContextSelect } from "./session-dialog-shared";
 import { useSessionContextChange, useSessionLaunchSubmit } from "./new-session-form-actions";
+import { HandoffStepSelect, HANDOFF_STAY_IN_STEP } from "./handoff-step-select";
+import { useHandoffStepMove } from "./use-handoff-step-move";
 import { resolveNewSessionProfileSelection } from "./new-session-profile-selection";
 import { resolveComposerWorkspaceId } from "./chat/composer-workspace";
 import { Trans, useTranslation } from "react-i18next";
@@ -32,6 +34,15 @@ import { Trans, useTranslation } from "react-i18next";
 export type { HandoffPreset } from "./handoff-types";
 
 const PROGRAMMATIC_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
+
+/** A handoff moves the task only when a workflow and a non-default step exist. */
+function handoffStepMoveEnabled(
+  handoff: HandoffPreset | undefined,
+  workflowId: string | null | undefined,
+  handoffStepId: string,
+): boolean {
+  return Boolean(handoff && workflowId && handoffStepId !== HANDOFF_STAY_IN_STEP);
+}
 
 type NewSessionDialogProps = {
   open: boolean;
@@ -157,7 +168,9 @@ export function useSessionPromptController(
 ) {
   const { t } = useTranslation();
   const { toast } = useToast();
-  const { enhancePrompt, isEnhancingPrompt, enhancePromptPhase } = useUtilityAgentGenerator({ sessionId: null });
+  const { enhancePrompt, isEnhancingPrompt, enhancePromptPhase } = useUtilityAgentGenerator({
+    sessionId: null,
+  });
   const latestPromptValueRef = useRef("");
   const promptResultDelivery = usePromptResultDelivery({
     scopeKey: `new-session:${taskId}`,
@@ -358,8 +371,14 @@ function NewSessionForm({
   const handoffInitial = handoff ? buildHandoffInitialState(handoff) : null;
   const { toast } = useToast();
   const setActiveSession = useAppStore((state) => state.setActiveSession);
+  const workflowId = useAppStore((state) => state.kanban.workflowId);
   const { summarize, isSummarizing } = useSummarizeSession();
   const [contextValue, setContextValue] = useState(handoffInitial?.contextValue ?? "blank");
+  const [handoffStepId, setHandoffStepId] = useState(
+    handoffInitial?.targetStepId ?? HANDOFF_STAY_IN_STEP,
+  );
+  const handoffMove = useHandoffStepMove();
+  const moveEnabled = handoffStepMoveEnabled(handoff, workflowId, handoffStepId);
   const [hasPrompt, setHasPrompt] = useState(false);
   const [hasPendingAttachmentUploads, setHasPendingAttachmentUploads] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -374,8 +393,14 @@ function NewSessionForm({
     currentProfileId,
     handoff,
   });
-  const { handleEnhancePrompt, isEnhancingPrompt, enhancePromptPhase, pendingResult, applyPending, copyPending } =
-    useSessionPromptController(promptRef, taskId);
+  const {
+    handleEnhancePrompt,
+    isEnhancingPrompt,
+    enhancePromptPhase,
+    pendingResult,
+    applyPending,
+    copyPending,
+  } = useSessionPromptController(promptRef, taskId);
   const handleContextChange = useSessionContextChange({
     promptRef,
     initialPrompt,
@@ -400,6 +425,10 @@ function NewSessionForm({
     setActiveSession,
     activateSession: activateNewSession,
     setIsCreating,
+    promotePrimary: moveEnabled ? handoffMove.promotePrimary : undefined,
+    onLaunched: moveEnabled
+      ? (sessionId) => handoffMove.moveToStep(taskId, sessionId, workflowId ?? "", handoffStepId)
+      : undefined,
   });
   const isSubmitDisabled =
     shouldDisableSubmit(isBusyState, hasPrompt, profileSelection.hasProfiles) ||
@@ -426,6 +455,9 @@ function NewSessionForm({
         sessionOptions={sessionOptions}
         isSummarizing={isSummarizing}
       />
+      {handoff && (
+        <HandoffStepSelect taskId={taskId} value={handoffStepId} onChange={setHandoffStepId} />
+      )}
       <TaskFormInputs
         isSessionMode
         taskId={taskId}

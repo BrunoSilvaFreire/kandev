@@ -78,6 +78,38 @@ type SearchMessagesOptions struct {
 	Limit int
 }
 
+// SearchTaskMessagesCursor is a decoded keyset position in the global
+// active-session-first task-search order. Key is the row's normalized
+// microsecond created_at ordering key; Bucket is 0 while the row still sits
+// in the active-session partition and 1 once pagination has entered the
+// non-active partition.
+type SearchTaskMessagesCursor struct {
+	Bucket int
+	Key    string
+	ID     string
+}
+
+// SearchTaskMessagesOptions defines options for a task-wide message search
+// ordered by active-session bucket, then created_at DESC, then id DESC.
+type SearchTaskMessagesOptions struct {
+	Query           string
+	ActiveSessionID string
+	Limit           int
+	// Cursor is nil for the first page.
+	Cursor *SearchTaskMessagesCursor
+}
+
+// TaskMessageSearchHit is one task-search result. WorkflowStepID comes only
+// from the owning turn's immutable workflow_step_id_at_start stamp and is
+// empty for legacy turns. Session is the hit's owning session for display
+// enrichment and may be nil when the session row was deleted.
+type TaskMessageSearchHit struct {
+	Message        *Message
+	Session        *TaskSession
+	WorkflowStepID string
+	OrderKey       string
+}
+
 // PluginMessageFilter defines the filters for the plugin Host data API's
 // message reader (ADR 0047). SessionIDs and TaskIDs narrow by session/task
 // (ORed within each, ANDed across the two — a message must match any
@@ -261,6 +293,15 @@ const (
 	// Recording it replaces any existing token (single-slot by construction);
 	// claiming it removes it. See REQ-TASKS-SIGNAL-PAYLOAD-DELIVERY-001.
 	MetaKeyStepHandoffCarry = "step_handoff_carry"
+	// MetaKeyStepPrimarySessions records designated primary sessions per workflow step
+	// as a JSON object map: { "<stepID>": "<sessionID>" }. Public, so task.updated
+	// delivers it to clients.
+	MetaKeyStepPrimarySessions = "step_primary_sessions"
+	// MetaKeyPendingContinuation is the server-owned record of a paused
+	// automatic continuation: an extraction or reset failure that left the
+	// session WAITING_FOR_INPUT and needs a user retry/continue decision. Its
+	// value is a PendingContinuation. Redacted from public metadata.
+	MetaKeyPendingContinuation = "pending_continuation"
 	// MetaKeyHandoffSource records inbound handoff provenance on a delivery
 	// task created via the cross-workspace handoff runtime route: the source
 	// workspace, task, and agent that created it. Written once at creation;

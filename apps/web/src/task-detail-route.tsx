@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { StateHydrator } from "@/components/state-hydrator";
 import { KanbanTaskShell } from "@/app/tasks/[id]/kanban-task-shell";
+import type { AppSurface } from "@/lib/surface/surface-capabilities";
 import {
   extractInitialRepositories,
   extractInitialScripts,
@@ -17,6 +18,8 @@ type TaskDetailRouteProps = {
   layout?: string | null;
   simple?: string;
   mode?: string;
+  surface?: AppSurface;
+  panel?: string;
   initialData?: FetchedSessionData;
 };
 
@@ -48,6 +51,8 @@ export function TaskDetailRoute({
   layout,
   simple,
   mode,
+  surface = "task",
+  panel,
   initialData,
 }: TaskDetailRouteProps) {
   const { t } = useTranslation();
@@ -111,6 +116,8 @@ export function TaskDetailRoute({
         initialLayout={layout}
         urlSimple={simple}
         urlMode={mode}
+        surface={surface}
+        panel={panel}
       />
     </>
   );

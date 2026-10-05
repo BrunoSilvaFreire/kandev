@@ -3191,7 +3191,8 @@ func (s *Service) resolveWorkflowSessionSwitchExisting(
 	if validatedExisting != nil {
 		return validatedExisting
 	}
-	existing, err := s.findReusableSessionForProfile(ctx, taskID, newAgentProfileID, currentSession.ID)
+	// TODO: thread the destination step ID here too; with "" this fallback (validatedExisting == nil) skips step-owner/creator ranking and can diverge from the preview.
+	existing, err := s.findReusableSessionForProfile(ctx, taskID, newAgentProfileID, currentSession.ID, "")
 	if err != nil {
 		s.logger.Warn("failed to look up reusable session, falling through to create new",
 			zap.String("task_id", taskID),
@@ -3268,7 +3269,7 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidateAndRoute(
 			reused, err = s.reuseSessionForStepWithEndPolicy(ctx, taskID, currentSession, existing, endPolicy)
 		}
 		if err == nil {
-			return reused, decisionReusedExisting(), nil
+			return reused, decisionReusedExisting(existing.ID, string(existing.State)), nil
 		}
 		if !errors.Is(err, errReusableSessionNoLongerActive) {
 			return nil, workflowRouteDecision{}, err
@@ -3285,7 +3286,7 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidateAndRoute(
 		}
 		// The validated candidate won selection but stopped being promotable
 		// between the decision and the promotion. That race is its own reason.
-		return created, decisionSelectedCandidateTerminal(), nil
+		return created, decisionSelectedCandidateTerminal(existing.ID, string(existing.State)), nil
 	}
 
 	created, createErr := s.createNewSessionForStepWithEndPolicyAndRoute(
@@ -3295,14 +3296,63 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidateAndRoute(
 		return nil, workflowRouteDecision{}, createErr
 	}
 	if startPolicy == models.WorkflowProfileSessionStartPolicyNew {
-		return created, decisionForcedNewPolicy(), nil
+		return created, decisionForcedNewPolicy(string(startPolicy)), nil
 	}
 	return created, decisionNoReusableCandidate(), nil
 }
 
-// findReusableSessionForProfile returns the most-recently-updated
-// *nonterminal* session on this task that uses the target profile (and is
-// not the session being switched away from), or nil if none exists.
+// stepPrimaryDesignation returns the user-designated primary session ID for a
+// step, or "" when none is set or the task cannot be read.
+func (s *Service) stepPrimaryDesignation(ctx context.Context, taskID, stepID string) string {
+	if s.repo == nil || taskID == "" || stepID == "" {
+		return ""
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return ""
+	}
+	return models.StepPrimarySessionID(task.Metadata, stepID)
+}
+
+func (s *Service) buildReuseHint(ctx context.Context, taskID, destinationStepID string) reuseHint {
+	hint := reuseHint{
+		DestinationStepID: destinationStepID,
+	}
+	if taskID == "" || destinationStepID == "" {
+		return hint
+	}
+	if s.repo != nil {
+		hint.DesignatedSessionID = s.stepPrimaryDesignation(ctx, taskID, destinationStepID)
+		ownerID, err := s.repo.LatestStepExitSessionID(ctx, taskID, destinationStepID)
+		if err != nil {
+			if s.logger != nil {
+				s.logger.Warn("failed to look up latest step exit session for reuse hint",
+					zap.String("task_id", taskID),
+					zap.String("destination_step_id", destinationStepID),
+					zap.Error(err))
+			}
+		} else {
+			hint.StepOwnerSessionID = ownerID
+		}
+	}
+	if s.profileExecutionResolver != nil {
+		quotaMemo := s.newProfileAvailabilityMemo(ctx)
+		hint.Exhausted = func(session *models.TaskSession) bool {
+			targetID := sessionTargetProfileID(session)
+			if targetID == "" {
+				return false
+			}
+			return quotaMemo(targetID)
+		}
+	}
+	return hint
+}
+
+// findReusableSessionForProfile returns the best *nonterminal* session on this
+// task that uses the target profile (and is not the session being switched away
+// from), or nil if none exists. It evaluates candidates by excluding exhausted
+// sessions, prioritizing destination step authors and creator sessions, and
+// tie-breaking by most recent activity.
 //
 // Terminal sessions (COMPLETED, FAILED, CANCELLED) are always excluded —
 // they are historical endpoints, not workflow-reusable. A prior incident
@@ -3313,7 +3363,10 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidateAndRoute(
 // re-arming the same cycle on the next re-entry. Terminal-profile re-entry
 // always goes through createNewSessionForStep instead, which gets a fresh
 // ACP conversation and the canonical current task/workflow context.
-func (s *Service) findReusableSessionForProfile(ctx context.Context, taskID, profileID, excludeSessionID string) (*models.TaskSession, error) {
+func (s *Service) findReusableSessionForProfile(
+	ctx context.Context,
+	taskID, profileID, excludeSessionID, destinationStepID string,
+) (*models.TaskSession, error) {
 	if profileID == "" {
 		return nil, nil
 	}
@@ -3321,7 +3374,8 @@ func (s *Service) findReusableSessionForProfile(ctx context.Context, taskID, pro
 	if err != nil {
 		return nil, err
 	}
-	return selectReusableWorkflowSession(sessions, profileID, excludeSessionID), nil
+	hint := s.buildReuseHint(ctx, taskID, destinationStepID)
+	return selectReusableWorkflowSession(sessions, profileID, excludeSessionID, hint), nil
 }
 
 // transferQueuedSessionState keeps queue rows and their claimed attachment
@@ -4001,8 +4055,19 @@ func (s *Service) prepareWorkflowStepSession(
 		s.workflowEntryIdentity(ctx, taskID, entryIDs...),
 		startPolicy,
 	)
+	// D7: an explicit per-step designation outranks profile matching and the
+	// step's start policy. It is honored first (case A) and only skipped when
+	// the designated session's provider quota is exhausted, in which case the
+	// existing selection runs and excludes it (the carry-forward handoff is a
+	// later work package).
+	if sourceStep != nil {
+		if designated, ok := s.designatedWorkflowSessionForStep(ctx, taskID, step, session); ok &&
+			!s.sessionProviderUnavailable(ctx, designated) {
+			return s.enterDesignatedWorkflowStepSession(ctx, taskID, session, step, sourceStep, designated, entryIDs...)
+		}
+	}
 	if shouldKeepCurrentWorkflowStepSession(effectiveProfile, session.AgentProfileID, startPolicy) {
-		requiresFreshSession, err := s.workflowEntryRequiresFreshExactModelSession(ctx, session, step, sourceStep, effectiveProfile)
+		requiresFreshSession, requiredModel, candidateModel, err := s.workflowEntryRequiresFreshExactModelSession(ctx, session, step, sourceStep, effectiveProfile)
 		if err != nil {
 			return nil, false, err
 		}
@@ -4013,9 +4078,9 @@ func (s *Service) prepareWorkflowStepSession(
 			endPolicy := s.resolveStepProfileSessionEndPolicy(sourceStep)
 			newSession, switched, err := s.replaceExactModelWorkflowStepSession(ctx, taskID, session, step, effectiveProfile, endPolicy, profileRoute, entryIDs...)
 			if err == nil {
-				decision := decisionExactModelIncompatibility()
+				decision := decisionExactModelIncompatibility(requiredModel, candidateModel)
 				s.recordWorkflowRouteDecision(ctx, taskID, session, newSession, step,
-					decision.Outcome, decision.Reason,
+					decision,
 					string(startPolicy), string(endPolicy), entryIDs...)
 			}
 			return newSession, switched, err
@@ -4027,7 +4092,7 @@ func (s *Service) prepareWorkflowStepSession(
 			// rather than a policy that was never applied.
 			decision := decisionReusedCurrentSession()
 			s.recordWorkflowRouteDecision(ctx, taskID, session, newSession, step,
-				decision.Outcome, decision.Reason,
+				decision,
 				string(startPolicy), "", entryIDs...)
 		}
 		return newSession, switched, err
@@ -4049,8 +4114,97 @@ func (s *Service) prepareWorkflowStepSession(
 	if predetermined != nil {
 		decision = *predetermined
 	}
-	s.recordWorkflowRouteDecision(ctx, taskID, session, newSession, step, decision.Outcome, decision.Reason,
+	s.recordWorkflowRouteDecision(ctx, taskID, session, newSession, step, decision,
 		string(configuredStartPolicy), string(endPolicy), entryIDs...)
+	if err := s.recordWorkflowSourceBinding(ctx, taskID, step, newSession, entryIDs...); err != nil {
+		return nil, false, err
+	}
+	return newSession, true, nil
+}
+
+// sessionProviderUnavailable reports whether the session's execution profile
+// (preferred) or agent profile has known-zero quota. A provider fetch error is
+// treated as available, matching ProfileQuotaExhausted.
+func (s *Service) sessionProviderUnavailable(ctx context.Context, session *models.TaskSession) bool {
+	if s.profileExecutionResolver == nil || session == nil {
+		return false
+	}
+	targetID := sessionTargetProfileID(session)
+	if targetID == "" {
+		return false
+	}
+	return s.profileExecutionResolver.ProfileQuotaExhausted(ctx, targetID)
+}
+
+// designatedWorkflowSessionForStep returns the session explicitly designated as
+// primary for step (task metadata "step_primary_sessions"), when it is a live,
+// non-completion-follow-up session of this task and not the current session. A
+// terminal or missing designation is ignored but left in place (D7).
+func (s *Service) designatedWorkflowSessionForStep(
+	ctx context.Context,
+	taskID string,
+	step *wfmodels.WorkflowStep,
+	current *models.TaskSession,
+) (*models.TaskSession, bool) {
+	if s.repo == nil || step == nil || current == nil {
+		return nil, false
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return nil, false
+	}
+	designatedID := models.StepPrimarySessionID(task.Metadata, step.ID)
+	if designatedID == "" || designatedID == current.ID {
+		return nil, false
+	}
+	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return nil, false
+	}
+	for _, candidate := range sessions {
+		if candidate == nil || candidate.ID != designatedID {
+			continue
+		}
+		if isTerminalSessionState(candidate.State) || models.IsCompletionFollowUpSession(candidate.Metadata) {
+			return nil, false
+		}
+		return candidate, true
+	}
+	return nil, false
+}
+
+// enterDesignatedWorkflowStepSession reuses the designated step-primary session
+// through the same switch/promotion path as a profile-driven switch, and records
+// the step_primary routing reason. The designation overrides the step's start
+// policy: a `new` policy does not create a fresh session when the user has named
+// one.
+func (s *Service) enterDesignatedWorkflowStepSession(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	step, sourceStep *wfmodels.WorkflowStep,
+	designated *models.TaskSession,
+	entryIDs ...int64,
+) (*models.TaskSession, bool, error) {
+	startPolicy := models.WorkflowProfileSessionStartPolicyReuse
+	profileRoute := workflowProfileSessionRoute(
+		taskID,
+		session,
+		step,
+		designated.AgentProfileID,
+		s.workflowEntryIdentity(ctx, taskID, entryIDs...),
+		startPolicy,
+	)
+	endPolicy := s.resolveStepProfileSessionEndPolicy(sourceStep)
+	newSession, _, err := s.switchSessionForStepWithPoliciesAndCandidateAndRoute(
+		ctx, taskID, session, designated.AgentProfileID, startPolicy, endPolicy, designated, profileRoute,
+	)
+	if err != nil {
+		return nil, false, err
+	}
+	decision := decisionStepPrimary(designated.ID, string(designated.State))
+	s.recordWorkflowRouteDecision(ctx, taskID, session, newSession, step, decision,
+		string(startPolicy), string(endPolicy), entryIDs...)
 	if err := s.recordWorkflowSourceBinding(ctx, taskID, step, newSession, entryIDs...); err != nil {
 		return nil, false, err
 	}
@@ -4094,10 +4248,14 @@ func (s *Service) exactModelWorkflowStartPolicy(
 	startPolicy models.WorkflowProfileSessionStartPolicy,
 ) (models.WorkflowProfileSessionStartPolicy, *models.TaskSession, *workflowRouteDecision, error) {
 	if startPolicy != models.WorkflowProfileSessionStartPolicyReuse {
-		decision := decisionForcedNewPolicy()
+		decision := decisionForcedNewPolicy(string(startPolicy))
 		return startPolicy, nil, &decision, nil
 	}
-	existing, err := s.findReusableSessionForProfile(ctx, taskID, profileID, currentSessionID)
+	destStepID := ""
+	if step != nil {
+		destStepID = step.ID
+	}
+	existing, err := s.findReusableSessionForProfile(ctx, taskID, profileID, currentSessionID, destStepID)
 	if err != nil {
 		s.logger.Warn("failed to inspect reusable session for exact model identity",
 			zap.String("task_id", taskID),
@@ -4112,12 +4270,12 @@ func (s *Service) exactModelWorkflowStartPolicy(
 		decision := decisionNoReusableCandidate()
 		return models.WorkflowProfileSessionStartPolicyNew, nil, &decision, nil
 	}
-	requiresFreshSession, err := s.workflowEntryRequiresFreshExactModelSession(ctx, existing, step, sourceStep, profileID)
+	requiresFreshSession, requiredModel, candidateModel, err := s.workflowEntryRequiresFreshExactModelSession(ctx, existing, step, sourceStep, profileID)
 	if err != nil {
 		return startPolicy, nil, nil, err
 	}
 	if requiresFreshSession {
-		decision := decisionExactModelIncompatibility()
+		decision := decisionExactModelIncompatibility(requiredModel, candidateModel)
 		return models.WorkflowProfileSessionStartPolicyNew, nil, &decision, nil
 	}
 	return startPolicy, existing, nil, nil
@@ -4134,17 +4292,17 @@ func (s *Service) workflowEntryRequiresFreshExactModelSession(
 	session *models.TaskSession,
 	step, sourceStep *wfmodels.WorkflowStep,
 	profileID string,
-) (bool, error) {
+) (bool, string, string, error) {
 	if session == nil || step == nil || sourceStep == nil || sourceStep.ID == step.ID || profileID == "" {
-		return false, nil
+		return false, "", "", nil
 	}
 	drifted, err := s.sessionHasUnauthorizedExactModelDrift(ctx, session, profileID)
 	if err != nil || !drifted {
-		return drifted, err
+		return drifted, "", "", err
 	}
 	profile, err := s.agentManager.ResolveAgentProfile(ctx, profileID)
 	if err != nil {
-		return false, fmt.Errorf("resolve exact workflow profile %q: %w", profileID, err)
+		return false, "", "", fmt.Errorf("resolve exact workflow profile %q: %w", profileID, err)
 	}
 	effective, _ := models.LoadEffectiveSessionRuntimeConfig(session)
 	s.logger.Info("creating fresh workflow session for exact model identity",
@@ -4154,7 +4312,7 @@ func (s *Service) workflowEntryRequiresFreshExactModelSession(
 		zap.String("target_step_id", step.ID),
 		zap.String("configured_model", profile.Model),
 		zap.String("persisted_model", effective.Model))
-	return true, nil
+	return true, profile.Model, effective.Model, nil
 }
 
 func (s *Service) sessionHasUnauthorizedExactModelDrift(
@@ -4166,6 +4324,10 @@ func (s *Service) sessionHasUnauthorizedExactModelDrift(
 		return false, nil
 	}
 	profile, err := s.agentManager.ResolveAgentProfile(ctx, profileID)
+	if errors.Is(err, agentruntime.ErrVirtualProfile) {
+		// Dynamic profiles own exact-model identity in the conductor, not here.
+		return false, nil
+	}
 	if err != nil {
 		return false, fmt.Errorf("resolve exact workflow profile %q: %w", profileID, err)
 	}
@@ -4283,7 +4445,11 @@ func (s *Service) preflightWorkflowStepCredentials(
 	}
 	targetSession := currentSession
 	if startPolicy == models.WorkflowProfileSessionStartPolicyReuse {
-		existing, err := s.findReusableSessionForProfile(ctx, taskID, effectiveProfile, currentSession.ID)
+		destStepID := ""
+		if targetStep != nil {
+			destStepID = targetStep.ID
+		}
+		existing, err := s.findReusableSessionForProfile(ctx, taskID, effectiveProfile, currentSession.ID, destStepID)
 		if err != nil {
 			return fmt.Errorf("find reusable session for credential preflight: %w", err)
 		}
@@ -4323,6 +4489,7 @@ func (s *Service) maybySwitchSessionForProfile(
 ) (*models.TaskSession, bool) {
 	effective, _, err := s.prepareWorkflowStepSession(ctx, taskID, session, step, sourceStep, entryIDs...)
 	if err != nil {
+		// TODO: surface this post-commit on_enter failure (route row reason, task-history marker, or MCP error) instead of only logging; needs its own spec decision.
 		s.logger.Error("failed to switch session for step agent profile",
 			zap.String("task_id", taskID),
 			zap.String("step_id", step.ID),
@@ -4414,6 +4581,9 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 	ctx = context.WithoutCancel(ctx)
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
 	ctx = withWorkflowMetaCache(ctx)
+	// A new step entry supersedes any paused continuation still waiting on a
+	// user decision (D10).
+	s.clearPendingContinuationOnEntry(ctx, taskID)
 	if !s.workflowEntryDispatchIsCurrentForSession(ctx, taskID, session.ID, step, transitionID) {
 		return
 	}
@@ -4524,6 +4694,20 @@ func (s *Service) launchAfterOnEnterDispatch(
 		)
 		if err != nil {
 			s.handleWorkflowEntryPromptError(ctx, taskID, session, step, err)
+			return
+		}
+	}
+	// Automatic cold-cache continuation (WP5 case B): when the reused session's
+	// provider cache is cold, reset its context and lead with a cheap handoff
+	// instead of re-reading the full conversation.
+	if effectivePrompt != "" && s.shouldAutoResumeWithHandoff(ctx, session, step, isPassthrough) {
+		outcome, handoff := s.applyAutoResumeHandoff(ctx, taskID, session, step, effectivePrompt, entryIDs...)
+		switch outcome {
+		case autoResumeApplied:
+			effectivePrompt = composeResumeHandoffPrompt(handoff, effectivePrompt)
+		case autoResumePaused:
+			// D10: the entry paused into the inbox recovery question. Sending
+			// the prompt now would defeat the pause.
 			return
 		}
 	}

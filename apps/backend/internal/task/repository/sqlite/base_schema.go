@@ -1125,6 +1125,7 @@ func (r *Repository) initTaskSessionRoutesSchema() error {
 		end_policy TEXT NOT NULL DEFAULT '',
 		outcome TEXT NOT NULL,
 		reason TEXT NOT NULL,
+		decision_detail TEXT,
 		workflow_step_transition_id INTEGER,
 		correlation_id TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMP NOT NULL

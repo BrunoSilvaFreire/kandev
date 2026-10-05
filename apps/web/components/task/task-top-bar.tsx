@@ -24,6 +24,7 @@ import { ExecutorSettingsButton } from "@/components/task/executor-settings-butt
 import { TaskUnarchiveButton } from "@/components/task/task-unarchive-button";
 import { TaskAssigneeControl } from "@/components/task/task-assignee-control";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
+import { WorkflowTransitionDisclosure } from "@/components/task/workflow-transition-disclosure";
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
 import { TaskTopBarActionsMenu } from "@/components/task/task-top-bar-actions-menu";
 import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
@@ -130,23 +131,30 @@ const TaskTopBar = memo(function TaskTopBar({
       // so the center zone may shrink instead of pushing chrome out of the bar.
       centerClassName="min-w-0 shrink"
       actions={
-        <TopBarRight
-          taskId={taskId}
-          activeSessionId={activeSessionId}
-          showDebugOverlay={showDebugOverlay}
-          onToggleDebugOverlay={onToggleDebugOverlay}
-          isArchived={isArchived}
-          workspaceId={workspaceId}
-          embeddedVscodeSupported={embeddedVscodeSupported}
-          taskTitle={taskTitle}
-          issueUrl={issueUrl}
-          issueNumber={issueNumber}
-          officeTaskHref={officeTaskHref}
-          onTaskUnarchived={onTaskUnarchived}
-          actionsMenuBoardRow={actionsMenuBoardRow}
-          subjectWorkflowStepId={subjectWorkflowStepId}
-          subjectPrimaryExecutorType={subjectPrimaryExecutorType}
-        />
+        <div className="flex items-center gap-1">
+          <WorkflowTransitionDisclosure
+            steps={workflowSteps ?? []}
+            currentStepId={currentStepId ?? null}
+            taskId={taskId ?? null}
+          />
+          <TopBarRight
+            taskId={taskId}
+            activeSessionId={activeSessionId}
+            showDebugOverlay={showDebugOverlay}
+            onToggleDebugOverlay={onToggleDebugOverlay}
+            isArchived={isArchived}
+            workspaceId={workspaceId}
+            embeddedVscodeSupported={embeddedVscodeSupported}
+            taskTitle={taskTitle}
+            issueUrl={issueUrl}
+            issueNumber={issueNumber}
+            officeTaskHref={officeTaskHref}
+            onTaskUnarchived={onTaskUnarchived}
+            actionsMenuBoardRow={actionsMenuBoardRow}
+            subjectWorkflowStepId={subjectWorkflowStepId}
+            subjectPrimaryExecutorType={subjectPrimaryExecutorType}
+          />
+        </div>
       }
     />
   );

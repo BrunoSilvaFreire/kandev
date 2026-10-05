@@ -2,6 +2,10 @@
 
 import { useCallback } from "react";
 import type { IDockviewPanelHeaderProps } from "dockview-react";
+import { removeSessionPanel } from "@/lib/state/dockview-panel-actions";
+import { useDockviewStore } from "@/lib/state/dockview-store";
+import { markEnvSessionClosed } from "@/lib/dockview-closed-sessions";
+import { closeTargets, type TabCloseMode } from "./tab-close-targets";
 
 /**
  * The close actions every dockview tab context menu offers.
@@ -10,25 +14,38 @@ import type { IDockviewPanelHeaderProps } from "dockview-react";
  * close button toward the edge of the strip leaves the context menu as the
  * reachable way to close it.
  *
- * `Close Others` deliberately spares the chat and session panels — they are
- * the task's permanent tabs and closing them is a session action, not a panel
- * one.
+ * Session panels close their tab without deleting the session. The structural
+ * `chat` panel is spared by Close Others and Close Tabs to the Right.
  */
 export function useTabContextActions(
   api: IDockviewPanelHeaderProps["api"],
   containerApi: IDockviewPanelHeaderProps["containerApi"],
 ) {
-  const handleClose = useCallback(() => {
-    const panel = containerApi.getPanel(api.id);
-    if (panel) containerApi.removePanel(panel);
-  }, [api, containerApi]);
+  const closePanel = useCallback(
+    (panelId: string) => {
+      if (panelId.startsWith("session:")) {
+        const sessionId = panelId.slice("session:".length);
+        markEnvSessionClosed(useDockviewStore.getState().currentLayoutEnvId, sessionId);
+        removeSessionPanel(containerApi, sessionId);
+        return;
+      }
+      const panel = containerApi.getPanel(panelId);
+      if (panel) containerApi.removePanel(panel);
+    },
+    [containerApi],
+  );
 
-  const handleCloseOthers = useCallback(() => {
-    const toClose = api.group.panels.filter(
-      (p) => p.id !== api.id && p.id !== "chat" && !p.id.startsWith("session:"),
-    );
-    for (const panel of toClose) containerApi.removePanel(panel);
-  }, [api, containerApi]);
+  const closeMany = useCallback(
+    (mode: TabCloseMode) => {
+      const orderedIds = api.group.panels.map((panel) => panel.id);
+      for (const panelId of closeTargets(orderedIds, api.id, mode)) closePanel(panelId);
+    },
+    [api, closePanel],
+  );
 
-  return { handleClose, handleCloseOthers };
+  const handleClose = useCallback(() => closePanel(api.id), [api.id, closePanel]);
+  const handleCloseOthers = useCallback(() => closeMany("others"), [closeMany]);
+  const handleCloseToRight = useCallback(() => closeMany("right"), [closeMany]);
+
+  return { handleClose, handleCloseOthers, handleCloseToRight };
 }

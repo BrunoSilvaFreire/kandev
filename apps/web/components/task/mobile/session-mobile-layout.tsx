@@ -2,7 +2,15 @@
 
 /* eslint-disable max-lines -- this file intentionally owns the complete mobile session composition. */
 
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { SessionMobileTopBar } from "./session-mobile-top-bar";
 import { SessionMobileBottomNav } from "./session-mobile-bottom-nav";
 import { MobileFileViewerPanel } from "./mobile-file-viewer-panel";
@@ -36,6 +44,11 @@ import { reviewItemId, useReviewItemSelection } from "../review-selection";
 import { PluginTaskPanel } from "../plugin-task-panel";
 import { PromptHistoryPanelContent } from "../prompt-history-panel-content";
 import { UsagePanelHost } from "../usage-panel/usage-panel-host";
+import { DocumentsPanel } from "../documents-panel";
+import { TaskDocumentReviewContent } from "../task-document-review-content";
+import { TaskHistoryPanel } from "../task-history-panel";
+import { useActivateTaskSession } from "../use-activate-task-session";
+import { PLAN_DOCUMENT_KEY } from "@/lib/types/task-document";
 import { parsePluginPanelId } from "@/lib/state/layout-manager/plugin-panels";
 import { useEffectiveMobilePanel, type MobileReviewSource } from "./mobile-plugin-panel-lifecycle";
 import { useTranslation } from "react-i18next";
@@ -272,13 +285,11 @@ export function MobilePanelArea({
         </div>
       )}
       {currentMobilePanel === "usage" && (
-        <div className="flex-1 min-h-0 flex flex-col" data-testid="mobile-usage-panel">
+        <MobileStaticPanel testId="mobile-usage-panel">
           <UsagePanelHost />
-        </div>
+        </MobileStaticPanel>
       )}
-      {currentMobilePanel === "plan" && (
-        <MobilePlanPanel taskId={activeTaskId} bottomNavHeight={bottomNavHeight} />
-      )}
+      <MobilePlanOrDocs panel={currentMobilePanel} taskId={activeTaskId} nav={bottomNavHeight} />
       {currentMobilePanel === "changes" && (
         <div className="flex-1 min-h-0 flex flex-col p-2">
           <MobileChangesPanel
@@ -333,6 +344,95 @@ function MobilePlanPanel({
   return (
     <div className="flex-1 min-h-0 flex flex-col p-2">
       <TaskPlanPanel taskId={taskId} visible={true} mobileBottomOffset={bottomNavHeight} />
+    </div>
+  );
+}
+
+/** Phone Task History surface; honours the per-task destination-step filter. */
+function MobileTaskHistoryPanel({ taskId }: { taskId: string | null }) {
+  const stepFilter = useAppStore((state) =>
+    taskId ? (state.mobileSession.taskHistoryStepIdByTaskId[taskId] ?? null) : null,
+  );
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const setMobileSessionPanel = useAppStore((state) => state.setMobileSessionPanel);
+  const activateSession = useActivateTaskSession();
+  const handleOpenSession = useCallback(
+    (sessionId: string) => activateSession(sessionId),
+    [activateSession],
+  );
+  const handleReview = useCallback(() => {
+    if (activeSessionId) setMobileSessionPanel(activeSessionId, "documents");
+  }, [activeSessionId, setMobileSessionPanel]);
+  return (
+    <div className="flex-1 min-h-0 flex flex-col" data-testid="mobile-task-history-panel">
+      <TaskHistoryPanel
+        taskId={taskId}
+        stepId={stepFilter}
+        onOpenSession={handleOpenSession}
+        onReview={handleReview}
+      />
+    </div>
+  );
+}
+
+/** Full-height, single-scroll container shared by static mobile panels. */
+function MobileStaticPanel({ testId, children }: { testId?: string; children: ReactNode }) {
+  return (
+    <div className="flex-1 min-h-0 flex flex-col" data-testid={testId}>
+      {children}
+    </div>
+  );
+}
+
+/** Plan and Documents share the panel area slot; each owns its own surface. */
+function MobilePlanOrDocs({
+  panel,
+  taskId,
+  nav,
+}: {
+  panel: MobileSessionPanel;
+  taskId: string | null;
+  nav: string;
+}) {
+  if (panel === "plan") return <MobilePlanPanel taskId={taskId} bottomNavHeight={nav} />;
+  if (panel === "documents") return <MobileDocumentsPanel taskId={taskId} />;
+  if (panel === "task-history") return <MobileTaskHistoryPanel taskId={taskId} />;
+  return null;
+}
+
+/**
+ * Phone Documents surface. The catalog and the read-only Review share the
+ * desktop hooks but compose as a full-height list → preview flow with an
+ * explicit Back action, never a squeezed split pane.
+ */
+function MobileDocumentsPanel({ taskId }: { taskId: string | null }) {
+  const { t } = useTranslation();
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  if (!taskId) return null;
+  if (selectedKey && selectedKey !== PLAN_DOCUMENT_KEY) {
+    return (
+      <div className="flex-1 min-h-0 flex flex-col" data-testid="mobile-documents-preview">
+        <button
+          type="button"
+          className="flex min-h-11 cursor-pointer items-center gap-1 border-b border-border/60 px-3 text-sm"
+          onClick={() => setSelectedKey(null)}
+          data-testid="mobile-documents-back"
+        >
+          {t("common:back")}
+        </button>
+        <div className="min-h-0 flex-1">
+          <TaskDocumentReviewContent
+            panelId="mobile-documents-review"
+            taskId={taskId}
+            documentKey={selectedKey}
+          />
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex-1 min-h-0 flex flex-col" data-testid="mobile-documents-list">
+      <DocumentsPanel taskId={taskId} onOpenDocument={setSelectedKey} />
     </div>
   );
 }
@@ -579,6 +679,8 @@ type SessionMobileFooterProps = {
   onPanelChange: (panel: MobileSessionPanel) => void;
   showPromptHistory: boolean;
   showUsage: boolean;
+  showDocuments: boolean;
+  showTaskHistory: boolean;
   planBadge: boolean;
   changesBadge: number;
   hasReview: boolean;
@@ -597,6 +699,8 @@ function SessionMobileFooter({
   onPanelChange,
   showPromptHistory,
   showUsage,
+  showDocuments,
+  showTaskHistory,
   planBadge,
   changesBadge,
   hasReview,
@@ -618,6 +722,8 @@ function SessionMobileFooter({
         onPanelChange={onPanelChange}
         showPromptHistory={showPromptHistory}
         showUsage={showUsage}
+        showDocuments={showDocuments}
+        showTaskHistory={showTaskHistory}
         planBadge={planBadge}
         changesBadge={changesBadge}
         hasReview={hasReview}
@@ -784,6 +890,8 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         hasReview={reviews.length > 0}
         showPromptHistory={!isPassthroughMode && effectiveSessionId !== null}
         showUsage={!isPassthroughMode && activeTaskId !== null}
+        showDocuments={!isPassthroughMode && activeTaskId !== null}
+        showTaskHistory={!isPassthroughMode && activeTaskId !== null}
         taskCanvases={props.taskCanvases}
         onOpenCanvas={props.onOpenCanvas}
       />

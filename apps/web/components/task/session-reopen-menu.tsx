@@ -11,6 +11,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { addSessionPanel } from "@/lib/state/dockview-panel-actions";
+import { clearEnvSessionClosed } from "@/lib/dockview-closed-sessions";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { AgentLogo } from "@/components/agent-logo";
 import { markSessionTabUserActivationIntent } from "@/components/task/session-tab-activation-intent";
@@ -113,6 +114,7 @@ export function SessionReopenMenuItems({
       // Reopening a session within the same task = same env, so the env switch
       // action no-ops naturally. We just create the chat panel.
       markSessionTabUserActivationIntent(sessionId);
+      clearEnvSessionClosed(useDockviewStore.getState().currentLayoutEnvId, sessionId);
       addSessionPanel(api, groupId ?? centerGroupId, sessionId, label);
     },
     [api, centerGroupId],

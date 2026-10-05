@@ -28,6 +28,8 @@ type SessionMobileBottomNavProps = {
   onPanelChange: (panel: MobileSessionPanel) => void;
   showPromptHistory?: boolean;
   showUsage?: boolean;
+  showDocuments?: boolean;
+  showTaskHistory?: boolean;
   planBadge?: boolean;
   changesBadge?: number;
   hasReview?: boolean;
@@ -71,7 +73,9 @@ function isMorePanelActive(activePanel: MobileSessionPanel): boolean {
   return (
     parsePluginPanelId(activePanel) !== undefined ||
     activePanel === "prompt-history" ||
-    activePanel === "usage"
+    activePanel === "usage" ||
+    activePanel === "documents" ||
+    activePanel === "task-history"
   );
 }
 
@@ -98,6 +102,8 @@ function buildMobileNavItems({
   onOpenPluginPicker,
   showPromptHistory,
   showUsage,
+  showDocuments,
+  showTaskHistory,
   hasTaskCanvases,
   mobilePluginPanelsAvailable,
   connectionIssueSeverity,
@@ -112,6 +118,8 @@ function buildMobileNavItems({
   onOpenPluginPicker: () => void;
   showPromptHistory: boolean;
   showUsage: boolean;
+  showDocuments: boolean;
+  showTaskHistory: boolean;
   hasTaskCanvases: boolean;
   connectionIssueSeverity: ConnectionIssueSeverity;
   t: (key: string) => string;
@@ -164,7 +172,12 @@ function buildMobileNavItems({
       label: t("task:terminal"),
       icon: <IconTerminal2 className="h-5 w-5" />,
     },
-    ...(showPromptHistory || showUsage || hasTaskCanvases || mobilePluginPanelsAvailable
+    ...(showPromptHistory ||
+    showUsage ||
+    showDocuments ||
+    showTaskHistory ||
+    hasTaskCanvases ||
+    mobilePluginPanelsAvailable
       ? [panelsNavItem(activePanel, onOpenPluginPicker, t)]
       : []),
     ...(showStatus
@@ -185,6 +198,8 @@ export function SessionMobileBottomNav({
   onPanelChange,
   showPromptHistory = false,
   showUsage = false,
+  showDocuments = false,
+  showTaskHistory = false,
   planBadge = false,
   changesBadge = 0,
   hasReview = false,
@@ -214,6 +229,8 @@ export function SessionMobileBottomNav({
         onOpenPluginPicker: () => setPluginPickerOpen(true),
         showPromptHistory,
         showUsage,
+        showDocuments,
+        showTaskHistory,
         hasTaskCanvases: taskCanvases.length > 0,
         mobilePluginPanelsAvailable,
         connectionIssueSeverity,
@@ -230,6 +247,8 @@ export function SessionMobileBottomNav({
       activePanel,
       showPromptHistory,
       showUsage,
+      showDocuments,
+      showTaskHistory,
       taskCanvases.length,
       mobilePluginPanelsAvailable,
       t,
@@ -255,6 +274,8 @@ export function SessionMobileBottomNav({
         onSelect={onPanelChange}
         showPromptHistory={showPromptHistory}
         showUsage={showUsage}
+        showDocuments={showDocuments}
+        showTaskHistory={showTaskHistory}
         taskCanvases={taskCanvases}
         onOpenCanvas={onOpenCanvas}
         taskId={taskId}

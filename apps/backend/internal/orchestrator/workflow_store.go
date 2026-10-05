@@ -878,16 +878,10 @@ func (s *workflowStore) promoteSameStepTask(ctx context.Context, candidate *mode
 		return s.pullOneFeederTask(ctx, pullRepo, limitedRepo, step, position, skipped)
 	}
 	promotionCtx := ctx
-	if s.entryRouteAttacher != nil {
-		attached, attachErr := s.entryRouteAttacher(promotionCtx, candidate.ID, "", step)
-		if attachErr != nil {
-			s.logger.Warn("skipping queued task: failed to freeze tagged step entry profile",
-				zap.String("task_id", candidate.ID), zap.Error(attachErr))
-			skipped[candidate.ID] = struct{}{}
-			return s.pullOneFeederTask(ctx, pullRepo, limitedRepo, step, position, skipped)
-		}
-		promotionCtx = attached
-	}
+	// Same-step WIP admission is not a new entry: from and to are the same
+	// step, so no task_step_transitions row is written and the route frozen at
+	// genesis must stand. Re-running selection here would re-rank a committed
+	// entry and could strand the task on a transient attachment failure.
 	if promoter, ok := s.repo.(workflowQueuedTaskPromoter); ok {
 		claimed, err := promoter.PromoteQueuedTaskIfWorkflowStepHasCapacity(promotionCtx, candidate, fromStepID, step.ID, step.WIPLimit)
 		if err != nil {

@@ -56,6 +56,13 @@ func sessionScopeCases() []deniedCase {
 		{"SetPrimarySession", func(s *Service) error {
 			return s.SetPrimarySession(context.Background(), sessionID)
 		}},
+		{"SetStepPrimarySession", func(s *Service) error {
+			return s.SetStepPrimarySession(context.Background(), sessionID, "step-1")
+		}},
+		{"ResumeWithHandoff", func(s *Service) error {
+			_, err := s.ResumeWithHandoff(context.Background(), sessionID, "continue")
+			return err
+		}},
 		{"RenameSession", func(s *Service) error {
 			return s.RenameSession(context.Background(), sessionID, "hijacked")
 		}},

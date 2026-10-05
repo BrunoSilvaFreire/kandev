@@ -243,6 +243,13 @@ type DockviewStore = {
   addTodosPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => void;
   addPromptHistoryPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => void;
   addUsagePanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => void;
+  /** Open the metadata-only task document catalog panel. */
+  addDocumentsPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => void;
+  /** Open (or retarget) the Review singleton for a document key. */
+  openDocumentReview: (documentKey: string) => void;
+  /** Open (or retarget) the singleton Task History panel, optionally filtered
+   *  to one destination step. */
+  openTaskHistory: (stepId?: string) => void;
   /** Open a PR detail panel. prKey (owner/repo/pr_number) gives multi-repo tasks one tab per PR. */
   addPRPanel: (prKey?: string, opts?: ReviewPanelOptions) => void;
   /** Open a GitLab merge request detail panel keyed by host/project/iid. */

@@ -14,6 +14,7 @@ import { useSessionResumption } from "@/hooks/domains/session/use-session-resump
 import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
 import { useTaskFocus } from "@/hooks/domains/session/use-task-focus";
 import { useAppStore } from "@/components/state-provider";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useEnsureTaskSession } from "@/hooks/domains/session/use-ensure-task-session";
 import { useExternalVcsFileLinkHydration } from "@/hooks/domains/workspace/use-external-vcs-file-link";
 import { fetchTask } from "@/lib/api";
@@ -33,6 +34,7 @@ import {
   syncActiveTaskSession,
 } from "@/components/task/task-page-content-helpers";
 import { TaskPageInner } from "@/components/task/task-page-inner";
+import { surfaceCapabilities, type AppSurface } from "@/lib/surface/surface-capabilities";
 import { TaskRemovalBoundary } from "@/components/task/task-removal-boundary";
 import { GridSpinner } from "@/components/grid-spinner";
 
@@ -46,6 +48,8 @@ type TaskPageContentProps = {
   defaultLayouts?: Record<string, Layout>;
   initialLayout?: string | null;
   officeTaskHref?: string | null;
+  surface?: AppSurface;
+  panel?: string;
 };
 
 export function useWorkflowStepsMapped() {
@@ -332,6 +336,34 @@ function useTaskPageData(
   };
 }
 
+/**
+ * Open the panel named by `?panel=` once the dockview exists. The Quick Chat
+ * panel and other no-dockview surfaces navigate here with the request, so the
+ * route has to honor it rather than leave the destination inert.
+ */
+/** Workflow steps are Task-only chrome; a Quick Chat surface gets none. */
+function useSurfaceWorkflowSteps(surface: AppSurface) {
+  const mapped = useWorkflowStepsMapped();
+  return surfaceCapabilities(surface).workflow ? mapped : [];
+}
+
+function useRequestedPanelOpen(panel: string | undefined): void {
+  useEffect(() => {
+    if (!panel) return;
+    let opened = false;
+    const openRequestedPanel = () => {
+      if (opened || !useDockviewStore.getState().api) return;
+      opened = true;
+      const dockview = useDockviewStore.getState();
+      if (panel === "plan") dockview.addPlanPanel({ quiet: false, inCenter: true });
+      else if (panel === "documents") dockview.addDocumentsPanel({ quiet: false, inCenter: true });
+    };
+    openRequestedPanel();
+    if (opened) return;
+    return useDockviewStore.subscribe(openRequestedPanel);
+  }, [panel]);
+}
+
 function TaskPageContentLive({
   task: initialTask,
   taskId: initialTaskId = null,
@@ -342,6 +374,8 @@ function TaskPageContentLive({
   defaultLayouts = {},
   initialLayout,
   officeTaskHref = null,
+  surface = "task",
+  panel,
 }: TaskPageContentProps) {
   const [isMounted, setIsMounted] = useState(false);
   const [showDebugOverlay, setShowDebugOverlay] = useState(false);
@@ -363,7 +397,7 @@ function TaskPageContentLive({
   const taskCanvasesState = useTaskCanvasesStateForTask(task, canvasesEnabled);
   useExternalVcsFileLinkHydration(task, repositories);
 
-  const workflowSteps = useWorkflowStepsMapped();
+  const workflowSteps = useSurfaceWorkflowSteps(surface);
   const sessionPanel = useSessionPanelState(effectiveSessionId);
   const agentctlStatus = useSessionAgentctl(effectiveSessionId);
   const resumption = useSessionResumption(
@@ -381,6 +415,8 @@ function TaskPageContentLive({
   useEffect(() => {
     queueMicrotask(() => setIsMounted(true));
   }, []);
+
+  useRequestedPanelOpen(panel);
 
   const contentState = resolveTaskContentState({
     isMounted,
@@ -416,6 +452,7 @@ function TaskPageContentLive({
       onTaskUnarchived={onTaskUnarchived}
       taskCanvases={taskCanvasesState.canvases}
       taskCanvasesStatus={taskCanvasesState.status}
+      surface={surface}
     />
   );
 }

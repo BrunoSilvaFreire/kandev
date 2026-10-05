@@ -5233,6 +5233,85 @@ func (s *Service) promoteNextPrimaryAfterRemoval(ctx context.Context, taskID, de
 	}
 }
 
+// setStepPrimarySessionMetadata updates the MetaKeyStepPrimarySessions whole-map on the task.
+// ponytail: read-modify-write race if two designations happen concurrently on the same task.
+// If concurrent writes become a problem, move to a dedicated table with PK (task_id, step_id).
+func (s *Service) setStepPrimarySessionMetadata(ctx context.Context, task *models.Task, sessionID, stepID string) error {
+	currentMap := models.StepPrimarySessions(task.Metadata)
+	if currentMap == nil {
+		currentMap = make(map[string]string)
+	}
+	currentMap[stepID] = sessionID
+	return s.repo.SetTaskMetadataKey(ctx, task.ID, models.MetaKeyStepPrimarySessions, currentMap)
+}
+
+func (s *Service) validateStepPrimarySessionAndTask(ctx context.Context, sessionID, stepID string) (*models.Task, error) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session: %w", err)
+	}
+	if session == nil {
+		return nil, fmt.Errorf("session not found")
+	}
+
+	task, err := s.repo.GetTask(ctx, session.TaskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get task: %w", err)
+	}
+	if task == nil {
+		return nil, fmt.Errorf("task not found")
+	}
+
+	if s.workflowStepGetter == nil {
+		return nil, fmt.Errorf("workflow step getter unavailable")
+	}
+
+	step, err := s.workflowStepGetter.GetStep(ctx, stepID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get step: %w", err)
+	}
+	if step == nil {
+		return nil, fmt.Errorf("step not found")
+	}
+
+	if task.WorkflowID == "" || step.WorkflowID != task.WorkflowID {
+		return nil, fmt.Errorf("step does not belong to task workflow")
+	}
+
+	return task, nil
+}
+
+// SetStepPrimarySession records a designated primary session for a specific workflow step
+// of the session's task, and broadcasts task.updated.
+func (s *Service) SetStepPrimarySession(ctx context.Context, sessionID, stepID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	stepID = strings.TrimSpace(stepID)
+	if sessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+	if stepID == "" {
+		return fmt.Errorf("step id is required")
+	}
+	if err := s.authorizeSession(ctx, sessionID); err != nil {
+		return err
+	}
+
+	task, err := s.validateStepPrimarySessionAndTask(ctx, sessionID, stepID)
+	if err != nil {
+		return err
+	}
+
+	if err := s.setStepPrimarySessionMetadata(ctx, task, sessionID, stepID); err != nil {
+		return fmt.Errorf("failed to set step primary session metadata: %w", err)
+	}
+
+	updatedTask, err := s.repo.GetTask(ctx, task.ID)
+	if err == nil && updatedTask != nil {
+		s.publishTaskUpdated(ctx, updatedTask)
+	}
+	return nil
+}
+
 // SetPrimarySession marks a session as the primary session for its task
 // and broadcasts a task.updated event so the frontend reflects the change.
 func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error {
@@ -5240,9 +5319,28 @@ func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error
 		return err
 	}
 
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to get session: %w", err)
+	}
+
 	if err := s.repo.SetSessionPrimary(ctx, sessionID); err != nil {
 		return fmt.Errorf("failed to set session as primary: %w", err)
 	}
+
+	if session != nil && session.TaskID != "" {
+		task, taskErr := s.repo.GetTask(ctx, session.TaskID)
+		if taskErr == nil && task != nil && task.WorkflowStepID != "" {
+			if setErr := s.setStepPrimarySessionMetadata(ctx, task, sessionID, task.WorkflowStepID); setErr != nil {
+				s.logger.Warn("failed to record step primary designation during SetPrimarySession",
+					zap.String("session_id", sessionID),
+					zap.String("task_id", session.TaskID),
+					zap.String("step_id", task.WorkflowStepID),
+					zap.Error(setErr))
+			}
+		}
+	}
+
 	s.publishPrimarySessionUpdate(ctx, "", sessionID)
 	return nil
 }
