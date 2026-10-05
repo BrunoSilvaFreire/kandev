@@ -29,11 +29,20 @@ export type MessageSearchHit = {
   type: string;
   snippet: string;
   created_at: string;
+  /** Task-scope enrichment; absent for a session-scoped search. */
+  session_id?: string;
+  session_name?: string;
+  agent_profile_id?: string;
+  /** Immutable turn-start step id, or null when the turn had no stamp. */
+  workflow_step_id?: string | null;
 };
 
 export type SearchMessagesResponse = {
   hits: MessageSearchHit[];
   total: number;
+  /** Task-scope keyset pagination; absent for a session-scoped search. */
+  has_more?: boolean;
+  next_cursor?: string;
 };
 
 /** Search messages in a single session via WebSocket. */
@@ -49,6 +58,25 @@ export async function searchSessionMessages(
     { session_id: sessionId, query, limit },
     10000,
   );
+}
+
+/** Search every message in a task via WebSocket, active session first. */
+export async function searchTaskMessages(
+  taskId: string,
+  activeSessionId: string | null | undefined,
+  query: string,
+  options: { limit?: number; cursor?: string } = {},
+): Promise<SearchMessagesResponse> {
+  const client = getWebSocketClient();
+  if (!client) return { hits: [], total: 0 };
+  const payload: Record<string, string | number> = {
+    task_id: taskId,
+    query,
+    limit: options.limit ?? 50,
+  };
+  if (activeSessionId) payload.active_session_id = activeSessionId;
+  if (options.cursor) payload.cursor = options.cursor;
+  return client.request<SearchMessagesResponse>("message.search", payload, 10000);
 }
 
 /**
@@ -204,6 +232,30 @@ export async function authenticateSession(sessionId: string, methodId: string) {
   return fetchJson<{ ok: boolean }>(`/api/v1/task-sessions/${sessionId}/authenticate`, {
     init: { method: "POST", body: JSON.stringify({ method_id: methodId }) },
   });
+}
+
+export type ResumeWithHandoffResponse = {
+  handoff: string;
+  prompt: string;
+  sent: boolean;
+};
+
+export async function resumeWithHandoff(
+  sessionId: string,
+  instructions?: string,
+  options?: ApiRequestOptions,
+): Promise<ResumeWithHandoffResponse> {
+  return fetchJson<ResumeWithHandoffResponse>(
+    `/api/v1/task-sessions/${sessionId}/resume-with-handoff`,
+    {
+      ...options,
+      init: {
+        method: "POST",
+        body: JSON.stringify({ instructions: instructions ?? "" }),
+        ...(options?.init ?? {}),
+      },
+    },
+  );
 }
 
 export { launchSession, type LaunchSessionResponse } from "@/lib/services/session-launch-service";

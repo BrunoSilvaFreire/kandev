@@ -44,8 +44,14 @@ import { PluginPanelTab } from "./plugin-panel-tab";
 import { PromptHistoryContent } from "./prompt-history-panel-host";
 import { TodosContent } from "./todos-panel-content";
 import { UsagePanelHost } from "./usage-panel/usage-panel-host";
+import { DocumentsPanel } from "./documents-panel";
+import { TaskDocumentReviewContent } from "./task-document-review-content";
+import { TaskHistoryPanel } from "./task-history-panel";
+import { useActivateTaskSession } from "./use-activate-task-session";
+import { PLAN_DOCUMENT_KEY } from "@/lib/types/task-document";
 
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
+import { panelTitle } from "@/lib/state/layout-manager/panel-title";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { usePortalSlot } from "@/lib/layout/panel-portal-host";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "@/lib/state/dockview-env-scoped-components";
@@ -125,6 +131,8 @@ export const dockviewComponents: Record<string, React.FunctionComponent<IDockvie
   todos: PortalSlot,
   "prompt-history": PortalSlot,
   usage: PortalSlot,
+  documents: PortalSlot,
+  "task-history": PortalSlot,
   "pr-detail": PortalSlot,
   "mr-detail": PortalSlot,
   "review-detail": PortalSlot,
@@ -384,9 +392,26 @@ function FilesContent() {
   return <FilesPanel onOpenFile={handleOpenFile} />;
 }
 
-/** Render the plan panel for the active task, with the task's documents below it. */
-function PlanContent() {
+/** Resolve the requested document key from a dockview panel's params. */
+function documentKeyFromParams(params: Record<string, unknown>): string | undefined {
+  return typeof params?.documentKey === "string" ? params.documentKey : undefined;
+}
+
+/** Render the plan panel for the active task, with the task's documents below
+ *  it. A `documentKey` other than the Plan renders the read-only Review
+ *  surface instead, reusing the same singleton panel. */
+function PlanContent({ panelId, params }: { panelId: string; params: Record<string, unknown> }) {
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
+  const documentKey = documentKeyFromParams(params);
+  const isPlan = !documentKey || documentKey === PLAN_DOCUMENT_KEY;
+  useEffect(() => {
+    if (isPlan) setPanelTitle(panelId, panelTitle("plan"));
+  }, [isPlan, panelId]);
+  if (!isPlan && taskId) {
+    return (
+      <TaskDocumentReviewContent panelId={panelId} taskId={taskId} documentKey={documentKey} />
+    );
+  }
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="plan-panel-with-documents">
       <div className="min-h-0 flex-1">
@@ -401,6 +426,34 @@ function PlanContent() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** Render the metadata-only task document catalog, opening a selected
+ *  document in the shared Review singleton. */
+function DocumentsContent() {
+  const taskId = useAppStore((state) => state.tasks.activeTaskId);
+  const openDocumentReview = useDockviewStore((s) => s.openDocumentReview);
+  return <DocumentsPanel taskId={taskId} onOpenDocument={openDocumentReview} />;
+}
+
+/** Task activity timeline; `params.stepId` narrows it to one step's visits. */
+function TaskHistoryContent({ params }: { params: Record<string, unknown> }) {
+  const taskId = useAppStore((state) => state.tasks.activeTaskId);
+  const openDocumentReview = useDockviewStore((s) => s.openDocumentReview);
+  const activateSession = useActivateTaskSession();
+  const stepId = typeof params?.stepId === "string" ? params.stepId : null;
+  const handleOpenSession = useCallback(
+    (sessionId: string) => activateSession(sessionId),
+    [activateSession],
+  );
+  return (
+    <TaskHistoryPanel
+      taskId={taskId}
+      stepId={stepId}
+      onOpenSession={handleOpenSession}
+      onReview={openDocumentReview}
+    />
   );
 }
 
@@ -438,10 +491,12 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   terminal: (panelId, params) => <TerminalPanel panelId={panelId} params={params} />,
   browser: (panelId, params) => <BrowserPanel panelId={panelId} params={params} />,
   vscode: (panelId) => <VscodePanel panelId={panelId} />,
-  plan: () => <PlanContent />,
+  plan: (panelId, params) => <PlanContent panelId={panelId} params={params} />,
   todos: () => <TodosContent />,
   "prompt-history": () => <PromptHistoryContent />,
   usage: () => <UsagePanelHost />,
+  documents: () => <DocumentsContent />,
+  "task-history": (_panelId, params) => <TaskHistoryContent params={params} />,
   "pr-detail": (panelId, params) => (
     <ReviewDetailPanelComponent panelId={panelId} params={params} />
   ),

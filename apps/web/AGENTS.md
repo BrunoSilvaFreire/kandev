@@ -186,8 +186,8 @@ surface.
   migrating specs; JSX and Playwright only support one `data-testid` attribute.
 - **Dockview session activation:** audit pointer/keyboard tabs, shortcuts,
   reopen/menu actions, and close controls; combine store state with
-  `api.isActive`, clear same-session intent, and treat default-tab close as
-  delete rather than session switching.
+  `api.isActive`, clear same-session intent, and keep tab close distinct from
+  session delete (see [REFERENCE.md](REFERENCE.md)).
 - **Conditional review panels:** show `pr-detail` only for active tasks with a
   linked PR/MR; default layouts only provide preferred placement. Hydrated review
   loss removes canonical panels, while restoration/maximized and offered/dismissed
@@ -291,7 +291,7 @@ and `lib/plugins/types.ts` are its detailed host implementation — all three mu
 
 ## Sidebar task views
 
-`sidebarViewsByWorkspace` stores personal view state by workspace ID. Use `selectSidebarViews`, preserve workspace identity through async saves and rollback, and keep `sidebarViews` only for legacy wire/hydration compatibility. The backend owns migration/defaults; writes use scoped `sidebar_view_state`, never legacy global fields.
+`sidebarViewsByWorkspace` stores personal view state by workspace ID. Use `selectSidebarViews`, preserve workspace identity through async saves and rollback, and keep `sidebarViews` only for legacy wire/hydration compatibility. The backend owns migration/defaults; writes use scoped `sidebar_view_state`, never legacy global fields. Shared view-model and tab-close contracts: [REFERENCE.md](REFERENCE.md).
 
 ## Testing notes
 

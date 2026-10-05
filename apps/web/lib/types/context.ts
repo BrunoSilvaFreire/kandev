@@ -4,6 +4,7 @@ import type {
   PRFeedbackComment,
   WalkthroughComment,
   AgentMessageComment,
+  DocumentComment,
 } from "@/lib/state/slices/comments";
 import type { FileAttachment } from "@/components/task/chat/file-attachment";
 import type { TaskPreviewFeedback } from "@/lib/types/http";
@@ -85,6 +86,11 @@ export type AgentMessageCommentContextItem = ContextItemBase & {
   comments: AgentMessageComment[];
 };
 
+export type DocumentCommentContextItem = ContextItemBase & {
+  kind: "document-comment";
+  comments: DocumentComment[];
+};
+
 export type ContextItem =
   | PlanContextItem
   | FileContextItem
@@ -96,6 +102,7 @@ export type ContextItem =
   | FileAttachmentContextItem
   | PRFeedbackContextItem
   | WalkthroughCommentContextItem
-  | AgentMessageCommentContextItem;
+  | AgentMessageCommentContextItem
+  | DocumentCommentContextItem;
 
 export type ContextItemKind = ContextItem["kind"];

@@ -4,6 +4,7 @@ import {
   IconBrandVscode,
   IconChartBar,
   IconDeviceDesktop,
+  IconFileDescription,
   IconFileText,
   IconFolder,
   IconGitBranch,
@@ -12,6 +13,7 @@ import {
   IconLayoutGrid,
   IconListCheck,
   IconNetwork,
+  IconTimeline,
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import {
@@ -321,6 +323,38 @@ function UsagePanelMenuItem({ groupId }: { groupId: string }) {
   );
 }
 
+/** "+" menu row that opens the metadata-only Documents catalog. */
+function DocumentsPanelMenuItem({ groupId }: { groupId: string }) {
+  const { t } = useTranslation();
+  const addDocumentsPanel = useDockviewStore((s) => s.addDocumentsPanel);
+  return (
+    <DropdownMenuItem
+      data-testid="add-panel-documents-item"
+      onClick={() => addDocumentsPanel({ groupId })}
+      className={MENU_ITEM_CLASS}
+    >
+      <IconFileDescription className={MENU_ICON_CLASS} />
+      {t("task:panelDocuments")}
+    </DropdownMenuItem>
+  );
+}
+
+/** "+" menu row that opens the durable task activity timeline. */
+function TaskHistoryPanelMenuItem() {
+  const { t } = useTranslation();
+  const openTaskHistory = useDockviewStore((s) => s.openTaskHistory);
+  return (
+    <DropdownMenuItem
+      data-testid="add-panel-task-history-item"
+      onClick={() => openTaskHistory()}
+      className={MENU_ITEM_CLASS}
+    >
+      <IconTimeline className={MENU_ICON_CLASS} />
+      {t("task:panelTaskHistory")}
+    </DropdownMenuItem>
+  );
+}
+
 /** Filters the linked PRs/MRs down to those whose review panel isn't already
  * open, so the "+" menu doesn't offer duplicates. */
 function missingBuiltInReviews(
@@ -407,6 +441,8 @@ export function AddPanelMenuItems({
       )}
       {!state.isPassthrough && <PromptHistoryPanelMenuItem groupId={groupId} />}
       {!state.isPassthrough && <UsagePanelMenuItem groupId={groupId} />}
+      <DocumentsPanelMenuItem groupId={groupId} />
+      <TaskHistoryPanelMenuItem />
       {!state.hasChanges && (
         <DropdownMenuItem onClick={() => addChangesPanel(groupId)} className={MENU_ITEM_CLASS}>
           <IconGitBranch className={MENU_ICON_CLASS} />

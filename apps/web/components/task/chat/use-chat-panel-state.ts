@@ -22,6 +22,7 @@ import {
   usePendingPRFeedback,
   usePendingWalkthroughComments,
   usePendingAgentMessageComments,
+  usePendingDocumentComments,
 } from "@/hooks/domains/comments/use-pending-comments";
 import { useChatContextItems } from "./use-chat-context-items";
 import { shouldSuppressPlanCommentAutoAttach } from "@/lib/approval";
@@ -33,6 +34,7 @@ import {
 import type { ReviewComment } from "@/lib/state/slices/comments";
 import type {
   AgentMessageComment,
+  DocumentComment,
   PlanComment,
   PRFeedbackComment,
   WalkthroughComment,
@@ -61,6 +63,7 @@ export type CommentsState = {
   pendingPRFeedback: PRFeedbackComment[];
   walkthroughComments: WalkthroughComment[];
   messageComments: AgentMessageComment[];
+  documentComments: DocumentComment[];
   markCommentsSent: (ids: string[]) => void;
   handleRemoveCommentFile: (filePath: string) => void;
   handleRemoveComment: (commentId: string) => void;
@@ -69,6 +72,7 @@ export type CommentsState = {
   handleRemoveWalkthroughComment: (commentId: string) => void;
   handleClearWalkthroughComments: () => void;
   handleClearMessageComments: () => void;
+  handleClearDocumentComments: () => void;
   clearSessionPlanComments: () => void;
 };
 
@@ -294,6 +298,7 @@ export function useCommentsState(
   const pendingPRFeedback = usePendingPRFeedback(resolvedSessionId);
   const walkthroughComments = usePendingWalkthroughComments(resolvedSessionId);
   const messageComments = usePendingAgentMessageComments(resolvedSessionId);
+  const documentComments = usePendingDocumentComments(resolvedSessionId);
   const markCommentsSent = useCommentsStore((state) => state.markCommentsSent);
   const removeComment = useCommentsStore((state) => state.removeComment);
   const clearSessionPlanComments = useCallback(() => {
@@ -333,12 +338,16 @@ export function useCommentsState(
   const handleClearMessageComments = useCallback(() => {
     removePendingCommentsForSession(resolvedSessionId, "agent-message");
   }, [resolvedSessionId]);
+  const handleClearDocumentComments = useCallback(() => {
+    removePendingCommentsForSession(resolvedSessionId, "document");
+  }, [resolvedSessionId]);
   return {
     planComments,
     pendingCommentsByFile,
     pendingPRFeedback,
     walkthroughComments,
     messageComments,
+    documentComments,
     markCommentsSent,
     handleRemoveCommentFile,
     handleRemoveComment,
@@ -347,6 +356,7 @@ export function useCommentsState(
     handleRemoveWalkthroughComment,
     handleClearWalkthroughComments,
     handleClearMessageComments,
+    handleClearDocumentComments,
     clearSessionPlanComments,
   };
 }
@@ -518,7 +528,9 @@ export function useChatPanelState({
   // While an approval bundle is pending, its Revise answer owns the task's
   // pending plan comments. Auto-attaching them to an unrelated chat message
   // would consume them behind the approval's back.
-  const approvalPending = shouldSuppressPlanCommentAutoAttach(sessionData.pendingClarification?.metadata);
+  const approvalPending = shouldSuppressPlanCommentAutoAttach(
+    sessionData.pendingClarification?.metadata,
+  );
   const effectivePlanComments = approvalPending ? EMPTY_PLAN_COMMENTS : comments.planComments;
   const previewFeedbackState = usePreviewFeedback(taskId);
   const planCommentMigration = usePlanCommentMigration(taskId);

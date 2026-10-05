@@ -73,7 +73,7 @@ describe("resolveDestinations", () => {
       ctx: KANBAN,
     });
 
-    expect(ids(resolved)).toEqual(["stats", "settings"]);
+    expect(ids(resolved)).toEqual(["stats", "usage", "quickChats", "settings"]);
   });
 
   it("resolves workspace-dependent hrefs from the nav context", () => {
@@ -184,6 +184,12 @@ describe("resolveDestinations with plugin items", () => {
     // matches this multi-section query (here: settings, a utilities entry),
     // so the order is stats, settings, plugin, not interleaved with
     // insights-section entries.
-    expect(ids(resolved)).toEqual(["stats", "settings", "plugin:acme:board"]);
+    expect(ids(resolved)).toEqual([
+      "stats",
+      "usage",
+      "quickChats",
+      "settings",
+      "plugin:acme:board",
+    ]);
   });
 });

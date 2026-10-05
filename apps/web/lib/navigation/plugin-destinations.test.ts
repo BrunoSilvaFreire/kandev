@@ -156,11 +156,17 @@ describe("plugin destinations", () => {
   });
 
   it("routes sidebar-footer items to the insights section, on both surfaces", () => {
-    // The insights section also carries the first-party `stats` destination;
-    // it always precedes plugin entries (see resolve-destinations.test.ts for
-    // the ordering contract).
+    // The insights section also carries first-party destinations; they always
+    // precede plugin entries (see resolve-destinations.test.ts for the ordering
+    // contract). `usage` and `quickChats` are mobile-menu-only manifest entries,
+    // so the sidebar list stays `stats` plus the plugin.
     expect(ids(insightsIn("sidebar", pluginItems))).toEqual(["stats", ACME_BOARD_ID]);
-    expect(ids(insightsIn("mobileMenu", pluginItems))).toEqual(["stats", ACME_BOARD_ID]);
+    expect(ids(insightsIn("mobileMenu", pluginItems))).toEqual([
+      "stats",
+      "usage",
+      "quickChats",
+      ACME_BOARD_ID,
+    ]);
   });
 
   it("moves, does not add: a sidebar-footer item is absent from the plugins group on both surfaces", () => {

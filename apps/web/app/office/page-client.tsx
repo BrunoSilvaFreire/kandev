@@ -211,8 +211,14 @@ function SubscriptionUsageCard({ agents }: { agents: AgentProfile[] }) {
 
   return (
     <Card>
-      <div className="p-4 border-b border-border">
+      <div className="flex items-center justify-between p-4 border-b border-border">
         <h2 className="text-sm font-semibold">{t("office:subscriptionQuota")}</h2>
+        <Link
+          href="/usage"
+          className="cursor-pointer text-xs text-muted-foreground hover:text-foreground"
+        >
+          {t("office:viewUsage")}
+        </Link>
       </div>
       <div className="divide-y divide-border">
         {subscriptionAgents.map((agent) => (

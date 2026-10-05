@@ -2080,4 +2080,7 @@ export const i18nGuardFiles = [
   "lib/ws/handlers/notifications.ts",
   "lib/ws/handlers/quick-chat.ts",
   "lib/ws/use-websocket.tsx",
+  "app/usage/**/*.{ts,tsx}",
+  "components/usage/**/*.{ts,tsx}",
+  "hooks/domains/usage/**/*.{ts,tsx}",
 ];

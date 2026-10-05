@@ -579,6 +579,20 @@ export class ApiClient {
     });
   }
 
+  /** Create or update a task document through the shared task-document route.
+   *  Used by specs that need a catalog entry before opening Documents. */
+  async writeTaskDocument(
+    taskId: string,
+    key: string,
+    document: { type: string; title?: string; content: string },
+  ): Promise<void> {
+    await this.request("PUT", `/api/v1/tasks/${taskId}/documents/${encodeURIComponent(key)}`, {
+      type: document.type,
+      title: document.title ?? "",
+      content: document.content,
+    });
+  }
+
   async createTask(
     workspaceId: string,
     title: string,
@@ -1476,6 +1490,7 @@ export class ApiClient {
       errorMessage?: string;
       commandCount?: number;
       metadata?: Record<string, unknown>;
+      isPrimary?: boolean;
     },
   ): Promise<{ session_id: string }> {
     const body: Record<string, unknown> = {
@@ -1490,7 +1505,26 @@ export class ApiClient {
     if (opts.errorMessage !== undefined) body.error_message = opts.errorMessage;
     if (opts.commandCount !== undefined) body.command_count = opts.commandCount;
     if (opts.metadata !== undefined) body.metadata = opts.metadata;
+    if (opts.isPrimary !== undefined) body.is_primary = opts.isPrimary;
     return this.request("POST", "/api/v1/_test/task-sessions", body);
+  }
+
+  /**
+   * Seeds a task_session_routes ledger row. Used by the activity/History specs
+   * to exercise route attribution (routed profile, outcome/reason, Open on the
+   * persisted destination) without a real session-routing run.
+   */
+  async seedSessionRoute(body: {
+    task_id: string;
+    destination_workflow_step_id: string;
+    destination_session_id?: string;
+    source_session_id?: string;
+    agent_profile_id?: string;
+    outcome?: string;
+    reason?: string;
+    workflow_step_transition_id?: number;
+  }): Promise<{ id: string }> {
+    return this.request("POST", "/api/v1/_test/session-routes", body);
   }
 
   /**

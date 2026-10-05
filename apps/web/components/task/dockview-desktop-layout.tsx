@@ -145,6 +145,8 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   todos: PortalSlot,
   "prompt-history": PortalSlot,
   usage: PortalSlot,
+  documents: PortalSlot,
+  "task-history": PortalSlot,
   "pr-detail": PortalSlot,
   "mr-detail": PortalSlot,
   "review-detail": PortalSlot,

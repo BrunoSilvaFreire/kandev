@@ -31,6 +31,7 @@ import { ClarificationOverlayTopBar } from "./clarification-overlay-header";
 import { ClarificationStatusBanner } from "./clarification-status-banner";
 import { ClarificationMarkdown } from "./clarification-markdown";
 import { ConnectedApprovalRequestCard } from "./approval-request-card";
+import { ContinuationRecoveryCard } from "./continuation-recovery-card";
 import { useTranslation } from "react-i18next";
 
 type ClarificationInputOverlayProps = {
@@ -539,6 +540,39 @@ function buildQuestionHandlers(ctx: QuestionHandlerCtx): QuestionHandlers {
     },
   };
 }
+function renderSpecializedClarificationCard(
+  meta: SingleQuestionMeta,
+  isSubmitting: boolean,
+  submitAnswers: AnswerSubmitter,
+) {
+  const onSubmit = (answer: ClarificationAnswer) => submitAnswers({ [meta.questionId]: answer });
+  const approval = meta.metadata.approval;
+  if (approval) {
+    return (
+      <ConnectedApprovalRequestCard
+        approval={approval}
+        summary={meta.metadata.context ?? null}
+        requestCreatedAt={meta.message.created_at ?? null}
+        isSubmitting={isSubmitting}
+        onSubmitAnswer={onSubmit}
+      />
+    );
+  }
+  const recovery = meta.metadata.continuation_recovery;
+  if (recovery) {
+    return (
+      <ContinuationRecoveryCard
+        recovery={recovery}
+        questionId={meta.questionId}
+        summary={meta.metadata.context ?? null}
+        isSubmitting={isSubmitting}
+        onSubmitAnswer={onSubmit}
+      />
+    );
+  }
+  return null;
+}
+
 function ClarificationCarouselBody({
   sortedMessages,
   meta,
@@ -568,18 +602,8 @@ function ClarificationCarouselBody({
 
   if (!meta) return null;
 
-  const approval = meta.metadata.approval;
-  if (approval) {
-    return (
-      <ConnectedApprovalRequestCard
-        approval={approval}
-        summary={meta.metadata.context ?? null}
-        requestCreatedAt={meta.message.created_at ?? null}
-        isSubmitting={isSubmitting}
-        onSubmitAnswer={(answer) => submitAnswers({ [meta.questionId]: answer })}
-      />
-    );
-  }
+  const specialized = renderSpecializedClarificationCard(meta, isSubmitting, submitAnswers);
+  if (specialized) return specialized;
 
   const { selectedOption, customCommittedText, draft, customActive } = deriveSelectionState(
     meta,
