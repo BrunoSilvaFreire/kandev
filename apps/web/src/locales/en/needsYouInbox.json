@@ -36,5 +36,11 @@
   "tabLabel": "Needs you",
   "failedClauseSome_one": "This list does not count failed tasks. {{count}} task has also failed. See the Failed tab.",
   "failedClauseSome_other": "This list does not count failed tasks. {{count}} tasks have also failed. See the Failed tab.",
-  "failedClauseNone": "This list does not count failed tasks. None have failed in this workspace right now; check the Failed tab any time."
+  "failedClauseNone": "This list does not count failed tasks. None have failed in this workspace right now; check the Failed tab any time.",
+  "triageTabLabel": "Triage",
+  "triageEmpty": "Nothing needs your attention right now.",
+  "triageCaption": "Possible questions are advisory hints; open the conversation to reply.",
+  "triageKindClarification": "Clarification",
+  "triageKindStaleReview": "Stale review",
+  "triageKindPossibleQuestion": "Possible question"
 }

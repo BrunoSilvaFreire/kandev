@@ -3,6 +3,7 @@ package skill
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"go.uber.org/zap"
 
@@ -104,4 +105,23 @@ func (d *Deployer) Deploy(ctx context.Context, req Request) (DeployResult, error
 	manifest := d.buildManifest(ctx, req.Profile, d.workspaceSlugFn(req.WorkspaceID), req.AdditionalSkillSlugs, req.OfficeRuntime)
 	result := d.deliver(ctx, manifest, req.ExecutorType, req.WorkspacePath)
 	return result, nil
+}
+
+// ValidateSkills verifies that all skills referenced by the profile can be resolved
+// and are compatible with the runtime environment (e.g. system skills require officeRuntime).
+func (d *Deployer) ValidateSkills(ctx context.Context, profile *settingsmodels.AgentProfile, officeRuntime bool) error {
+	if d == nil || d.skillReader == nil || profile == nil {
+		return nil
+	}
+	keys := mergedSkillKeys(profile)
+	for _, key := range keys {
+		skill, err := d.skillReader.GetSkillFromConfig(ctx, key)
+		if err != nil || skill == nil {
+			return fmt.Errorf("referenced skill %q could not be resolved for profile %q", key, profile.Name)
+		}
+		if skill.IsSystem && !officeRuntime {
+			return fmt.Errorf("referenced skill %q is an Office system skill and cannot be resolved in a non-Office workflow step", key)
+		}
+	}
+	return nil
 }

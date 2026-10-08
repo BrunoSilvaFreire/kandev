@@ -19,6 +19,8 @@ type ApprovalSubjectReader interface {
 	// version. For a task plan this is the plan write version; for a document
 	// it is the document's current version.
 	CurrentVersion(ctx context.Context, taskID, subject, documentKey string) (string, error)
+	// CurrentPlanRevision returns the task's latest plan revision ID.
+	CurrentPlanRevision(ctx context.Context, taskID string) (string, error)
 	// RenderPlanComments validates refs against the task's current pending
 	// comments and returns the canonical Markdown block plus the resolved
 	// comment ids in the same order.
@@ -73,6 +75,7 @@ func decodeApprovalMeta(raw any) *ApprovalMeta {
 		meta.DocumentKey, _ = v["document_key"].(string)
 		meta.Title, _ = v["title"].(string)
 		meta.VersionAtRequest, _ = v["version_at_request"].(string)
+		meta.PlanRevisionID, _ = v["plan_revision_id"].(string)
 		if meta.Subject == "" {
 			return nil
 		}
@@ -232,6 +235,16 @@ func (r *Resolver) FillApprovalVersion(ctx context.Context, taskID string, meta 
 		return
 	}
 	meta.VersionAtRequest = version
+	if meta.Subject == protocol.ApprovalSubjectTaskPlan {
+		revID, revErr := r.approvalReader.CurrentPlanRevision(ctx, taskID)
+		if revErr != nil {
+			r.logger.Warn("failed to record approval plan revision at request time",
+				zap.String("task_id", taskID),
+				zap.Error(revErr))
+			return
+		}
+		meta.PlanRevisionID = revID
+	}
 }
 
 func (r *Resolver) approvalCurrentVersion(ctx context.Context, taskID string, meta *ApprovalMeta) (string, error) {
@@ -269,8 +282,11 @@ func FormatApprovalOutcome(a *ApprovalOutcome) string {
 }
 
 // consumeApprovalComments consumes the plan comments a revise answer carried.
-// Best-effort: a failure leaves the comments pending (risking duplicate
-// feedback) but never blocks or fails the already-delivered answer.
+// Consuming the batch is feedback delivery only: it never records or implies
+// plan approval. Enrollment still requires a separate winning human approve
+// receipt bound to the plan revision and write version. It is best-effort: a
+// failure leaves the comments pending (risking duplicate feedback) but never
+// blocks or fails the already-delivered answer.
 func (r *Resolver) consumeApprovalComments(
 	ctx context.Context,
 	taskID, pendingID string,

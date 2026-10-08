@@ -175,6 +175,7 @@ func newTestTaskServiceWithWorkflowDBAndEventBus(t *testing.T) (
 	svc.SetWorkspacePolicyAttacher(testWorkspacePolicyAttacher{})
 	workflowSvc := workflowservice.NewService(workflowRepo, log)
 	t.Cleanup(func() { _ = workflowSvc.Close() })
+	svc.SetWorkflowStepGetter(workflowSvc)
 	return svc, repo, workflowcontroller.NewController(workflowSvc), workflowRepo, sqlxDB, eventBus
 }
 

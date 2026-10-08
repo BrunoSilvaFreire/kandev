@@ -36,5 +36,11 @@
   "tabLabel": "必要事項",
   "failedClauseSome_one": "この一覧は失敗した task を数えない。{{count}}件の task も失敗済み。Failed タブを見ろ。",
   "failedClauseSome_other": "この一覧は失敗した task を数えない。{{count}}件の task も失敗済み。Failed タブを見ろ。",
-  "failedClauseNone": "この一覧には失敗タスクは含まれない。今このワークスペースで失敗はない。Failed タブをいつでも確認して。"
+  "failedClauseNone": "この一覧には失敗タスクは含まれない。今このワークスペースで失敗はない。Failed タブをいつでも確認して。",
+  "triageTabLabel": "トリアージ",
+  "triageEmpty": "今すぐ対応が必要なものはありません。",
+  "triageCaption": "可能性のある質問は参考情報です。会話を開いて返信してください。",
+  "triageKindClarification": "確認事項",
+  "triageKindStaleReview": "滞留したレビュー",
+  "triageKindPossibleQuestion": "質問の可能性"
 }

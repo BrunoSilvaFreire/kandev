@@ -6,10 +6,11 @@ import (
 )
 
 const (
-	TaskCompletionEvidenceTaskRevision = "task_revision"
-	TaskCompletionEvidenceExecution    = "execution"
-	TaskCompletionEvidenceArtifact     = "artifact_revision"
-	TaskCompletionEvidenceGitHubPRHead = "github_pr_head"
+	TaskCompletionEvidenceTaskRevision  = "task_revision"
+	TaskCompletionEvidenceExecution     = "execution"
+	TaskCompletionEvidenceArtifact      = "artifact_revision"
+	TaskCompletionEvidenceGitHubPRHead  = "github_pr_head"
+	TaskCompletionEvidencePlanIncrement = "plan_increment"
 )
 
 // TaskCompletionEvidenceSubject identifies a typed, revisioned source used to
@@ -54,12 +55,15 @@ type TaskCompletionBlocker struct {
 
 // TaskCompletionGateSnapshot is the canonical task-owned completion view.
 type TaskCompletionGateSnapshot struct {
-	TaskID      string                    `json:"task_id"`
-	WorkspaceID string                    `json:"workspace_id"`
-	Revision    int64                     `json:"revision"`
-	Criteria    []TaskCompletionCriterion `json:"criteria"`
-	Blockers    []TaskCompletionBlocker   `json:"blockers,omitempty"`
-	Blocked     bool                      `json:"blocked"`
+	TaskID           string                    `json:"task_id"`
+	WorkspaceID      string                    `json:"workspace_id"`
+	Revision         int64                     `json:"revision"`
+	PlanRevisionID   string                    `json:"plan_revision_id,omitempty"`
+	PlanWriteVersion string                    `json:"plan_write_version,omitempty"`
+	PlanStale        bool                      `json:"plan_stale,omitempty"`
+	Criteria         []TaskCompletionCriterion `json:"criteria"`
+	Blockers         []TaskCompletionBlocker   `json:"blockers,omitempty"`
+	Blocked          bool                      `json:"blocked"`
 }
 
 // TaskCompletionGateHistory is an immutable criteria, evidence, or override
@@ -84,6 +88,7 @@ type TaskCompletionCriteriaChange struct {
 	WorkspaceID                 string
 	ExpectedTaskResourceVersion string
 	ExpectedRevision            int64
+	PlanRevisionID              string
 	OperationID                 string
 	PayloadDigest               string
 	ClaimFence                  TaskManagementClaimFence
@@ -139,4 +144,19 @@ func WithTaskCompletionMoveOverride(ctx context.Context, override TaskCompletion
 func TaskCompletionMoveOverrideFromContext(ctx context.Context) (TaskCompletionMoveOverride, bool) {
 	value, ok := ctx.Value(completionMoveOverrideContextKey{}).(TaskCompletionMoveOverride)
 	return value, ok
+}
+
+// TaskPlanIncrementDeclaration defines a single increment declared in a plan revision.
+type TaskPlanIncrementDeclaration struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+}
+
+// EnrollTaskPlanIncrementsRequest is the typed request to bind declared plan increments
+// from an approved plan revision to task completion criteria.
+type EnrollTaskPlanIncrementsRequest struct {
+	WorkspaceID      string                         `json:"workspace_id,omitempty"`
+	PlanRevisionID   string                         `json:"plan_revision_id"`
+	ExpectedRevision int64                          `json:"expected_revision"`
+	Increments       []TaskPlanIncrementDeclaration `json:"increments"`
 }

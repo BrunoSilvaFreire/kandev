@@ -83,6 +83,9 @@ type Services struct {
 	DynamicProfileResolver   *agentruntime.ProfileExecutionResolver
 	DynamicBindingResolver   *dynamicruntime.CredentialBindingResolver
 	Task                     *taskservice.Service
+	// UsageAdapter is the shared subscription-usage adapter. It is set once the
+	// agent runtime is wired and read when the Usage routes are registered.
+	UsageAdapter *usageProviderAdapter
 	// Org owns organizations. Always non-nil; Enabled() reports whether the
 	// multi-tenancy feature is on.
 	Org           *org.Service

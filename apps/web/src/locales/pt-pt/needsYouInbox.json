@@ -36,5 +36,11 @@
   "tabLabel": "Precisa de si",
   "failedClauseSome_one": "Esta lista não conta tarefas falhadas. {{count}} tarefa também falhou. Consulte o separador Falhadas.",
   "failedClauseSome_other": "Esta lista não conta tarefas falhadas. {{count}} tarefas também falharam. Consulte o separador Falhadas.",
-  "failedClauseNone": "Esta lista não conta tarefas falhadas. Nenhuma falhou neste espaço de trabalho neste momento; pode consultar o separador Falhadas a qualquer momento."
+  "failedClauseNone": "Esta lista não conta tarefas falhadas. Nenhuma falhou neste espaço de trabalho neste momento; pode consultar o separador Falhadas a qualquer momento.",
+  "triageTabLabel": "Triagem",
+  "triageEmpty": "Nada precisa da sua atenção neste momento.",
+  "triageCaption": "As perguntas possíveis são apenas indícios; abra a conversa para responder.",
+  "triageKindClarification": "Esclarecimento",
+  "triageKindStaleReview": "Revisão pendente",
+  "triageKindPossibleQuestion": "Pergunta possível"
 }

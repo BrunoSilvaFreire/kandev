@@ -43,6 +43,10 @@ func (f *fakeApprovalReader) CurrentVersion(_ context.Context, taskID, subject, 
 	return f.current, f.currentErr
 }
 
+func (f *fakeApprovalReader) CurrentPlanRevision(_ context.Context, taskID string) (string, error) {
+	return f.current, f.currentErr
+}
+
 func (f *fakeApprovalReader) RenderPlanComments(_ context.Context, taskID string, refs []taskmodels.TaskPlanCommentRef) (string, []string, error) {
 	f.renderCalls++
 	f.lastTaskID = taskID

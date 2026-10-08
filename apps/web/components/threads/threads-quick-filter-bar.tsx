@@ -4,6 +4,9 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { QuickFilterBar, type QuickFilterAdapter } from "@/components/view-model/quick-filter-bar";
+import { ViewGroupControl } from "@/components/view-model/view-group-control";
+import { SUPPORTED_GROUPS } from "@/lib/view-model/views";
+import type { ViewGroupKey } from "@/lib/view-model/types";
 import { useHomeQuickFilters } from "@/hooks/use-home-quick-filters";
 import { useRepositoryGroups } from "@/hooks/use-repository-groups";
 import type { ThreadCandidate } from "@/lib/threads/thread-view-query";
@@ -80,5 +83,15 @@ export function ThreadsQuickFilterBar({
     removeClause: (id) =>
       updateDraft({ filters: current.filters.filter((filter) => filter.id !== id) }),
   };
-  return <QuickFilterBar adapter={adapter} testId="threads-quick-filters" />;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <QuickFilterBar adapter={adapter} testId="threads-quick-filters" />
+      <ViewGroupControl
+        value={current.group}
+        groups={SUPPORTED_GROUPS.threads}
+        onChange={(group: ViewGroupKey) => updateDraft({ group: group as ThreadView["group"] })}
+        testId="threads-group-select"
+      />
+    </div>
+  );
 }

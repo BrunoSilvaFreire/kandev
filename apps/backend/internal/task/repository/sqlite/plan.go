@@ -15,7 +15,7 @@ import (
 
 // revisionSelectCols lists the task_plan_revisions columns in the fixed order used by
 // every SELECT in this file (and by scanRevisionRow / scanRevisionRows).
-const revisionSelectCols = `id, task_id, revision_number, title, content, author_kind, author_name, revert_of_revision_id, workflow_step_id, workflow_step_name, workflow_step_color, created_at, updated_at`
+const revisionSelectCols = `id, task_id, revision_number, title, content, author_kind, author_name, revert_of_revision_id, workflow_step_id, workflow_step_name, workflow_step_color, created_at, updated_at, write_version`
 
 // authorKindAgent matches the task_plan_revisions.author_kind column DEFAULT
 // and is the fallback for unknown values when persisting plan history rows.
@@ -155,12 +155,12 @@ func (r *Repository) InsertTaskPlanRevision(ctx context.Context, rev *models.Tas
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_plan_revisions
 			(`+revisionSelectCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		rev.ID, rev.TaskID, rev.RevisionNumber, rev.Title, rev.Content,
 		rev.AuthorKind, rev.AuthorName, rev.RevertOfRevisionID,
 		rev.WorkflowStepID, rev.WorkflowStepName, rev.WorkflowStepColor,
-		rev.CreatedAt, rev.UpdatedAt)
+		rev.CreatedAt, rev.UpdatedAt, rev.WriteVersion)
 	if err != nil {
 		return fmt.Errorf("failed to insert task plan revision: %w", err)
 	}
@@ -221,7 +221,7 @@ func (r *Repository) ListTaskPlanRevisions(ctx context.Context, taskID string, l
 			&rev.ID, &rev.TaskID, &rev.RevisionNumber, &rev.Title, &rev.Content,
 			&rev.AuthorKind, &rev.AuthorName, &revertOf,
 			&rev.WorkflowStepID, &rev.WorkflowStepName, &rev.WorkflowStepColor,
-			&rev.CreatedAt, &rev.UpdatedAt,
+			&rev.CreatedAt, &rev.UpdatedAt, &rev.WriteVersion,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan task plan revision: %w", err)
 		}
@@ -317,7 +317,7 @@ func (r *Repository) ListTaskPlanRevisionMetadata(
 	ctx context.Context, taskID string, beforeRevisionNumber, limit int,
 ) ([]*models.TaskPlanRevision, error) {
 	contentBytes := dialect.ByteLength(r.db.DriverName(), "content")
-	query := `SELECT id, task_id, revision_number, title, ` + contentBytes + `, author_kind, author_name, revert_of_revision_id, workflow_step_id, workflow_step_name, workflow_step_color, created_at, updated_at FROM task_plan_revisions WHERE task_id = ?`
+	query := `SELECT id, task_id, revision_number, title, ` + contentBytes + `, author_kind, author_name, revert_of_revision_id, workflow_step_id, workflow_step_name, workflow_step_color, created_at, updated_at, write_version FROM task_plan_revisions WHERE task_id = ?`
 	args := []interface{}{taskID}
 	if beforeRevisionNumber > 0 {
 		query += ` AND revision_number < ?`
@@ -343,7 +343,7 @@ func (r *Repository) ListTaskPlanRevisionMetadata(
 			&rev.ID, &rev.TaskID, &rev.RevisionNumber, &rev.Title, &contentBytes,
 			&rev.AuthorKind, &rev.AuthorName, &revertOf,
 			&rev.WorkflowStepID, &rev.WorkflowStepName, &rev.WorkflowStepColor,
-			&rev.CreatedAt, &rev.UpdatedAt,
+			&rev.CreatedAt, &rev.UpdatedAt, &rev.WriteVersion,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan task plan revision metadata: %w", err)
 		}
@@ -431,6 +431,7 @@ func (r *Repository) WritePlanRevision(
 		return err
 	}
 	rev.Title = head.Title
+	rev.WriteVersion = writeVersion
 	if coalesceLatestID != nil && *coalesceLatestID != "" {
 		if err := mergeRevisionInTx(ctx, tx, r.db, rev, *coalesceLatestID, now); err != nil {
 			return err
@@ -542,9 +543,9 @@ func upsertPlanHead(
 func mergeRevisionInTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, rev *models.TaskPlanRevision, latestID string, now time.Time) error {
 	result, err := tx.ExecContext(ctx, db.Rebind(`
 		UPDATE task_plan_revisions
-		SET title = ?, content = ?, updated_at = ?
+		SET title = ?, content = ?, updated_at = ?, write_version = ?
 		WHERE id = ?
-	`), rev.Title, rev.Content, now, latestID)
+	`), rev.Title, rev.Content, now, rev.WriteVersion, latestID)
 	if err != nil {
 		return fmt.Errorf("merge plan revision: %w", err)
 	}
@@ -577,16 +578,16 @@ func insertNewRevisionInTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, rev *m
 	rev.UpdatedAt = now
 	result, err := tx.ExecContext(ctx, db.Rebind(`
 		INSERT INTO task_plan_revisions
-			(id, task_id, revision_number, title, content, author_kind, author_name, revert_of_revision_id, workflow_step_id, workflow_step_name, workflow_step_color, created_at, updated_at)
+			(id, task_id, revision_number, title, content, author_kind, author_name, revert_of_revision_id, workflow_step_id, workflow_step_name, workflow_step_color, created_at, updated_at, write_version)
 		SELECT ?, ?, ?, ?, ?, ?, ?, ?,
-			COALESCE(ws.id, ''), COALESCE(ws.name, ''), COALESCE(ws.color, ''), ?, ?
+			COALESCE(ws.id, ''), COALESCE(ws.name, ''), COALESCE(ws.color, ''), ?, ?, ?
 		FROM tasks AS t
 		LEFT JOIN workflow_steps AS ws ON ws.id = t.workflow_step_id
 		WHERE t.id = ?
 	`),
 		rev.ID, rev.TaskID, rev.RevisionNumber, rev.Title, rev.Content,
 		rev.AuthorKind, rev.AuthorName, rev.RevertOfRevisionID,
-		rev.CreatedAt, rev.UpdatedAt, rev.TaskID)
+		rev.CreatedAt, rev.UpdatedAt, rev.WriteVersion, rev.TaskID)
 	if err != nil {
 		return fmt.Errorf("insert plan revision: %w", err)
 	}
@@ -628,7 +629,7 @@ func (r *Repository) scanRevisionRow(row *sql.Row) (*models.TaskPlanRevision, er
 		&rev.ID, &rev.TaskID, &rev.RevisionNumber, &rev.Title, &rev.Content,
 		&rev.AuthorKind, &rev.AuthorName, &revertOf,
 		&rev.WorkflowStepID, &rev.WorkflowStepName, &rev.WorkflowStepColor,
-		&rev.CreatedAt, &rev.UpdatedAt,
+		&rev.CreatedAt, &rev.UpdatedAt, &rev.WriteVersion,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil

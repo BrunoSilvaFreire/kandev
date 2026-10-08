@@ -569,9 +569,27 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 			task_id TEXT PRIMARY KEY,
 			workspace_id TEXT NOT NULL,
 			revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+			plan_revision_id TEXT NOT NULL DEFAULT '',
 			updated_at TIMESTAMP NOT NULL,
 			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		)`)
+	_ = r.migrate.Apply("task_completion_sets.plan_revision_id", `ALTER TABLE task_completion_sets ADD COLUMN plan_revision_id TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("task_completion_sets.plan_write_version", `ALTER TABLE task_completion_sets ADD COLUMN plan_write_version TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("task_plan_revisions.write_version", `ALTER TABLE task_plan_revisions ADD COLUMN write_version TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("task_plan_approval_receipts.table", `
+		CREATE TABLE IF NOT EXISTS task_plan_approval_receipts (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			plan_revision_id TEXT NOT NULL,
+			write_version TEXT NOT NULL,
+			decision TEXT NOT NULL,
+			subject_edited INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`)
+	_ = r.migrate.Apply("task_plan_approval_receipts.lookup", `
+		CREATE INDEX IF NOT EXISTS idx_plan_approval_receipts_lookup
+			ON task_plan_approval_receipts(task_id, plan_revision_id, write_version)`)
 	_ = r.migrate.Apply("task_completion_criteria.table", `
 		CREATE TABLE IF NOT EXISTS task_completion_criteria (
 			task_id TEXT NOT NULL,

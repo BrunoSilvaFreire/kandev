@@ -67,6 +67,20 @@ vi.mock("@/components/quick-chat/use-quick-chat-activity", () => ({
 
 vi.mock("@/hooks/use-in-office", () => ({
   useInOffice: () => inOffice,
+  useOfficeModeState: () => (inOffice ? "office" : "kanban"),
+}));
+
+vi.mock("@/hooks/domains/features/use-feature", () => ({
+  useFeature: () => true,
+}));
+
+vi.mock("@/hooks/domains/inbox-triage/use-inbox-triage", () => ({
+  useInboxTriageNudge: () => ({
+    items: [],
+    newCount: 0,
+    additionalCount: 0,
+    acknowledgeAll: () => {},
+  }),
 }));
 
 type NavRegistration = {

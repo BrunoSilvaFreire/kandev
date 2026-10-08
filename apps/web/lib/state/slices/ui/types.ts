@@ -505,6 +505,7 @@ export type UISliceActions = {
       taskScope: ThreadView["taskScope"];
       filters: ThreadFilterClause[];
       sort: ThreadSortSpec;
+      group: ThreadView["group"];
       maxColumns: number | null;
       layout: ThreadView["layout"];
       autoHideComposer: boolean;

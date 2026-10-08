@@ -802,12 +802,14 @@ func (s *Service) rebuildInput(
 			}
 		}
 		input.Sessions = append(input.Sessions, statussummary.RebuildSession{
-			ID:                  session.ID,
-			State:               string(session.State),
-			IsPrimary:           session.IsPrimary,
-			ForegroundActivity:  activity,
-			ActiveSubagentCount: activeSubagentCount,
-			ActiveError:         activeError,
+			ID:                     session.ID,
+			State:                  string(session.State),
+			IsPrimary:              session.IsPrimary,
+			ForegroundActivity:     activity,
+			ActiveSubagentCount:    activeSubagentCount,
+			ActiveError:            activeError,
+			PossibleQuestion:       models.SessionPossibleQuestion(session.Metadata),
+			PossibleQuestionTurnID: models.SessionPossibleQuestionTurnID(session.Metadata),
 		})
 		if action := string(pendingBySession[session.ID]); strings.TrimSpace(action) != "" {
 			input.PendingActions[session.ID] = action

@@ -7,6 +7,7 @@ import type { InboxTab } from "@/lib/failed-inbox/inbox-tab";
 
 const FAILED_BADGE_TESTID = "inbox-tab-failed-badge";
 const HISTORY_BADGE_TESTID = "inbox-tab-history-badge";
+const TRIAGE_BADGE_TESTID = "inbox-tab-triage-badge";
 
 function renderStrip(
   overrides: Partial<{
@@ -14,6 +15,7 @@ function renderStrip(
     onSelectTab: (tab: InboxTab) => void;
     needsYouCount: number;
     needsYouHasMore: boolean;
+    triageCount: number;
     failedCount: number | undefined;
     failedTruncated: boolean;
     historyCount: number;
@@ -26,6 +28,7 @@ function renderStrip(
       onSelectTab={vi.fn()}
       needsYouCount={0}
       needsYouHasMore={false}
+      triageCount={0}
       failedCount={undefined}
       failedTruncated={false}
       historyCount={0}
@@ -37,13 +40,14 @@ function renderStrip(
 afterEach(() => cleanup());
 
 describe("InboxTabStrip", () => {
-  it("renders exactly three tabs, Needs you, Failed, then History (AC .1)", () => {
+  it("renders Needs you, Triage, Failed, then History", () => {
     renderStrip();
     const tabs = screen.getAllByRole("tab");
-    expect(tabs).toHaveLength(3);
+    expect(tabs).toHaveLength(4);
     expect(tabs[0].textContent).toContain("Needs you");
-    expect(tabs[1].textContent).toContain("Failed");
-    expect(tabs[2].textContent).toContain("History");
+    expect(tabs[1].textContent).toContain("Triage");
+    expect(tabs[2].textContent).toContain("Failed");
+    expect(tabs[3].textContent).toContain("History");
   });
 
   it("calls onSelectTab with the clicked tab's value", () => {
@@ -87,6 +91,16 @@ describe("InboxTabStrip", () => {
   it("renders the history badge once a non-zero count is known", () => {
     renderStrip({ historyCount: 3 });
     expect(screen.getByTestId(HISTORY_BADGE_TESTID).textContent).toBe("3");
+  });
+
+  it("renders no triage badge when the count is zero", () => {
+    renderStrip({ triageCount: 0 });
+    expect(screen.queryByTestId(TRIAGE_BADGE_TESTID)).toBeNull();
+  });
+
+  it("renders the triage nudge badge once a non-zero count is known", () => {
+    renderStrip({ triageCount: 2 });
+    expect(screen.getByTestId(TRIAGE_BADGE_TESTID).textContent).toBe("2");
   });
 
   it("carries a coarse-pointer/mobile 44px touch-target floor on every tab trigger", () => {

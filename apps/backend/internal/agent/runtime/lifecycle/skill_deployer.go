@@ -19,6 +19,7 @@ import (
 // means for its delivery strategy.
 type SkillDeployer interface {
 	DeploySkills(ctx context.Context, req SkillDeployRequest) (SkillDeployResult, error)
+	ValidateSkills(ctx context.Context, profile *settingsmodels.AgentProfile, officeRuntime bool) error
 }
 
 // SkillDeployRequest carries everything a SkillDeployer needs to materialise
@@ -67,6 +68,11 @@ type noopSkillDeployer struct{}
 // DeploySkills satisfies SkillDeployer with a zero-effort implementation.
 func (noopSkillDeployer) DeploySkills(_ context.Context, _ SkillDeployRequest) (SkillDeployResult, error) {
 	return SkillDeployResult{}, nil
+}
+
+// ValidateSkills satisfies SkillDeployer with a zero-effort implementation.
+func (noopSkillDeployer) ValidateSkills(_ context.Context, _ *settingsmodels.AgentProfile, _ bool) error {
+	return nil
 }
 
 // NoopSkillDeployer returns the default deployer used when no concrete

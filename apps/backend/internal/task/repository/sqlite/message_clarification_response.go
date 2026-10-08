@@ -7,6 +7,7 @@ import (
 	"maps"
 	"sort"
 
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db/dialect"
@@ -217,6 +218,9 @@ func (r *Repository) CompleteActiveClarificationBundle(
 		return nil, false, fmt.Errorf("claimed %d clarification rows but loaded %d", claimedRows, len(messages))
 	}
 	if err := r.completeClaimedClarificationMessages(ctx, tx, drv, messages, status, responses); err != nil {
+		return nil, false, err
+	}
+	if err := r.persistPlanApprovalReceiptsInTx(ctx, tx, drv, messages, status, responses); err != nil {
 		return nil, false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -622,4 +626,130 @@ func (r *Repository) completeClaimedClarificationMessages(
 		message.UpdatedAt = updatedAt
 	}
 	return nil
+}
+
+//nolint:cyclop,funlen,gocognit // The transaction persists one receipt per winning approval answer in a single pass.
+func (r *Repository) persistPlanApprovalReceiptsInTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	drv string,
+	messages []*models.Message,
+	status string,
+	responses map[string]interface{},
+) error {
+	if status != clarificationStatusAnswered || len(messages) == 0 {
+		return nil
+	}
+	now := r.nowUTC()
+	for _, message := range messages {
+		if message == nil || message.Type != "clarification_request" || message.Metadata == nil {
+			continue
+		}
+		rawApproval, ok := message.Metadata["approval"]
+		if !ok || rawApproval == nil {
+			continue
+		}
+		var subject, versionAtRequest, planRevisionID string
+		switch a := rawApproval.(type) {
+		case map[string]interface{}:
+			subject, _ = a["subject"].(string)
+			versionAtRequest, _ = a["version_at_request"].(string)
+			planRevisionID, _ = a["plan_revision_id"].(string)
+		default:
+			data, err := json.Marshal(rawApproval)
+			if err == nil {
+				var m map[string]interface{}
+				if err := json.Unmarshal(data, &m); err == nil {
+					subject, _ = m["subject"].(string)
+					versionAtRequest, _ = m["version_at_request"].(string)
+					planRevisionID, _ = m["plan_revision_id"].(string)
+				}
+			}
+		}
+		if subject != "task_plan" || versionAtRequest == "" {
+			continue
+		}
+		questionID, _ := message.Metadata["question_id"].(string)
+		resp, hasResp := responses[questionID]
+		if !hasResp {
+			continue
+		}
+		decision, subjectEdited := extractApprovalResponse(resp)
+		if decision != "approve" || subjectEdited {
+			continue
+		}
+		if planRevisionID == "" {
+			_ = tx.QueryRowContext(ctx, r.db.Rebind(`
+				SELECT id FROM task_plan_revisions
+				WHERE task_id = ? AND write_version = ?
+				ORDER BY revision_number DESC LIMIT 1
+			`), message.TaskID, versionAtRequest).Scan(&planRevisionID)
+		}
+		if planRevisionID == "" {
+			continue
+		}
+		var planWriteVersion string
+		err := tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT write_version FROM task_plans WHERE task_id = ?
+		`), message.TaskID).Scan(&planWriteVersion)
+		if err != nil || planWriteVersion != versionAtRequest {
+			continue
+		}
+		var revWriteVersion string
+		err = tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT write_version FROM task_plan_revisions WHERE id = ? AND task_id = ?
+		`), planRevisionID, message.TaskID).Scan(&revWriteVersion)
+		if err != nil || revWriteVersion != versionAtRequest {
+			continue
+		}
+		receiptID := message.ID
+		if receiptID == "" {
+			receiptID = uuid.NewString()
+		}
+		_, err = tx.ExecContext(ctx, r.db.Rebind(`
+			INSERT INTO task_plan_approval_receipts
+				(id, task_id, plan_revision_id, write_version, decision, subject_edited, created_at)
+			VALUES (?, ?, ?, ?, ?, 0, ?)
+			ON CONFLICT(id) DO NOTHING
+		`), receiptID, message.TaskID, planRevisionID, versionAtRequest, decision, now)
+		if err != nil {
+			return fmt.Errorf("persist plan approval receipt: %w", err)
+		}
+	}
+	return nil
+}
+
+func extractApprovalResponse(resp interface{}) (decision string, subjectEdited bool) {
+	if resp == nil {
+		return "", false
+	}
+	switch v := resp.(type) {
+	case map[string]interface{}:
+		if appr, ok := v["approval"].(map[string]interface{}); ok {
+			if d, ok := appr["decision"].(string); ok {
+				decision = d
+			}
+			if se, ok := appr["subject_edited"].(bool); ok {
+				subjectEdited = se
+			}
+		}
+		if decision == "" {
+			if sel, ok := v["selected_options"].([]string); ok && len(sel) > 0 {
+				decision = sel[0]
+			} else if sel, ok := v["selected_options"].([]interface{}); ok && len(sel) > 0 {
+				if d, ok := sel[0].(string); ok {
+					decision = d
+				}
+			}
+		}
+	default:
+		data, err := json.Marshal(resp)
+		if err == nil {
+			var m map[string]interface{}
+			if err := json.Unmarshal(data, &m); err == nil {
+				return extractApprovalResponse(m)
+			}
+		}
+	}
+	return decision, subjectEdited
 }

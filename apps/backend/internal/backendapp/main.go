@@ -363,6 +363,10 @@ func run(cfg *config.Config, log *logger.Logger, cleanups *[]func() error, runCl
 	ctx, cancel := context.WithCancel(context.Background())
 	addCleanup(func() error { cancel(); return nil })
 
+	// Start the opt-in pprof/expvar profiling server (KANDEV_PROFILE=1) and
+	// register its shutdown alongside the other deferred cleanups.
+	startProfilingIfEnabled(log, cleanups)
+
 	return runWithBootstrap(ctx, cfg, log, func(ctx context.Context) bool {
 		return initializeApplication(ctx, cfg, log, addCleanup, runCleanups)
 	})
@@ -1001,6 +1005,9 @@ func startAgentInfrastructure(
 	// and the settings batch endpoint so credential-path cache sharing is
 	// preserved across all three.
 	usageAdapter := newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
+	if services != nil {
+		services.UsageAdapter = usageAdapter
+	}
 	// Dynamic Profile schedule-time ranking reuses the same subscription-usage
 	// adapter as Office and the legacy workflow selector, preserving
 	// credential-path cache sharing across all consumers.
@@ -2952,6 +2959,14 @@ func buildHTTPServer(
 		}
 		return err
 	})
+	// The provider-usage history service backs the Usage page endpoints. It is
+	// optional: when its store cannot be built the routes are simply not
+	// registered, and the page reports the feature as unavailable.
+	providerUsageSvc, providerUsageErr := buildProviderUsageServiceForServices(
+		services, dbPool, repos, cfg.ResolvedHomeDir(), log)
+	if providerUsageErr != nil {
+		log.Warn("failed to build provider usage service", zap.Error(providerUsageErr))
+	}
 	registerRoutes(routeParams{
 		router:                        router,
 		gateway:                       gateway,
@@ -2974,6 +2989,7 @@ func buildHTTPServer(
 		persistenceHealth:             requiredHealth,
 		agentSettingsController:       agentSettingsController,
 		agentSettingsRepo:             repos.AgentSettings,
+		providerUsageSvc:              providerUsageSvc,
 		agentList:                     agentRegistry,
 		agentRegistry:                 agentRegistry,
 		userCtrl:                      usercontroller.NewController(services.User),

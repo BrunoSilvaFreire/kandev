@@ -76,3 +76,16 @@ func mergeSkillMetadata(prepared *LaunchRequest, result SkillDeployResult) {
 		prepared.Metadata[MetadataKeyInstructionsDir] = result.InstructionsDir
 	}
 }
+
+// PreflightProfileSkills verifies that any skills referenced by the agent profile
+// can be resolved and are compatible with the workflow/runtime environment.
+func (m *Manager) PreflightProfileSkills(ctx context.Context, profileID string, officeRuntime bool) error {
+	if m == nil || m.skillDeployer == nil || m.agentProfileReader == nil || profileID == "" {
+		return nil
+	}
+	profile, err := m.agentProfileReader.GetAgentProfile(ctx, profileID)
+	if err != nil || profile == nil {
+		return nil
+	}
+	return m.skillDeployer.ValidateSkills(ctx, profile, officeRuntime)
+}

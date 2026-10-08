@@ -7,6 +7,7 @@ import {
   UNGROUPED_REPOSITORY_GROUP_KEY,
 } from "./repository-group";
 import { resolveQuickFilterDimensions } from "./quick-filters";
+import { getViewDimensionMeta } from "./dimensions";
 import { SUPPORTED_DIMENSIONS, SUPPORTED_GROUPS, viewSupportsGroup } from "./views";
 import type { ViewFilterClause, ViewValueAccessor } from "./index";
 
@@ -73,6 +74,13 @@ describe("applyViewGroup", () => {
 });
 
 describe("view capabilities", () => {
+  it("provides shared metadata for every supported dimension", () => {
+    for (const view of ["kanban", "list", "threads", "sidebar"] as const) {
+      for (const dimension of SUPPORTED_DIMENSIONS[view]) {
+        expect(getViewDimensionMeta(dimension).labelKey).toBeTruthy();
+      }
+    }
+  });
   it("declares at least one dimension and group per view", () => {
     for (const view of ["kanban", "list", "threads", "sidebar"] as const) {
       expect(SUPPORTED_DIMENSIONS[view].length).toBeGreaterThan(0);

@@ -141,6 +141,7 @@
   "statusNeedsYou": "対応必要",
   "statusNotStarted": "未開始",
   "statusPermissionNeeded": "権限が必要",
+  "statusPossibleQuestion": "質問の可能性",
   "statusQuestionFromAgent": "エージェントからの質問",
   "statusStarting": "開始",
   "statusTurnFinished": "ターン終了",

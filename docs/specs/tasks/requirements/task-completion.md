@@ -85,6 +85,12 @@ does not need to reopen merely because its agent answers a question.
   explicitly override a gate with a recorded reason. Plugin absence shall
   leave a visible blocker and shall never require a synchronous plugin callback
   to evaluate completion.
+- **AC-TASKS-COMPLETION-001.17:** A Role Pipeline plan's declared increments shall
+  become task completion criteria; each shall stay blocked until Review records
+  evidence for that increment. A Review PASS may confirm one increment and return
+  to Implement while later criteria remain pending; it cannot complete the task
+  through `pass` while any increment is pending, unless an audited human completion
+  override is applied.
 
 ### REQ-TASKS-COMPLETION-002: Follow-ups in completed conversations
 

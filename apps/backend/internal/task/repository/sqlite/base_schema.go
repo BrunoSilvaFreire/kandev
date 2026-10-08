@@ -814,6 +814,7 @@ func (r *Repository) initPlansSchema() error {
 		workflow_step_id TEXT NOT NULL DEFAULT '',
 		workflow_step_name TEXT NOT NULL DEFAULT '',
 		workflow_step_color TEXT NOT NULL DEFAULT '',
+		write_version TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,

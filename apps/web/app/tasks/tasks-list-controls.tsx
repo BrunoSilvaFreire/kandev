@@ -11,6 +11,7 @@ import {
   TASKS_LIST_SORT_OPTIONS,
 } from "@/lib/tasks/tasks-list-options";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import { KanbanViewFilters } from "@/components/kanban/kanban-view-filters";
 
 export function TasksListControls({
   showArchived,
@@ -46,6 +47,7 @@ export function TasksListControls({
   ];
   return (
     <div className="hidden min-h-9 flex-wrap items-center justify-end gap-3 sm:flex">
+      <KanbanViewFilters view="list" />
       <ListOptionSelect
         label={t("tasks:sort")}
         value={tasksListSort}

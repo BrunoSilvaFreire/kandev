@@ -141,6 +141,7 @@
   "statusNeedsYou": "需要你處理",
   "statusNotStarted": "未開始",
   "statusPermissionNeeded": "需要權限",
+  "statusPossibleQuestion": "疑似提問",
   "statusQuestionFromAgent": "代理程式提問",
   "statusStarting": "正在啟動",
   "statusTurnFinished": "回合已完成",

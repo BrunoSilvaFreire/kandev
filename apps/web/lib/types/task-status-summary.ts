@@ -64,6 +64,13 @@ export type TaskStatusSummary = {
   foreground_activity?: ForegroundActivity;
   active_subagent_count?: number;
   pending_action?: TaskPendingAction;
+  /** True when the primary session ended with a possible question hint in agent prose. */
+  possible_question?: boolean;
+  /**
+   * Turn identity behind `possible_question`. The inbox nudge uses it so a hint
+   * acknowledged on one turn can surface again on a later turn.
+   */
+  possible_question_turn_id?: string;
   /** Number of prompts currently en-queued for the task (all sessions). */
   queued_prompt_count?: number;
   /** Automatic session launch waiting for admission, independent of the selected session. */

@@ -15,10 +15,17 @@ func (p *Projector) applySourceEventLocked(state *projectionState, eventType str
 	activityChanged := applyTaskActivityEventLocked(state, eventType, data)
 	var sourceChanged bool
 	switch eventType {
-	case events.TaskCreated, events.TaskStateChanged:
-		// These lifecycle events have no additional bounded status fields. Their
-		// persisted timestamps are handled by applyTaskActivityEventLocked.
+	case events.TaskCreated:
 		sourceChanged = false
+	case events.TaskStateChanged:
+		// A task state change clears the advisory hint only when the primary
+		// session is no longer waiting. The automatic turn-complete write to
+		// REVIEW keeps the session WAITING_FOR_INPUT, so the agent's question
+		// is still outstanding; a real move that stops the wait clears it.
+		if state.possibleQuestion && !taskEventReportsWaitingPrimary(data) {
+			clearPossibleQuestionState(state)
+			sourceChanged = true
+		}
 	case events.TaskUpdated:
 		sourceChanged = p.applyTaskUpdatedEventLocked(state, data)
 	case events.TaskSessionStateChanged:
@@ -30,9 +37,10 @@ func (p *Projector) applySourceEventLocked(state *projectionState, eventType str
 	case events.MessageAdded, events.MessageUpdated, events.MessageDeleted:
 		sourceChanged = p.applyMessageEventLocked(state, eventType, data)
 	case events.TurnStarted, events.TurnCompleted:
-		// Turn timestamps are the bounded activity source. The turn payload does
-		// not contribute another task-row status field.
-		sourceChanged = false
+		if eventType == events.TurnStarted && state.possibleQuestion {
+			clearPossibleQuestionState(state)
+			sourceChanged = true
+		}
 	case events.ClarificationAnswered, events.ClarificationPrimaryAnswered,
 		events.ClarificationCancelled:
 		if p.loadPendingActions != nil {
@@ -143,6 +151,13 @@ func applyPermissionEventLocked(state *projectionState, data map[string]interfac
 	state.pending[sessionID] = pendingPermission
 	state.pendingRequests[sessionID] = identity
 	return true
+}
+
+// taskEventReportsWaitingPrimary reports whether a task-level event carries a
+// primary session that is still WAITING_FOR_INPUT. A missing or nil field is
+// not evidence of waiting, so callers fail toward clearing.
+func taskEventReportsWaitingPrimary(data map[string]interface{}) bool {
+	return stringField(data, "primary_session_state") == sessionStateWaitingForInput
 }
 
 func (p *Projector) applyTaskUpdatedEventLocked(state *projectionState, data map[string]interface{}) bool {
@@ -333,6 +348,8 @@ func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 	state.completionGate = cloneCompletionGate(summary.CompletionGate)
 	state.completionGateObserved = summary.CompletionGate != nil
 	state.taskPending = summary.PendingAction
+	state.possibleQuestion = summary.PossibleQuestion
+	state.possibleQuestionTurnID = summary.PossibleQuestionTurnID
 	state.lastActivityAt = maxTimePtr(state.lastActivityAt, summary.LastActivityAt)
 	if summary.PrimarySession != nil && summary.PrimarySession.ID != "" {
 		state.sessions[summary.PrimarySession.ID] = sessionObservation{
@@ -493,6 +510,9 @@ func (p *Projector) restoreSessionObservations(
 			foregroundActivity:  input.ForegroundActivity,
 			activeSubagentCount: maxInt(input.ActiveSubagentCount, 0),
 		}
+		if input.IsPrimary && input.PossibleQuestion {
+			setPossibleQuestionState(state, true, input.PossibleQuestionTurnID)
+		}
 		activeError := normalizeRebuildError(input.ActiveError, p.now().UTC())
 		if activeError == nil || state.clearedErrorStamps[sessionID] == activeError.Stamp {
 			continue
@@ -627,6 +647,12 @@ func (p *Projector) applySessionEventLocked(state *projectionState, data map[str
 	changed := true
 	if metadata, ok := data["session_metadata"].(map[string]interface{}); ok {
 		p.applySessionMetadataErrorLocked(state, sessionID, metadata)
+		if v, ok := metadata[models.SessionMetaKeyPossibleQuestion]; ok && observation.isPrimary {
+			setPossibleQuestionState(state, possibleQuestionActive(v), possibleQuestionTurnID(v))
+		}
+	}
+	if observation.isPrimary && observation.state != sessionStateWaitingForInput {
+		clearPossibleQuestionState(state)
 	}
 	return changed
 }
@@ -706,6 +732,10 @@ func (p *Projector) applyMessageEventLocked(state *projectionState, eventType st
 	}
 	changed := p.clearSupersededErrorFromMessageLocked(state, eventType, sessionID, data)
 	pendingChanged := p.applyPendingMessageLocked(state, eventType, data, sessionID)
+	if stringField(data, "author_type") == messageTypeUser && state.possibleQuestion {
+		clearPossibleQuestionState(state)
+		changed = true
+	}
 	return changed || pendingChanged
 }
 

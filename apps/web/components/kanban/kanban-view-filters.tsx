@@ -14,6 +14,7 @@ import type { KanbanFilterDimension } from "@/lib/view-model/kanban";
 import { getOpLabel } from "@/components/task/sidebar-filter/filter-dimension-registry";
 import { TASK_PRIORITY_TOKENS, TASK_PRIORITY_LABEL_KEYS } from "@/lib/tasks/task-priority";
 import { TASK_STATE_ORDER } from "@/lib/tasks/tasks-list-options";
+import type { HomeViewId } from "@/lib/view-model/types";
 
 // `labelKey` values are catalog keys, not copy: module scope, so a resolved
 // `t()` here would freeze at the boot locale.
@@ -44,11 +45,14 @@ const TASK_STATE_LABEL_KEYS: Record<string, string> = {
  * views. Both consume the same persisted `filters`/`group` arrays through the
  * shared view model; only the workflow/step selector stays view-structural.
  */
-export function KanbanViewFilters() {
+export function KanbanViewFilters({
+  view = "kanban",
+}: {
+  view?: Extract<HomeViewId, "kanban" | "list">;
+}) {
   const { t } = useTranslation();
   const display = useKanbanDisplaySettings();
   const repositoryGroups = useRepositoryGroups();
-  const view = display.effectiveTaskListingView === "list" ? "list" : "kanban";
   const { dimensions } = useHomeQuickFilters(view);
   const options = useMemo(
     () => ({
@@ -101,21 +105,17 @@ export function KanbanViewFilters() {
       display.onFiltersChange(display.filters.filter((filter) => filter.id !== id)),
   };
 
-  // The List filters its loaded page through the same persisted clauses; its
-  // grouping stays in its own server-backed control, so no group picker here.
   return (
     <div className="flex flex-wrap items-center gap-2" data-testid="kanban-view-filters">
       <QuickFilterBar adapter={adapter} testId={`${view}-quick-filters`} />
-      {view === "kanban" ? (
-        <div className="hidden sm:block">
-          <ViewGroupControl
-            value={display.group}
-            groups={SUPPORTED_GROUPS[view]}
-            onChange={(next: ViewGroupKey) => display.onGroupChange(next)}
-            testId={`${view}-group-select`}
-          />
-        </div>
-      ) : null}
+      <div className="hidden sm:block">
+        <ViewGroupControl
+          value={display.group}
+          groups={SUPPORTED_GROUPS[view]}
+          onChange={(next: ViewGroupKey) => display.onGroupChange(next)}
+          testId={`${view}-group-select`}
+        />
+      </div>
     </div>
   );
 }

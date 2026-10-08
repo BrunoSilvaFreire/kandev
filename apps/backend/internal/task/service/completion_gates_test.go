@@ -246,3 +246,105 @@ func TestCompletionGateExactCommandsUseTaskVersionClaimFenceAndReplay(t *testing
 		t.Fatalf("replay exact evidence = %+v err=%v", verifiedReplay, err)
 	}
 }
+
+func TestPlanIncrementServiceIntegration(t *testing.T) {
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "user-1", Role: authn.RoleAdmin, Synthetic: true})
+	svc, _, repo := createTestService(t)
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	svc.workflowStepGetter.(*fakeWorkflowStepGetter).steps["step-done"] = &wfmodels.WorkflowStep{
+		ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2, CompleteTaskOnEnter: true,
+	}
+	svc.workflowStepGetter.(*fakeWorkflowStepGetter).steps["step-implement"] = &wfmodels.WorkflowStep{
+		ID: "step-implement", WorkflowID: "wf-source", Name: "Implement", Position: 1, CompleteTaskOnEnter: false,
+	}
+
+	createMoveTask(t, ctx, repo, "task-plan-increment-svc", "wf-source", "step-source", nil)
+
+	// Enroll plan increments with plan revision
+	criteria, err := svc.SetTaskCompletionCriteria(ctx, "task-plan-increment-svc", SetTaskCompletionCriteriaRequest{
+		ExpectedRevision: 0,
+		PlanRevisionID:   "plan-rev-101",
+		Criteria: []models.TaskCompletionCriterion{
+			{
+				ID: "I1", Description: "Increment 1",
+				EvidenceSubject: models.TaskCompletionEvidenceSubject{Kind: models.TaskCompletionEvidencePlanIncrement, ID: "I1"},
+			},
+			{
+				ID: "I2", Description: "Increment 2",
+				EvidenceSubject: models.TaskCompletionEvidenceSubject{Kind: models.TaskCompletionEvidencePlanIncrement, ID: "I2"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("set plan increment criteria: %v", err)
+	}
+	if criteria.PlanRevisionID != "plan-rev-101" {
+		t.Fatalf("plan revision ID = %q, want plan-rev-101", criteria.PlanRevisionID)
+	}
+
+	// Non-terminal move must SUCCEED while criteria are unmet
+	if _, err := svc.MoveTask(ctx, "task-plan-increment-svc", "wf-source", "step-implement", 0); err != nil {
+		t.Fatalf("non-terminal move should be allowed while criteria are unmet: %v", err)
+	}
+
+	// Terminal move must be BLOCKED
+	if _, err := svc.MoveTask(ctx, "task-plan-increment-svc", "wf-source", "step-done", 0); !errors.Is(err, repoerrors.ErrTaskCompletionGateBlocked) {
+		t.Fatalf("terminal move with unmet criteria = %v, want ErrTaskCompletionGateBlocked", err)
+	}
+
+	// Verify I1
+	verifiedI1, err := svc.VerifyTaskCompletionCriterion(ctx, "task-plan-increment-svc", VerifyTaskCompletionCriterionRequest{
+		ExpectedRevision: criteria.Revision,
+		CriterionID:      "I1",
+		Evidence: models.TaskCompletionEvidence{
+			Subject: models.TaskCompletionEvidenceSubject{
+				Kind:     models.TaskCompletionEvidencePlanIncrement,
+				ID:       "I1",
+				Revision: "1",
+			},
+			Summary: "I1 approved by review",
+		},
+	})
+	if err != nil {
+		t.Fatalf("verify I1: %v", err)
+	}
+	if !verifiedI1.Blocked {
+		t.Fatal("gate should still be blocked after verifying only I1")
+	}
+
+	// Non-terminal move back to implement (e.g. request_changes or partial review handoff) SUCCEEDS
+	if _, err := svc.MoveTask(ctx, "task-plan-increment-svc", "wf-source", "step-implement", 0); err != nil {
+		t.Fatalf("non-terminal move after partial verify should succeed: %v", err)
+	}
+
+	// Terminal move still BLOCKED
+	if _, err := svc.MoveTask(ctx, "task-plan-increment-svc", "wf-source", "step-done", 0); !errors.Is(err, repoerrors.ErrTaskCompletionGateBlocked) {
+		t.Fatalf("terminal move with partial criteria = %v, want ErrTaskCompletionGateBlocked", err)
+	}
+
+	// Verify I2
+	verifiedI2, err := svc.VerifyTaskCompletionCriterion(ctx, "task-plan-increment-svc", VerifyTaskCompletionCriterionRequest{
+		ExpectedRevision: criteria.Revision,
+		CriterionID:      "I2",
+		Evidence: models.TaskCompletionEvidence{
+			Subject: models.TaskCompletionEvidenceSubject{
+				Kind:     models.TaskCompletionEvidencePlanIncrement,
+				ID:       "I2",
+				Revision: "1",
+			},
+			Summary: "I2 approved by review",
+		},
+	})
+	if err != nil {
+		t.Fatalf("verify I2: %v", err)
+	}
+	if verifiedI2.Blocked {
+		t.Fatalf("gate should be unblocked after verifying all increments: %+v", verifiedI2.Blockers)
+	}
+
+	// Terminal move to Done now SUCCEEDS
+	if _, err := svc.MoveTask(ctx, "task-plan-increment-svc", "wf-source", "step-done", 0); err != nil {
+		t.Fatalf("terminal move to done after full verification failed: %v", err)
+	}
+}

@@ -141,6 +141,7 @@
   "statusNeedsYou": "Precisa de si",
   "statusNotStarted": "Não iniciada",
   "statusPermissionNeeded": "Permissão necessária",
+  "statusPossibleQuestion": "Possível pergunta",
   "statusQuestionFromAgent": "Pergunta do agente",
   "statusStarting": "A iniciar",
   "statusTurnFinished": "Turno concluído",

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ const (
 	maxCompletionCriteria          = 64
 	completionGateActorHuman       = "human"
 	completionGateActorPlugin      = "plugin"
+	completionGateActorAgent       = "agent"
 	completionGateTaskVersionQuery = `SELECT workspace_id, updated_at FROM tasks WHERE id = ?`
 )
 
@@ -32,7 +34,7 @@ func (r *Repository) SetTaskCompletionCriteriaExact(ctx context.Context, change 
 	return r.setTaskCompletionCriteria(ctx, change, true)
 }
 
-//nolint:cyclop,funlen,gocognit // The transaction replaces the task-owned criteria set with its revision and audit record.
+//nolint:cyclop,funlen,gocognit,nestif // The transaction replaces the task-owned criteria set with its revision and audit record.
 func (r *Repository) setTaskCompletionCriteria(ctx context.Context, change models.TaskCompletionCriteriaChange, exact bool) (*models.TaskCompletionGateSnapshot, bool, error) {
 	if err := validateCompletionCriteria(change.Criteria); err != nil {
 		return nil, false, err
@@ -100,11 +102,60 @@ func (r *Repository) setTaskCompletionCriteria(ctx context.Context, change model
 
 	nextRevision := current.Revision + 1
 	now := r.nowUTC()
+	planRevisionID := strings.TrimSpace(change.PlanRevisionID)
+	if planRevisionID == "" {
+		planRevisionID = current.PlanRevisionID
+	}
+	var planWriteVersion string
+	if change.ActorKind == completionGateActorAgent {
+		if planRevisionID == "" {
+			return nil, false, repoerrors.ErrTaskCompletionGateBlocked
+		}
+		var receiptWriteVersion string
+		err := tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT write_version FROM task_plan_approval_receipts
+			WHERE task_id = ? AND plan_revision_id = ? AND decision = 'approve' AND subject_edited = 0
+			ORDER BY created_at DESC LIMIT 1
+		`), change.TaskID, planRevisionID).Scan(&receiptWriteVersion)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, false, repoerrors.ErrTaskCompletionGateBlocked
+			}
+			return nil, false, err
+		}
+		var headWriteVersion string
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT write_version FROM task_plans WHERE task_id = ?
+		`), change.TaskID).Scan(&headWriteVersion); err != nil {
+			return nil, false, repoerrors.ErrTaskCompletionGateBlocked
+		}
+		if headWriteVersion != receiptWriteVersion {
+			return nil, false, repoerrors.ErrTaskCompletionGateBlocked
+		}
+		var revWriteVersion string
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT write_version FROM task_plan_revisions WHERE id = ? AND task_id = ?
+		`), planRevisionID, change.TaskID).Scan(&revWriteVersion); err != nil {
+			return nil, false, repoerrors.ErrTaskCompletionGateBlocked
+		}
+		if revWriteVersion != receiptWriteVersion {
+			return nil, false, repoerrors.ErrTaskCompletionGateBlocked
+		}
+		planWriteVersion = receiptWriteVersion
+	} else {
+		var headWriteVersion string
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT write_version FROM task_plans WHERE task_id = ?
+		`), change.TaskID).Scan(&headWriteVersion); err == nil {
+			planWriteVersion = headWriteVersion
+		}
+	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO task_completion_sets (task_id, workspace_id, revision, updated_at)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT(task_id) DO UPDATE SET workspace_id = excluded.workspace_id, revision = excluded.revision, updated_at = excluded.updated_at
-	`), change.TaskID, change.WorkspaceID, nextRevision, now); err != nil {
+		INSERT INTO task_completion_sets (task_id, workspace_id, revision, plan_revision_id, plan_write_version, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(task_id) DO UPDATE SET workspace_id = excluded.workspace_id, revision = excluded.revision,
+			plan_revision_id = excluded.plan_revision_id, plan_write_version = excluded.plan_write_version, updated_at = excluded.updated_at
+	`), change.TaskID, change.WorkspaceID, nextRevision, planRevisionID, planWriteVersion, now); err != nil {
 		return nil, false, err
 	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_completion_criteria WHERE task_id = ?`), change.TaskID); err != nil {
@@ -307,37 +358,121 @@ func (r *Repository) ListTaskCompletionGateHistory(ctx context.Context, taskID s
 	return history, rows.Err()
 }
 
-//nolint:cyclop // The transaction checks completion gates before allowing a terminal state transition.
+//nolint:cyclop,funlen,gocognit,nestif // The transaction checks completion gates before allowing terminal or Architect handoff transitions.
 func (r *Repository) guardTaskCompletionTransitionTx(ctx context.Context, tx *sql.Tx, taskID string, currentState, nextState v1.TaskState, currentWorkflowID, currentStepID, targetWorkflowID, targetStepID string) error {
-	if nextState != v1.TaskStateCompleted || currentState == v1.TaskStateCompleted {
+	var isTerminal bool
+	if nextState == v1.TaskStateCompleted && currentState != v1.TaskStateCompleted {
+		isTerminal = true
+	}
+	var isArchitectHandoff bool
+	if targetStepID != "" && targetStepID != currentStepID {
+		var toStepName sql.NullString
+		_ = tx.QueryRowContext(ctx, r.db.Rebind(`SELECT name FROM workflow_steps WHERE id = ?`), targetStepID).Scan(&toStepName)
+		if (toStepName.Valid && strings.EqualFold(strings.TrimSpace(toStepName.String), "implement")) ||
+			strings.EqualFold(strings.TrimSpace(targetStepID), "implement") ||
+			strings.Contains(strings.ToLower(targetStepID), "implement") {
+			var fromStepName sql.NullString
+			if currentStepID != "" {
+				_ = tx.QueryRowContext(ctx, r.db.Rebind(`SELECT name FROM workflow_steps WHERE id = ?`), currentStepID).Scan(&fromStepName)
+			}
+			if !fromStepName.Valid || strings.EqualFold(strings.TrimSpace(fromStepName.String), "architect") ||
+				strings.Contains(strings.ToLower(currentStepID), "architect") || currentStepID == "" {
+				isArchitectHandoff = true
+			}
+		}
+	}
+	if !isTerminal && !isArchitectHandoff {
 		return nil
 	}
+
 	snapshot, err := r.readTaskCompletionGateTx(ctx, tx, taskID, true)
 	if err != nil {
 		return err
 	}
-	if len(snapshot.Criteria) == 0 || len(snapshot.Blockers) == 0 {
-		return nil
+
+	if isArchitectHandoff {
+		scoped, _ := r.isScopedWorkflowTx(ctx, tx, taskID)
+		if scoped && (snapshot.Blocked || snapshot.PlanStale || len(snapshot.Criteria) == 0) {
+			override, ok := models.TaskCompletionMoveOverrideFromContext(ctx)
+			if !ok {
+				return repoerrors.ErrTaskCompletionGateBlocked
+			}
+			if override.TaskID != taskID || override.WorkspaceID != snapshot.WorkspaceID ||
+				override.ExpectedRevision != snapshot.Revision ||
+				override.SourceWorkflowID != currentWorkflowID || override.SourceStepID != currentStepID ||
+				override.TargetWorkflowID != targetWorkflowID || override.TargetStepID != targetStepID ||
+				strings.TrimSpace(override.ActorID) == "" || strings.TrimSpace(override.Reason) == "" {
+				return repoerrors.ErrTaskCompletionCriteriaConflict
+			}
+			now := r.nowUTC()
+			details, _ := json.Marshal(snapshot.Blockers)
+			return insertCompletionHistoryTx(ctx, tx, r.db.Rebind, models.TaskCompletionGateHistory{
+				ID: uuid.NewString(), TaskID: taskID, WorkspaceID: snapshot.WorkspaceID,
+				Revision: snapshot.Revision, Action: "handoff_overridden", ActorKind: completionGateActorHuman,
+				ActorID: override.ActorID, Reason: strings.TrimSpace(override.Reason),
+				Details: string(details), CreatedAt: now,
+			})
+		}
 	}
-	override, ok := models.TaskCompletionMoveOverrideFromContext(ctx)
-	if !ok {
-		return repoerrors.ErrTaskCompletionGateBlocked
+
+	if isTerminal {
+		if !snapshot.Blocked || len(snapshot.Blockers) == 0 {
+			return nil
+		}
+		override, ok := models.TaskCompletionMoveOverrideFromContext(ctx)
+		if !ok {
+			return repoerrors.ErrTaskCompletionGateBlocked
+		}
+		if override.TaskID != taskID || override.WorkspaceID != snapshot.WorkspaceID ||
+			override.ExpectedRevision != snapshot.Revision ||
+			override.SourceWorkflowID != currentWorkflowID || override.SourceStepID != currentStepID ||
+			override.TargetWorkflowID != targetWorkflowID || override.TargetStepID != targetStepID ||
+			strings.TrimSpace(override.ActorID) == "" || strings.TrimSpace(override.Reason) == "" {
+			return repoerrors.ErrTaskCompletionCriteriaConflict
+		}
+		now := r.nowUTC()
+		details, _ := json.Marshal(snapshot.Blockers)
+		return insertCompletionHistoryTx(ctx, tx, r.db.Rebind, models.TaskCompletionGateHistory{
+			ID: uuid.NewString(), TaskID: taskID, WorkspaceID: snapshot.WorkspaceID,
+			Revision: snapshot.Revision, Action: "completion_overridden", ActorKind: completionGateActorHuman,
+			ActorID: override.ActorID, Reason: strings.TrimSpace(override.Reason),
+			Details: string(details), CreatedAt: now,
+		})
 	}
-	if override.TaskID != taskID || override.WorkspaceID != snapshot.WorkspaceID ||
-		override.ExpectedRevision != snapshot.Revision ||
-		override.SourceWorkflowID != currentWorkflowID || override.SourceStepID != currentStepID ||
-		override.TargetWorkflowID != targetWorkflowID || override.TargetStepID != targetStepID ||
-		strings.TrimSpace(override.ActorID) == "" || strings.TrimSpace(override.Reason) == "" {
-		return repoerrors.ErrTaskCompletionCriteriaConflict
+	return nil
+}
+
+func (r *Repository) isScopedWorkflowTx(ctx context.Context, tx *sql.Tx, taskID string) (bool, error) {
+	var wfName sql.NullString
+	var planCount, receiptCount, roleStepCount int
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT w.name,
+		       (SELECT COUNT(*) FROM task_plans WHERE task_id = t.id),
+		       (SELECT COUNT(*) FROM task_plan_approval_receipts WHERE task_id = t.id AND decision = 'approve' AND subject_edited = 0),
+		       (SELECT COUNT(*) FROM workflow_steps ws WHERE ws.workflow_id = t.workflow_id AND LOWER(ws.name) IN ('architect', 'implement', 'review'))
+		FROM tasks t
+		LEFT JOIN workflows w ON t.workflow_id = w.id
+		WHERE t.id = ?
+	`), taskID).Scan(&wfName, &planCount, &receiptCount, &roleStepCount)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
 	}
-	now := r.nowUTC()
-	details, _ := json.Marshal(snapshot.Blockers)
-	return insertCompletionHistoryTx(ctx, tx, r.db.Rebind, models.TaskCompletionGateHistory{
-		ID: uuid.NewString(), TaskID: taskID, WorkspaceID: snapshot.WorkspaceID,
-		Revision: snapshot.Revision, Action: "completion_overridden", ActorKind: completionGateActorHuman,
-		ActorID: override.ActorID, Reason: strings.TrimSpace(override.Reason),
-		Details: string(details), CreatedAt: now,
-	})
+	if receiptCount > 0 || planCount > 0 {
+		return true, nil
+	}
+	if wfName.Valid && strings.EqualFold(strings.TrimSpace(wfName.String), "Role Pipeline") {
+		return true, nil
+	}
+	// A structural role-pipeline signature requires all three role steps; a
+	// workflow that merely happens to have one or two similarly named steps
+	// stays on the legacy no-criteria path.
+	if roleStepCount >= 3 {
+		return true, nil
+	}
+	return false, nil
 }
 
 //nolint:cyclop // The snapshot reads criteria, evidence, and actor-visible state together.
@@ -349,8 +484,15 @@ func (r *Repository) readTaskCompletionGateTx(ctx context.Context, tx *sql.Tx, t
 		}
 		return nil, err
 	}
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT revision FROM task_completion_sets WHERE task_id = ?`), taskID).Scan(&snapshot.Revision); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	var planRevisionID, planWriteVersion sql.NullString
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT revision, plan_revision_id, plan_write_version FROM task_completion_sets WHERE task_id = ?`), taskID).Scan(&snapshot.Revision, &planRevisionID, &planWriteVersion); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
+	}
+	if planRevisionID.Valid {
+		snapshot.PlanRevisionID = planRevisionID.String
+	}
+	if planWriteVersion.Valid {
+		snapshot.PlanWriteVersion = planWriteVersion.String
 	}
 	rows, err := tx.QueryContext(ctx, r.db.Rebind(`
 		SELECT criterion_id, description, criterion_revision, subject_kind, subject_id,
@@ -405,7 +547,44 @@ func (r *Repository) readTaskCompletionGateTx(ctx context.Context, tx *sql.Tx, t
 			snapshot.Blockers = append(snapshot.Blockers, models.TaskCompletionBlocker{CriterionID: criterion.ID, Reason: reason})
 		}
 	}
-	snapshot.Blocked = len(snapshot.Criteria) > 0 && len(snapshot.Blockers) > 0
+	if snapshot.PlanRevisionID != "" {
+		var currentHeadWriteVersion string
+		err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT write_version FROM task_plans WHERE task_id = ?`), taskID).Scan(&currentHeadWriteVersion)
+		if err == nil && snapshot.PlanWriteVersion != "" && currentHeadWriteVersion != snapshot.PlanWriteVersion {
+			snapshot.PlanStale = true
+			snapshot.Blocked = true
+			snapshot.Blockers = append(snapshot.Blockers, models.TaskCompletionBlocker{
+				CriterionID: "plan",
+				Reason:      "plan_revision_stale: task plan was modified after criteria enrollment",
+			})
+		}
+	}
+	if len(snapshot.Criteria) == 0 {
+		var approvedReceiptCount int
+		err := tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT COUNT(*) FROM task_plan_approval_receipts
+			WHERE task_id = ? AND decision = 'approve' AND subject_edited = 0
+		`), taskID).Scan(&approvedReceiptCount)
+		if err == nil && approvedReceiptCount > 0 {
+			snapshot.Blocked = true
+			snapshot.Blockers = append(snapshot.Blockers, models.TaskCompletionBlocker{
+				CriterionID: "plan",
+				Reason:      "unenrolled_plan: task plan is approved but completion criteria have not been enrolled",
+			})
+		} else {
+			scoped, _ := r.isScopedWorkflowTx(ctx, tx, taskID)
+			if scoped {
+				snapshot.Blocked = true
+				snapshot.Blockers = append(snapshot.Blockers, models.TaskCompletionBlocker{
+					CriterionID: "plan",
+					Reason:      "unenrolled_plan: task plan is required for scoped workflow but completion criteria have not been enrolled",
+				})
+			}
+		}
+	}
+	if len(snapshot.Criteria) > 0 && len(snapshot.Blockers) > 0 {
+		snapshot.Blocked = true
+	}
 	return snapshot, nil
 }
 
@@ -457,6 +636,16 @@ func (r *Repository) evidenceSubjectCurrentTx(ctx context.Context, tx *sql.Tx, t
 		// artifact query that issued one owns its lifetime; evidence stores that
 		// revision rather than dereferencing a plugin during completion.
 		return subject.Revision != "", nil
+	case models.TaskCompletionEvidencePlanIncrement:
+		var liveRevision int64
+		err := tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT criterion_revision FROM task_completion_criteria
+			WHERE task_id = ? AND criterion_id = ?
+		`), taskID, subject.ID).Scan(&liveRevision)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return err == nil && subject.Revision == strconv.FormatInt(liveRevision, 10), err
 	default:
 		return false, nil
 	}
@@ -620,6 +809,11 @@ func validateCompletionCriteria(criteria []models.TaskCompletionCriterion) error
 		if id == "" || len(id) > 128 || description == "" || len(description) > 2000 || !validRequiredEvidenceSubject(criterion.EvidenceSubject) {
 			return fmt.Errorf("completion criterion is invalid")
 		}
+		if criterion.EvidenceSubject.Kind == models.TaskCompletionEvidencePlanIncrement {
+			if strings.TrimSpace(criterion.EvidenceSubject.ID) != id {
+				return fmt.Errorf("plan_increment evidence subject ID %q must match criterion ID %q", criterion.EvidenceSubject.ID, id)
+			}
+		}
 		if _, exists := seen[id]; exists {
 			return fmt.Errorf("completion criterion IDs must be unique")
 		}
@@ -638,7 +832,8 @@ func validEvidenceSubject(subject models.TaskCompletionEvidenceSubject) bool {
 	}
 	switch subject.Kind {
 	case models.TaskCompletionEvidenceTaskRevision, models.TaskCompletionEvidenceExecution,
-		models.TaskCompletionEvidenceArtifact, models.TaskCompletionEvidenceGitHubPRHead:
+		models.TaskCompletionEvidenceArtifact, models.TaskCompletionEvidenceGitHubPRHead,
+		models.TaskCompletionEvidencePlanIncrement:
 		return true
 	default:
 		return false

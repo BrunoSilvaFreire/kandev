@@ -17,6 +17,7 @@ export type KanbanFilterableTask = {
   workflowStepId?: string;
   state?: TaskState;
   priority?: TaskPriority;
+  repositoryGroupIds?: string[];
 };
 
 export type KanbanFilterDimension =
@@ -84,7 +85,12 @@ const kanbanValueAccessor: ViewValueAccessor<KanbanFilterableTask, KanbanFilterD
         (task.repositoryId ? [task.repositoryId] : [])
       );
     case "repositoryGroup":
-      return task.repositoryIds ?? [];
+      return (
+        task.repositoryGroupIds ??
+        task.repositoryIds ??
+        task.repositories?.map((r) => r.repository_id) ??
+        []
+      );
     case "workflow":
       return task.workflowId;
     case "workflowStep":
@@ -113,7 +119,7 @@ export function applyKanbanFilterClauses<T extends KanbanFilterableTask>(
 ): T[] {
   if (clauses.length === 0) return tasks;
   const accessor: ViewValueAccessor<T, KanbanFilterDimension> = (task, dimension) => {
-    if (dimension === "repositoryGroup") {
+    if (dimension === "repositoryGroup" && context?.repositoryGroups) {
       const ids = task.repositoryIds ?? (task.repositories ?? []).map((r) => r.repository_id);
       const groups = context?.repositoryGroups ?? [];
       return groups

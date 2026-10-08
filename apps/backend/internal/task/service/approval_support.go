@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"go.uber.org/zap"
 )
 
@@ -59,6 +60,24 @@ func (a *ApprovalSupport) CurrentVersion(ctx context.Context, taskID, subject, d
 	default:
 		return "", nil
 	}
+}
+
+// CurrentPlanRevision returns the latest plan revision ID for the task.
+func (a *ApprovalSupport) CurrentPlanRevision(ctx context.Context, taskID string) (string, error) {
+	if a.plans == nil {
+		return "", nil
+	}
+	rev, err := a.plans.GetLatestRevision(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, ErrTaskPlanNotFound) || errors.Is(err, repoerrors.ErrTaskNotFound) {
+			return "", nil
+		}
+		return "", err
+	}
+	if rev == nil {
+		return "", nil
+	}
+	return rev.ID, nil
 }
 
 func (a *ApprovalSupport) documentVersion(ctx context.Context, taskID, documentKey string) (string, error) {

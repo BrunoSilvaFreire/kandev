@@ -11,12 +11,14 @@ import (
 // Callers may add live activity values when an in-memory activity provider is
 // available; the rest of the fields come from task_sessions and metadata.
 type RebuildSession struct {
-	ID                  string
-	State               string
-	IsPrimary           bool
-	ForegroundActivity  string
-	ActiveSubagentCount int
-	ActiveError         *ActiveErrorSummary
+	ID                     string
+	State                  string
+	IsPrimary              bool
+	ForegroundActivity     string
+	ActiveSubagentCount    int
+	ActiveError            *ActiveErrorSummary
+	PossibleQuestion       bool
+	PossibleQuestionTurnID string
 }
 
 // RebuildGit is one authoritative Git snapshot. Repository is empty for the
@@ -110,6 +112,9 @@ func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 			isPrimary:           inputSession.IsPrimary,
 			foregroundActivity:  inputSession.ForegroundActivity,
 			activeSubagentCount: maxInt(inputSession.ActiveSubagentCount, 0),
+		}
+		if inputSession.IsPrimary && inputSession.PossibleQuestion {
+			setPossibleQuestionState(state, true, inputSession.PossibleQuestionTurnID)
 		}
 		if inputSession.ActiveError != nil {
 			if activeError := normalizeRebuildError(inputSession.ActiveError, input.Now); activeError != nil {

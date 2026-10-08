@@ -120,8 +120,13 @@ func validateRuntimeBundle(dir, source string, build ...BuildInfo) (runtimeBundl
 	}
 	if hasManifest && manifest.Variant == runtimeapi.RemoteHelperVariantStandard {
 		err = validateStandardRuntimeBundle(dir)
+	} else if hasManifest {
+		err = validateFullRuntimeBundle(dir, manifest, true)
 	} else {
-		err = validateFullRuntimeBundle(dir, manifest, hasManifest)
+		// A release bundle always ships remote-helpers.json. A manifest-less
+		// bundle is a local build, and this fork builds and stages only the host
+		// platform, so its helpers are optional: validate any that are present.
+		err = validateLegacyRuntimeBundle(dir)
 	}
 	if err != nil {
 		return runtimeBundle{}, err
@@ -143,6 +148,25 @@ func validateFullRuntimeBundle(dir string, manifest *runtimeapi.RemoteHelperMani
 	for _, helper := range requiredAgentctlRemoteHelpers {
 		if err := validateRuntimeBundleHelper(dir, helper, manifest, hasManifest); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// validateLegacyRuntimeBundle validates the manifest-less layout. Unlike the
+// release variants, a manifest-less bundle may be host-only, so remote helpers
+// are optional; every helper that is present is still validated so a corrupt or
+// unsigned darwin/arm64 artifact cannot slip through.
+func validateLegacyRuntimeBundle(dir string) error {
+	for _, helper := range requiredAgentctlRemoteHelpers {
+		path := filepath.Join(dir, "bin", helper.Name)
+		if !exists(path) {
+			continue
+		}
+		if helper.MustBeSigned {
+			if err := validateSignedDarwinArm64Helper(path, helper); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

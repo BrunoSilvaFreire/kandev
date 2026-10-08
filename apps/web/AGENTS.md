@@ -276,10 +276,8 @@ and `lib/plugins/types.ts` are its detailed host implementation — all three mu
 - **Task panels** (`registerTaskPanel`): one generic dockview component, `"plugin-panel"`, shared by
   every plugin — identity lives in `params: { pluginId, panelKey }` (id helpers in
   `lib/state/layout-manager/plugin-panels.ts`). `renderPanel` in `dockview-shared.tsx` and
-  `dockview-panel-content.tsx` each get exactly one `"plugin-panel"` case (lookup tables, not
-  switches). `PluginTaskPanel` (`components/task/`) resolves the registration behind a
-  `PluginErrorBoundary`; `mobileEnabled: true` also renders it via the phone bottom nav
-  (`session-mobile-bottom-nav.tsx`) with `presentation: "mobile"`.
+  `dockview-panel-content.tsx` each get exactly one `"plugin-panel"` case (lookup tables, not switches). `PluginTaskPanel` (`components/task/`) resolves the registration behind a
+  `PluginErrorBoundary`; `mobileEnabled: true` also renders it via the phone bottom nav (`session-mobile-bottom-nav.tsx`) with `presentation: "mobile"`.
 - **Task contributions:** `registerTaskMenuAction({ group: "edit", ... })` adds card-only actions to
   the `Edit` submenu. Group `"primary"` adds top-level actions to card and desktop/mobile task-row
   menus; declaring `items(context)` renders an action of either group as a submenu of its children
@@ -292,6 +290,8 @@ and `lib/plugins/types.ts` are its detailed host implementation — all three mu
 ## Sidebar task views
 
 `sidebarViewsByWorkspace` stores personal view state by workspace ID. Use `selectSidebarViews`, preserve workspace identity through async saves and rollback, and keep `sidebarViews` only for legacy wire/hydration compatibility. The backend owns migration/defaults; writes use scoped `sidebar_view_state`, never legacy global fields. Shared view-model, tab-close, and shared-task-state contracts: [REFERENCE.md](REFERENCE.md).
+
+The shared Home view model (`lib/view-model/`) owns filter metadata and predicates, clause evaluation, grouping, per-view capabilities, and Repository Group semantics. Sidebar and Threads editors use `components/view-model/ViewFilterEditor`; keep display labels and option resolution at their view adapters. Kanban/List persist their shared clauses and group under `task_view_filters`/`task_view_groups`; the first Kanban/List read writes legacy repository/priority selections into clauses. `QuickFilterBar` reads and updates the same filter clauses, while pin selection persists in `home_quick_filters`. The shared controls are mounted in Kanban, List, Threads, and sidebar headers. A tab X closes and preserves its conversation; deletion is a separate confirmed context-menu action. Quick Chats sits between Usage and New Task in the main navigation.
 
 ## Testing notes
 

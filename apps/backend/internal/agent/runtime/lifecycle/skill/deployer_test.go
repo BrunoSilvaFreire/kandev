@@ -532,3 +532,75 @@ func TestDeploy_MergesSkillIDsAndDesiredSkills(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateSkills(t *testing.T) {
+	base := t.TempDir()
+	reader := &fakeSkillReader{skills: map[string]*skill.Skill{
+		"sk-user":   {Slug: "sk-user", Content: "# user skill", IsSystem: false},
+		"sk-system": {Slug: "sk-system", Content: "# system skill", IsSystem: true},
+	}}
+	d := newDeployer(t, base, reader, &fakeInstructionLister{})
+
+	tests := []struct {
+		name          string
+		profile       *settingsmodels.AgentProfile
+		officeRuntime bool
+		wantErr       bool
+		errContains   string
+	}{
+		{
+			name: "valid user skill in non-office runtime",
+			profile: &settingsmodels.AgentProfile{
+				Name:     "user-agent",
+				SkillIDs: `["sk-user"]`,
+			},
+			officeRuntime: false,
+			wantErr:       false,
+		},
+		{
+			name: "missing skill returns error",
+			profile: &settingsmodels.AgentProfile{
+				Name:     "missing-skill-agent",
+				SkillIDs: `["sk-nonexistent"]`,
+			},
+			officeRuntime: false,
+			wantErr:       true,
+			errContains:   "could not be resolved",
+		},
+		{
+			name: "system skill in non-office runtime returns error",
+			profile: &settingsmodels.AgentProfile{
+				Name:     "system-skill-agent",
+				SkillIDs: `["sk-system"]`,
+			},
+			officeRuntime: false,
+			wantErr:       true,
+			errContains:   "Office system skill and cannot be resolved in a non-Office workflow step",
+		},
+		{
+			name: "system skill in office runtime succeeds",
+			profile: &settingsmodels.AgentProfile{
+				Name:     "office-system-agent",
+				SkillIDs: `["sk-system"]`,
+			},
+			officeRuntime: true,
+			wantErr:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := d.ValidateSkills(context.Background(), tt.profile, tt.officeRuntime)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tt.errContains)
+				}
+			} else if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}

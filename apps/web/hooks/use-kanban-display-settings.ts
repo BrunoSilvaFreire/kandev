@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useUserDisplaySettings } from "@/hooks/use-user-display-settings";
 import { useTaskListingView } from "@/hooks/use-task-listing-view";
@@ -183,6 +183,15 @@ function useKanbanViewFilterHandlers(
     userSettings.repositoryIds,
     userSettings.kanbanPriorityFilterTokens,
   );
+  const needsLegacyMigration =
+    userSettings.taskViewFilters?.[taskView] === undefined && filters.length > 0;
+  useEffect(() => {
+    if (!needsLegacyMigration) return;
+    commitSettings({
+      ...baseSettingsPayload(userSettings),
+      taskViewFilters: { ...(userSettings.taskViewFilters ?? {}), [taskView]: filters },
+    });
+  }, [commitSettings, filters, needsLegacyMigration, taskView, userSettings]);
   const group = (userSettings.taskViewGroups?.[taskView] ?? "none") as ViewGroupKey;
   const onFiltersChange = useCallback(
     (next: ViewFilterClause[]) => {

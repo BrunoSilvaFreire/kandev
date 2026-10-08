@@ -31,6 +31,23 @@ func buildProviderUsageService(dbPool *db.Pool, adapter *usageProviderAdapter, p
 	return providerusage.NewService(repo, adapter, profiles, accounts, indexer, log), nil
 }
 
+// buildProviderUsageServiceForServices builds the provider-usage service from
+// route wiring when the shared usage adapter is present. It returns (nil, nil)
+// when no adapter is wired, so the caller can leave the Usage routes
+// unregistered instead of failing startup.
+func buildProviderUsageServiceForServices(
+	services *Services,
+	dbPool *db.Pool,
+	repos *Repositories,
+	home string,
+	log *logger.Logger,
+) (*providerusage.Service, error) {
+	if services == nil || services.UsageAdapter == nil {
+		return nil, nil
+	}
+	return buildProviderUsageService(dbPool, services.UsageAdapter, repos.AgentSettings, home, log)
+}
+
 // mockUsageTagPrefix marks an E2E-only profile tag carrying a deterministic
 // provider utilization percentage (for example "mock-quota-10" means 10%
 // utilization, 90% remaining). It is read only under the e2e mock profile so

@@ -533,9 +533,11 @@ func loadTaskSessionObservations(
 			continue
 		}
 		input := statussummary.RebuildSession{
-			ID:        session.ID,
-			State:     string(session.State),
-			IsPrimary: session.IsPrimary,
+			ID:                     session.ID,
+			State:                  string(session.State),
+			IsPrimary:              session.IsPrimary,
+			PossibleQuestion:       models.SessionPossibleQuestion(session.Metadata),
+			PossibleQuestionTurnID: models.SessionPossibleQuestionTurnID(session.Metadata),
 		}
 		if activityProvider != nil {
 			activity := activityProvider.ForegroundActivity(session.ID)

@@ -531,6 +531,7 @@ func (h *Handlers) registerTaskModeHandlers(d *guardedMCPDispatcher) {
 	h.registerTaskQuestionHandlers(d)
 	h.registerReviewHandlers(d)
 	h.registerCanvasHandlers(d)
+	h.registerCompletionGateHandlers(d)
 }
 
 func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {

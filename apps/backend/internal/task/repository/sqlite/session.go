@@ -2972,6 +2972,35 @@ func (r *Repository) SetSessionMetadataKey(ctx context.Context, sessionID, key s
 	return nil
 }
 
+// SetSessionAdvisoryMetadataKey atomically sets one advisory metadata key
+// without touching updated_at. It exists for clearable, derived projections
+// (for example possible_question) whose persistence must not disturb the
+// authoritative session state-change timestamp used for publish ordering.
+func (r *Repository) SetSessionAdvisoryMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error {
+	valueJSON, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("failed to serialize metadata value: %w", err)
+	}
+	query := "UPDATE task_sessions SET metadata = json_set(" + sqliteMetadataObject + ", ?, json(?)) WHERE id = ?"
+	path := jsonPath(key)
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = "UPDATE task_sessions SET metadata = jsonb_set(" + postgresMetadataObject + ", ARRAY[?]::text[], ?::jsonb, true)::text WHERE id = ?"
+		path = key
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), path, string(valueJSON), sessionID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("agent session not found: %s", sessionID)
+	}
+	return nil
+}
+
 // SetSessionMetadataKeyIfState atomically sets one metadata key only while the
 // session remains in expectedState. Runtime recovery uses this to keep a
 // follow-up marker from being attached to a session that was stopped between

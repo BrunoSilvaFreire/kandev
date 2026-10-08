@@ -1134,6 +1134,55 @@ const SessionMetaKeyPendingStepCompletion = "pending_step_completion_signal"
 // attempt identity.
 const SessionMetaKeyAgentStartAttemptID = "agent_start_attempt_id"
 
+// SessionMetaKeyPossibleQuestion stores the advisory possible-question hint
+// under TaskSession.Metadata when an agent finishes a turn with trailing
+// decision or question prose without setting a structured clarification or move.
+const SessionMetaKeyPossibleQuestion = "possible_question"
+
+// SessionPossibleQuestion reports whether the session metadata indicates an advisory possible question hint.
+func SessionPossibleQuestion(metadata map[string]interface{}) bool {
+	if len(metadata) == 0 {
+		return false
+	}
+	v, ok := metadata[SessionMetaKeyPossibleQuestion]
+	if !ok {
+		return false
+	}
+	switch val := v.(type) {
+	case bool:
+		return val
+	case string:
+		return strings.EqualFold(val, "true")
+	case map[string]interface{}:
+		if active, ok := val["active"].(bool); ok {
+			return active
+		}
+		return len(val) > 0
+	default:
+		return false
+	}
+}
+
+// SessionPossibleQuestionTurnID returns the turn identity stored with the
+// advisory possible-question hint, or "" when the hint is absent or malformed.
+// The turn identity lets consumers distinguish a resurfaced hint on a new turn
+// from the hint they already acknowledged.
+func SessionPossibleQuestionTurnID(metadata map[string]interface{}) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	v, ok := metadata[SessionMetaKeyPossibleQuestion]
+	if !ok {
+		return ""
+	}
+	val, ok := v.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	turnID, _ := val["turn_id"].(string)
+	return strings.TrimSpace(turnID)
+}
+
 // SessionMetaKeyLastAgentError stores the last recoverable agent runtime
 // failure for UI surfaces that need to keep the error visible after auto-resume.
 const SessionMetaKeyLastAgentError = "last_agent_error"
@@ -3261,8 +3310,21 @@ type TaskPlanRevision struct {
 	WorkflowStepID    string    `json:"workflow_step_id,omitempty"`
 	WorkflowStepName  string    `json:"workflow_step_name,omitempty"`
 	WorkflowStepColor string    `json:"workflow_step_color,omitempty"`
+	WriteVersion      string    `json:"write_version,omitempty"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"` // bumps on coalesce merge
+}
+
+// TaskPlanApprovalReceipt is an immutable record proving human approval of a
+// specific plan revision and HEAD write_version.
+type TaskPlanApprovalReceipt struct {
+	ID             string    `json:"id"`
+	TaskID         string    `json:"task_id"`
+	PlanRevisionID string    `json:"plan_revision_id"`
+	WriteVersion   string    `json:"write_version"`
+	Decision       string    `json:"decision"`
+	SubjectEdited  bool      `json:"subject_edited"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // TaskWalkthrough is an agent-authored guided code tour attached to a task.

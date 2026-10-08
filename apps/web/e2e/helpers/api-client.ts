@@ -2863,6 +2863,8 @@ export class ApiClient {
       updated_at: string;
       completed_at?: string | null;
       task_environment_id?: string;
+      possible_question?: boolean;
+      possible_question_turn_id?: string;
       workspace_path?: string;
       worktree_path?: string;
       worktree_branch?: string;

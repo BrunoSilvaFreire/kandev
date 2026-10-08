@@ -883,7 +883,7 @@ func (s *Server) deleteExecutorProfileHandler() server.ToolHandlerFunc {
 func (s *Server) forwardToBackend(ctx context.Context, action string, payload interface{}) (*mcp.CallToolResult, error) {
 	var result map[string]interface{}
 	if err := s.backend.RequestPayload(ctx, action, payload, &result); err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return backendToolError(err), nil
 	}
 	data, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {

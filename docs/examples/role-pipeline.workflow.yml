@@ -22,6 +22,7 @@ workflows:
           When finished, save the full resume/handoff report with write_task_document_kandev:
           document_key "spike", type "spike", title "Spike report". If a "spike" document already holds a
           different investigation, use the next free key ("spike-2", "spike-3", ...) instead of overwriting it.
+          If this entry carries a SPIKE EXPLORATION REQUEST from the Architect, answer exactly those questions, cite file:line evidence, and save the findings as the next free spike document (do not overwrite earlier reports).
           Do NOT create or update the task plan: the implementation plan is owned by the Architect step.
           Then call step_complete_kandev.
         events:
@@ -50,28 +51,57 @@ workflows:
           How you were entered decides what to do:
           A) First entry (no escalation text below): read the Spike report with get_task_document_kandev(document_key "spike")
              (list_task_documents_kandev shows "spike-2"...). If it is absent, work from the task prompt and state plainly which
-             evidence is missing; never invent evidence. Verify its claims against the repository, then write the final ordered
-             implementation plan (explicit verification commands and stop/rollback gates) with create_task_plan_kandev, or with
-             update_task_plan_kandev(new_revision=true) if a plan already exists (any later plan write in the same turn also uses
-             new_revision=true if the draft should stay readable). Then request human approval with
-             request_approval_kandev(subject "task_plan", title "Plan revision N", summary: 3-6 lines naming what changed since the
-             last request and where to resume). Handle the answer:
-             - approve: call step_complete_kandev. The task moves to Implement.
+             evidence is missing; never invent evidence. Verify its claims against the repository. Write the technical design file
+             under docs/specs/tasks/system-design/<slug>.md and publish its exact content as the "technical-design" task document
+             with write_task_document_kandev(document_key="technical-design", type="custom", title="Technical design"). Write the final
+             ordered implementation plan (linking the technical design repository path and task document key, explicit verification commands,
+             stop/rollback gates, and declared plan increments / completion criteria) with create_task_plan_kandev, or with
+             update_task_plan_kandev(new_revision=true) if a plan already exists (if new_revision is unsupported by the deployed tool schema,
+             omit it). Then request human approval with request_approval_kandev(subject "task_plan", title "Plan revision N", summary: 3-6 lines
+             naming what changed since the last request, linking the design document, and where to resume). Handle the answer:
+             - approve: register the declared plan increments as task completion criteria with set_task_completion_criteria_kandev(plan_revision_id=<approved_revision_id>, expected_revision=0, criteria=[{"id": "I1", "description": "..."}, ...]) (or enroll_task_plan_increments_kandev). Then call step_complete_kandev. The task moves to Implement.
              - revise: if subject_edited is true, re-read the plan first with get_task_plan_kandev and keep the user's edits. Address
-               the feedback and every item in plan_comments, then write a new revision with
+               the feedback and every item in plan_comments, revise the technical design file and document if technical decisions changed (keeping prior document revision readable), then write a new revision with
                update_task_plan_kandev(new_revision=true, expected_version=<current_version from the answer>), and request approval
                again with request_approval_kandev.
              - reject: end your turn without calling step_complete_kandev, with a short summary of why the plan stopped.
              If the answer arrives as the next message instead (the user answered after the tool call timed out), act on it exactly
              the same way.
-          B) Escalation from the Implementer (instructions below start with "ESCALATION"): read the current plan and the evidence
-             given, verify it against the repository, and decide. Either revise the plan with update_task_plan_kandev(new_revision=true),
+          B) Escalation from the Implementer (instructions below start with "ESCALATION"): read the current plan, technical design, and the evidence
+             given, verify it against the repository, and decide. If a technical decision changed, revise the technical design file and publish the updated content with write_task_document_kandev(document_key="technical-design", type="custom") while keeping prior design decisions traceable. Either revise the plan with update_task_plan_kandev(new_revision=true),
              keeping untouched sections and putting a note at the top: "Revision N (supersedes revision M): what changed, why, where
              to resume" (earlier plans stay readable via list_task_plan_revisions_kandev / get_task_plan_revision_kandev), or leave
              the plan unchanged and give advice only. When a human should sign off (scope or risk change, destructive step, ambiguous
-             requirement), call request_approval_kandev first and handle its answer as in case A. Then hand back with
+             requirement), call request_approval_kandev first and handle its answer as in case A (registering revised criteria with set_task_completion_criteria_kandev if approved). Then hand back with
              move_task_kandev(task_id, transition="handoff", entry_options={"instructions": "<what changed, the plan revision
-             number, where to resume>"}). End your turn WITHOUT calling step_complete_kandev.
+             number, where to resume>. Full handoff: get_task_document_kandev(document_key=\"handoff-...\")."}). End your turn WITHOUT calling step_complete_kandev.
+          C) Returned from a SPIKE EXPLORATION REQUEST you issued (your session remembers it; there is no special entry
+             text): read the newest spike report(s) with list_task_documents_kandev / get_task_document_kandev - the appended
+             "spike-2", "spike-3", ... document holds the new findings. Verify them against the repository, then continue as in
+             case A (finish the plan and request human approval, or issue another exploration request).
+
+          REQUESTING MORE EXPLORATION (whenever you are in the Architect step): if the spike evidence is absent, stale, or
+          insufficient to decide the plan, do NOT guess and do NOT write a plan yet. Call
+          move_task_kandev(task_id, transition="request_exploration", entry_options={"instructions": "SPIKE EXPLORATION REQUEST:
+          <the specific questions, the files or areas to inspect, and the exact evidence you need>"}). The Spike step re-runs,
+          saves its findings as the next free spike document, and returns control here. End your turn WITHOUT calling
+          step_complete_kandev until a plan is written and approved.
+
+          DECISION BARRIER: Never end a turn with a prose question or ask the user a question in chat text. End decisions
+          through request_approval_kandev or ask_user_question_kandev. A structured ask is a hard barrier that reaches the user's
+          Needs-you Inbox. Do NOT ask when you can take a configured named transition (handoff, request_exploration) or call
+          step_complete_kandev.
+
+          HANDOFF DOCUMENT (required before the `handoff` move to Implement):
+          Write a handoff document with write_task_document_kandev (type "handoff", document_key "handoff-architect-to-implement"
+          or next free key "handoff-architect-to-implement-2", ...) containing:
+          1) Objective and resume point (one sentence goal, exact place to continue),
+          2) What changed (every file created/modified/deleted with file:line link, and what changed),
+          3) Verified evidence (verification commands ran with results, test output, run ids),
+          4) Decisions and rationale (what chosen and why),
+          5) Open questions and blockers.
+          Then pass its document_key in entry_options.instructions so the Implementer resumes without re-searching the repository or conversation.
+          If set_task_completion_criteria_kandev, move_task_kandev, or named transitions are unavailable in the deployed tool schema, report the capability error or fall back to step_complete_kandev.
         events:
           on_enter:
             - type: auto_start_agent
@@ -82,7 +112,11 @@ workflows:
               direction: forward
               to_step_position: 3
               skip_step_prompt: true
-              instructions: "ARCHITECT HANDOFF: re-read the task plan with get_task_plan_kandev (the latest revision is current) and resume."
+              instructions: "ARCHITECT HANDOFF: re-read the task plan with get_task_plan_kandev (the latest revision is current) and the handoff document named in this entry's instructions, then resume."
+            - name: request_exploration
+              direction: backward
+              to_step_position: 1
+              instructions: "SPIKE EXPLORATION REQUEST: the Architect needs more evidence before it can plan. Read the existing spike report(s) with list_task_documents_kandev / get_task_document_kandev(document_key \"spike\"), investigate only the questions in this entry's instructions, and save the findings as a NEW spike document with the next free key (\"spike-2\", \"spike-3\", ...) and type \"spike\" - never overwrite an earlier report. Then call step_complete_kandev to return to the Architect."
         is_start_step: false
         show_in_command_panel: true
         allow_manual_move: true
@@ -99,23 +133,35 @@ workflows:
         position: 3
         color: bg-blue-500
         prompt: |
-          ROLE: Implementer. Read the task plan with get_task_plan_kandev and implement it step by step in the current working
+          ROLE: Implementer. Read the task plan with get_task_plan_kandev and the technical design document with get_task_document_kandev(document_key="technical-design") (and its linked repository file). If the technical design document is missing or contradicts the repository, report it or escalate rather than guessing. Implement the plan step by step in the current working
           tree, running the plan's verification commands. Preserve existing uncommitted work. Do not commit. Keep working until the plan's
           gates are finished or you hit a blocker; do not end your turn just to report progress. Background runs you start must be awaited
           and their artifacts checked before you finish.
 
           Escalate to the Architect instead of guessing when the plan is wrong, contradicted by evidence, missing a decision, or a gate
           fails for a reason the plan does not cover. "The Architect" is the KanDev workflow step named "Architect" (its own agent session),
-          never a native/CLI subagent you spawn yourself. Call
-          move_task_kandev(task_id, transition="escalate", entry_options={"instructions": "ESCALATION: <what you tried, the evidence
-          (paths, test output, run ids), and the specific question or plan change needed>"}) and end your turn WITHOUT calling
-          step_complete_kandev. After an escalation your next prompt carries the ARCHITECT HANDOFF; re-read the task plan (the latest
-          revision is current).
+          never a native/CLI subagent you spawn yourself.
+
+          DECISION BARRIER: Never end a turn with a prose question or ask the user a question in chat text. End decisions through
+          ask_user_question_kandev or move_task_kandev(transition="escalate"). A structured ask is a hard barrier that reaches the user's
+          Needs-you Inbox. Do NOT ask when you can escalate or call step_complete_kandev.
+
+          HANDOFF DOCUMENT (required before any move):
+          Before calling move_task_kandev(transition="escalate"), write a handoff document with write_task_document_kandev (type "handoff",
+          document_key "handoff-implement-to-architect" or next free key) containing:
+          1) Objective and resume point (one sentence goal, exact place to continue),
+          2) What changed (every file created/modified/deleted with file:line link, and what changed),
+          3) Verified evidence (verification commands ran with results, test output, run ids),
+          4) Decisions and rationale (what chosen and why),
+          5) Open questions and blockers (the specific question or plan change needed).
+          Call move_task_kandev(task_id, transition="escalate", entry_options={"instructions": "ESCALATION: <summary>. Full handoff: get_task_document_kandev(document_key=\"handoff-...\")."}) and end your turn WITHOUT calling step_complete_kandev.
+          If move_task_kandev or named transitions are unavailable in the deployed tool schema, report the capability error.
+          After an escalation your next prompt carries the ARCHITECT HANDOFF; re-read the task plan (the latest revision is current).
 
           If your turn starts with REVIEW CHANGES REQUESTED, read the task document "review" with get_task_document_kandev and fix
           every BLOCKER it names before anything else.
 
-          When the plan's gates are done, report what changed and the test/run results, then call step_complete_kandev.
+          When the plan's gates and declared increments are done, report what changed and the test/run results, then call step_complete_kandev.
         events:
           on_enter:
             - type: auto_start_agent
@@ -143,18 +189,47 @@ workflows:
         position: 4
         color: bg-yellow-500
         prompt: |
-          ROLE: Reviewer. Read the task plan (get_task_plan_kandev) and the implementer's conversation
-          (get_task_conversation_kandev), then review the uncommitted diff against the plan. Do not edit files.
+          ROLE: Reviewer. Read the task plan (get_task_plan_kandev), the technical design document (get_task_document_kandev(document_key="technical-design")), and the implementer's conversation
+          (get_task_conversation_kandev). If the technical design document is missing or diverges from the plan, report it as a blocker rather than guessing. Review the uncommitted diff against both the plan and the technical design. Do not edit files (except adding TODO comments on PASS).
           Read any earlier "review" document first with list_task_documents_kandev / get_task_document_kandev and verify
           that each earlier BLOCKER is actually resolved.
 
-          Write the new review with write_task_document_kandev(document_key "review", type "review", title "Review").
-          It starts with exactly "VERDICT: PASS" or "VERDICT: CHANGES REQUESTED", then the BLOCKER / SUGGESTION items with
-          file:line.
+          DECISION BARRIER: Never end a turn with a prose question or ask the user a question in chat text. Use structured actions
+          (request_changes, pass, or ask_user_question_kandev if user clarification is required). A structured ask is a hard barrier.
 
-          - PASS: post a short chat summary. A human moves the task to Done.
-          - CHANGES REQUESTED: call move_task_kandev(task_id, transition="request_changes") without pasting the review into the
-            move, then end your turn.
+          Deliver exactly one of two verdicts:
+
+          VERDICT: CHANGES REQUESTED (any BLOCKER, or a SUGGESTION serious enough to block):
+          1. Write the review with write_task_document_kandev(document_key "review", type "review", title "Review"), starting
+             with exactly "VERDICT: CHANGES REQUESTED", then the BLOCKER / SUGGESTION items with file:line. Do not fix the findings yourself.
+          2. Write a handoff document with write_task_document_kandev(type "handoff", document_key "handoff-review-to-implement" or next free key)
+             containing: 1) Objective & resume point, 2) Files and lines affected, 3) Verified evidence & test output, 4) Decisions & rationale, 5) Unresolved blockers.
+          3. Call move_task_kandev(task_id, transition="request_changes", entry_options={"instructions": "REVIEW CHANGES REQUESTED: <summary>. Full handoff: get_task_document_kandev(document_key=\"handoff-...\")."})
+             without pasting the full review into the move, then end your turn.
+          UNACTIONABLE BLOCKER - do NOT loop: Before requesting changes, confirm every BLOCKER is actionable by the Implementer within its current scope.
+          A BLOCKER that needs a human or operator action (such as llm-sudo), a missing external credential or infrastructure, or a change to the approved plan scope
+          is NOT the Implementer's to fix. Do not emit CHANGES REQUESTED for that same unactionable BLOCKER again; instead escalate to the Architect with
+          move_task_kandev(task_id, transition="escalate", entry_options={"instructions": "ESCALATION: <the unactionable BLOCKER and the decision needed>"})
+          and end your turn WITHOUT step_complete_kandev. If the decision needs the user, call ask_user_question_kandev first.
+
+          VERDICT: PASS (no BLOCKER):
+          - If any declared plan increments remain pending (partial PASS): do NOT call move_task_kandev(transition="pass"). Record evidence for the reviewed increment using verify_task_completion_criterion_kandev(criterion_id=..., evidence={"summary": "...", "subject": {"kind": "plan_increment", "id": "...", "revision": "<criterion_revision>"}}, expected_revision=<gate_revision>), post a clear continuation summary, and move through request_changes to return to Implement with the next resume point.
+          - When all declared plan increments and gates are fully verified:
+            1. Record evidence for each remaining increment with verify_task_completion_criterion_kandev(criterion_id=..., evidence={"summary": "...", "subject": {"kind": "plan_increment", "id": "...", "revision": "<criterion_revision>"}}, expected_revision=<gate_revision>).
+            2. Turn every remaining non-blocking SUGGESTION into a `TODO:` comment in the code at the exact place it applies
+               (same file, near the affected lines). One line each: `TODO: <what to change and why>`. These TODO comments are
+               the only edits you make: do not fix BLOCKERs and do not rewrite the implementation.
+            3. Write the review with write_task_document_kandev(document_key "review", type "review", title "Review"), starting
+               with exactly "VERDICT: PASS", then a short list of what the TODOs cover.
+            4. Produce a code walkthrough with show_walkthrough_kandev: ordered steps from the entry point through the changed
+               call chain, each anchored with file + line (use line_end for ranges) and a concise text. Cover the real behaviour
+               change and every TODO you added.
+            5. Move the task to Done yourself: move_task_kandev(task_id, transition="pass") and end your turn.
+               On a PASS the "review" document and the walkthrough are the durable handoff record, so no separate handoff document
+               is required for the `pass` move.
+            If move_task_kandev(transition="pass") returns a completion gate blocked error, check get_task_completion_gate_kandev, report the unverified criteria and return to
+            Implement via request_changes or ask user for an override via ask_user_question_kandev.
+            If verify_task_completion_criterion_kandev, move_task_kandev, or named transitions are unavailable in the deployed tool schema, report the capability error.
         events:
           on_enter:
             - type: auto_start_agent
@@ -164,6 +239,11 @@ workflows:
               to_step_position: 3
               skip_step_prompt: true
               instructions: "REVIEW CHANGES REQUESTED: read the task document \"review\" with get_task_document_kandev and fix every BLOCKER, then call step_complete_kandev."
+            - name: pass
+              direction: forward
+              to_step_position: 5
+              skip_step_prompt: true
+              instructions: "REVIEW PASSED: the task is complete. Read the task document \"review\" and the walkthrough with get_task_document_kandev / get_walkthrough_kandev; the non-blocking suggestions are recorded as TODO comments in the code."
         is_start_step: false
         show_in_command_panel: true
         allow_manual_move: true
@@ -173,7 +253,7 @@ workflows:
           agent_name: Claude
           model: opus[1m]
           mode: default
-        profile_session_start_policy: new
+        profile_session_start_policy: reuse
         profile_session_end_policy: park
         complete_task_on_enter: false
       - name: Done

@@ -28,10 +28,11 @@ func (f *fakeProfileReader) GetAgentProfile(_ context.Context, _ string) (*setti
 // recordingDeployer captures whether DeploySkills was called and lets tests
 // inject a return value.
 type recordingDeployer struct {
-	called atomic.Int32
-	last   SkillDeployRequest
-	result SkillDeployResult
-	err    error
+	called      atomic.Int32
+	last        SkillDeployRequest
+	result      SkillDeployResult
+	err         error
+	validateErr error
 }
 
 type lifecycleSkillReader struct {
@@ -49,6 +50,10 @@ func (r *recordingDeployer) DeploySkills(_ context.Context, req SkillDeployReque
 	r.called.Add(1)
 	r.last = req
 	return r.result, r.err
+}
+
+func (r *recordingDeployer) ValidateSkills(_ context.Context, _ *settingsmodels.AgentProfile, _ bool) error {
+	return r.validateErr
 }
 
 func newSkillDeployTestManager(t *testing.T) *Manager {
@@ -324,5 +329,23 @@ func TestRunSkillDeploy_NoProfileID(t *testing.T) {
 
 	if rec.called.Load() != 0 {
 		t.Errorf("missing profile id should skip deploy, called %d times", rec.called.Load())
+	}
+}
+
+func TestPreflightProfileSkills(t *testing.T) {
+	mgr := newSkillDeployTestManager(t)
+	rec := &recordingDeployer{}
+	mgr.skillDeployer = rec
+	mgr.agentProfileReader = &fakeProfileReader{
+		profile: &settingsmodels.AgentProfile{ID: "p1", Name: "test"},
+	}
+
+	if err := mgr.PreflightProfileSkills(context.Background(), "p1", false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	rec.validateErr = errors.New("skill not found")
+	if err := mgr.PreflightProfileSkills(context.Background(), "p1", false); err == nil {
+		t.Fatal("expected error, got nil")
 	}
 }

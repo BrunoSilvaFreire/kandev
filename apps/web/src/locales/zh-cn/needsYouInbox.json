@@ -36,5 +36,11 @@
   "tabLabel": "需要你处理",
   "failedClauseSome_one": "此列表不计入失败的任务。{{count}} 个任务也失败了,请查看失败标签页。",
   "failedClauseSome_other": "此列表不计入失败的任务。{{count}} 个任务也失败了,请查看失败标签页。",
-  "failedClauseNone": "此列表不计入失败的任务。此工作区目前没有失败的任务,您可以随时查看失败标签页。"
+  "failedClauseNone": "此列表不计入失败的任务。此工作区目前没有失败的任务,您可以随时查看失败标签页。",
+  "triageTabLabel": "分类",
+  "triageEmpty": "目前没有需要您处理的事项。",
+  "triageCaption": "可能的问题只是提示，请打开对话进行回复。",
+  "triageKindClarification": "待确认",
+  "triageKindStaleReview": "滞留的评审",
+  "triageKindPossibleQuestion": "可能的问题"
 }

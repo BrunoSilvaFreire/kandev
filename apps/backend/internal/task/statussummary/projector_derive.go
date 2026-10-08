@@ -10,20 +10,55 @@ import (
 
 func deriveSummary(state *projectionState) TaskStatusSummary {
 	primary, foregroundActivity, activeSubagentCount := deriveSessionFields(state)
-	return TaskStatusSummary{
-		PrimarySession:      primary,
-		ForegroundActivity:  foregroundActivity,
-		ActiveSubagentCount: activeSubagentCount,
-		PendingAction:       derivePendingAction(state),
-		ActiveError:         deriveActiveError(state),
-		TaskError:           cloneActiveError(state.taskError),
-		Git:                 deriveGitSummary(state),
-		PullRequest:         derivePullRequestSummary(state),
-		QueuedPromptCount:   state.queuedCount,
-		LastActivityAt:      cloneTimePtr(state.lastActivityAt),
-		LaunchQueue:         cloneLaunchQueue(state.launchQueue),
-		CompletionGate:      cloneCompletionGate(state.completionGate),
+	pendingAction := derivePendingAction(state)
+	possibleQuestion := state.possibleQuestion && pendingAction == ""
+	possibleQuestionTurnID := ""
+	if possibleQuestion {
+		possibleQuestionTurnID = state.possibleQuestionTurnID
 	}
+	return TaskStatusSummary{
+		PrimarySession:         primary,
+		ForegroundActivity:     foregroundActivity,
+		ActiveSubagentCount:    activeSubagentCount,
+		PendingAction:          pendingAction,
+		PossibleQuestion:       possibleQuestion,
+		PossibleQuestionTurnID: possibleQuestionTurnID,
+		ActiveError:            deriveActiveError(state),
+		TaskError:              cloneActiveError(state.taskError),
+		Git:                    deriveGitSummary(state),
+		PullRequest:            derivePullRequestSummary(state),
+		QueuedPromptCount:      state.queuedCount,
+		LastActivityAt:         cloneTimePtr(state.lastActivityAt),
+		LaunchQueue:            cloneLaunchQueue(state.launchQueue),
+		CompletionGate:         cloneCompletionGate(state.completionGate),
+	}
+}
+
+// setPossibleQuestionState keeps the advisory flag and its turn identity in
+// lockstep: an active hint always carries its producing turn, and a cleared
+// hint never leaves a stale turn identity behind.
+func setPossibleQuestionState(state *projectionState, active bool, turnID string) {
+	state.possibleQuestion = active
+	if active {
+		state.possibleQuestionTurnID = turnID
+		return
+	}
+	state.possibleQuestionTurnID = ""
+}
+
+func clearPossibleQuestionState(state *projectionState) {
+	setPossibleQuestionState(state, false, "")
+}
+
+// possibleQuestionTurnID extracts the turn identity from a session-metadata
+// possible_question value. Older records stored a bare bool, which has no turn.
+func possibleQuestionTurnID(value interface{}) string {
+	m, ok := value.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	turnID, _ := m["turn_id"].(string)
+	return strings.TrimSpace(turnID)
 }
 
 func cloneCompletionGate(gate *CompletionGateSummary) *CompletionGateSummary {

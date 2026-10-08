@@ -1277,6 +1277,7 @@ func (s *Service) updateTaskSessionStateWithHook(
 	if nextState == models.TaskSessionStateStarting || nextState == models.TaskSessionStateRunning {
 		s.clearTaskAutoStartFailedMarker(ctx, taskID)
 	}
+	s.onSessionStateChangedForPossibleQuestion(ctx, taskID, sessionID, oldState, nextState, session)
 	if authoritativeUpdatedAt == nil {
 		s.logger.Warn("skipping session state_changed publish; could not read authoritative updated_at",
 			zap.String("task_id", taskID),

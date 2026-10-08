@@ -1039,7 +1039,6 @@ type routeParams struct {
 	agentSettingsController       *agentsettingscontroller.Controller
 	agentSettingsRepo             settingsstore.Repository
 	profileUsageProvider          agentsettingshandlers.ProfileUsageProvider
-	usageAdapter                  *usageProviderAdapter
 	providerUsageSvc              *providerusage.Service
 	agentList                     taskhandlers.AgentLister
 	agentRegistry                 *registry.Registry

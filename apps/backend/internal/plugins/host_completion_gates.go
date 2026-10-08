@@ -277,7 +277,8 @@ func validCompletionEvidenceSubject(subject taskmodels.TaskCompletionEvidenceSub
 	}
 	switch subject.Kind {
 	case taskmodels.TaskCompletionEvidenceTaskRevision, taskmodels.TaskCompletionEvidenceExecution,
-		taskmodels.TaskCompletionEvidenceArtifact, taskmodels.TaskCompletionEvidenceGitHubPRHead:
+		taskmodels.TaskCompletionEvidenceArtifact, taskmodels.TaskCompletionEvidenceGitHubPRHead,
+		taskmodels.TaskCompletionEvidencePlanIncrement:
 		return true
 	default:
 		return false

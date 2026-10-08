@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
+	workflowctrl "github.com/kandev/kandev/internal/workflow/controller"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
@@ -69,7 +70,11 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		var err error
 		transition, err = h.resolveTransitionMove(ctx, &req)
 		if err != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+			code := ws.ErrorCodeValidation
+			if errors.Is(err, repoerrors.ErrTaskVersionConflict) {
+				code = ws.ErrorCodeConflict
+			}
+			return ws.NewError(msg.ID, msg.Action, code, err.Error(), nil)
 		}
 	}
 	if req.WorkflowID == "" {
@@ -138,6 +143,14 @@ func (h *Handlers) completeSameStepMove(ctx context.Context, msg *ws.Message, re
 	}
 	if task.WorkflowID != req.WorkflowID || task.WorkflowStepID != req.WorkflowStepID {
 		return nil, false, nil
+	}
+	if req.Transition != "" {
+		// Stale-transition fallback: the transition was already applied to reach this step.
+		response, err := ws.NewResponse(msg.ID, msg.Action, dto.MoveTaskResponse{
+			Task:        dto.FromTask(task),
+			Disposition: "already_applied",
+		})
+		return response, true, err
 	}
 	if code, message := h.validateSameStepMove(ctx, req, task); code != "" {
 		return moveTaskErrorResponse(msg, code, message)
@@ -271,6 +284,22 @@ func (h *Handlers) deferMoveTask(
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
 				"target workflow_step_id does not belong to the requested workflow_id", nil)
 		}
+		if stepResp.Step.CompleteTaskOnEnter || wfmodels.IsTerminalStepName(stepResp.Step.Name) {
+			// Fast-fail check outside the move transaction; the repository guard remains the sole authority.
+			if h.taskSvc != nil {
+				gate, gateErr := h.taskSvc.GetTaskCompletionGate(ctx, req.TaskID)
+				if gateErr == nil && gate != nil && gate.Blocked {
+					return h.taskCompletionGateBlockedMoveResponse(ctx, msg, req)
+				}
+			}
+		} else if strings.EqualFold(stepResp.Step.Name, "Implement") {
+			if h.taskSvc != nil {
+				gate, gateErr := h.taskSvc.GetTaskCompletionGate(ctx, req.TaskID)
+				if gateErr == nil && gate != nil && (gate.PlanStale || gate.Blocked) {
+					return h.taskCompletionGateBlockedMoveResponse(ctx, msg, req)
+				}
+			}
+		}
 	}
 
 	// Validate the target workflow lives in the same workspace as the task.
@@ -360,7 +389,7 @@ func (h *Handlers) resolveTransitionMove(ctx context.Context, req *moveTaskReque
 	source := sourceResp.Step
 	transition, err := wfmodels.FindTransition(source.Events, req.Transition)
 	if err != nil {
-		return nil, err
+		return h.resolveTransitionOnOtherStep(ctx, source, task.WorkflowStepID, req, err)
 	}
 	targetResp, err := h.workflowCtrl.GetStep(ctx, transition.ToStepID)
 	if err != nil || targetResp == nil || targetResp.Step == nil {
@@ -376,6 +405,57 @@ func (h *Handlers) resolveTransitionMove(ctx context.Context, req *moveTaskReque
 	req.WorkflowID = source.WorkflowID
 	req.WorkflowStepID = target.ID
 	return transition, nil
+}
+
+// resolveTransitionOnOtherStep handles a named transition that is absent from
+// the task's current step. When the name is defined on another step of the same
+// workflow it fails closed with ErrTaskVersionConflict, except for the legacy
+// self-target case (a transition elsewhere whose target is the task's current
+// step), which resolves to a position-preserving return to that step. When the
+// name is absent from the whole workflow it returns the original lookup error.
+func (h *Handlers) resolveTransitionOnOtherStep(
+	ctx context.Context,
+	source *wfmodels.WorkflowStep,
+	currentStepID string,
+	req *moveTaskRequest,
+	lookupErr error,
+) (*wfmodels.StepTransition, error) {
+	stepsResp, listErr := h.workflowCtrl.ListStepsByWorkflow(ctx, workflowctrl.ListStepsRequest{WorkflowID: source.WorkflowID})
+	if listErr != nil || stepsResp == nil {
+		return nil, lookupErr
+	}
+	existsElsewhere := false
+	for _, step := range stepsResp.Steps {
+		tr, ok := findNamedTransition(step, req.Transition)
+		if !ok {
+			continue
+		}
+		existsElsewhere = true
+		if tr.ToStepID == currentStepID {
+			req.WorkflowID = source.WorkflowID
+			req.WorkflowStepID = currentStepID
+			return tr, nil
+		}
+	}
+	if existsElsewhere {
+		return nil, fmt.Errorf("%w: transition %q is not defined on current step %q (%s)",
+			repoerrors.ErrTaskVersionConflict, req.Transition, source.Name, source.ID)
+	}
+	return nil, lookupErr
+}
+
+// findNamedTransition returns a pointer to the transition named name on step,
+// if the step defines one.
+func findNamedTransition(step *wfmodels.WorkflowStep, name string) (*wfmodels.StepTransition, bool) {
+	if step == nil {
+		return nil, false
+	}
+	for i := range step.Events.Transitions {
+		if step.Events.Transitions[i].Name == name {
+			return &step.Events.Transitions[i], true
+		}
+	}
+	return nil, false
 }
 
 // mergeTransitionEntryOptions folds a transition's configured one-shot options
@@ -452,6 +532,9 @@ func (h *Handlers) applyMoveTaskImmediate(
 		service.MoveTaskOptions{StepHistoryActor: wfmodels.StepTransitionActorAgent, EntryOptions: req.EntryOptions})
 	if err != nil {
 		h.logger.Error("failed to move task", zap.Error(err))
+		if errors.Is(err, repoerrors.ErrTaskCompletionGateBlocked) {
+			return h.taskCompletionGateBlockedMoveResponse(ctx, msg, req)
+		}
 		return ws.NewError(msg.ID, msg.Action, classifyMoveTaskError(err), moveTaskErrorMessage(err), nil)
 	}
 	response := dto.MoveTaskResponse{
@@ -467,9 +550,72 @@ func (h *Handlers) applyMoveTaskImmediate(
 	return ws.NewResponse(msg.ID, msg.Action, response)
 }
 
+//nolint:nestif // Builds the structured blocked-move payload from optional gate/step enrichment.
+func (h *Handlers) taskCompletionGateBlockedMoveResponse(
+	ctx context.Context,
+	msg *ws.Message,
+	req moveTaskRequest,
+) (*ws.Message, error) {
+	details := map[string]interface{}{
+		"code":                 ws.ErrorCodeTaskCompletionGateBlocked,
+		"human_override_route": "A human operator can provide an audited completion override via the Kandev task UI or MoveTask with completion override reason.",
+	}
+	if h.taskSvc != nil {
+		gate, err := h.taskSvc.GetTaskCompletionGate(ctx, req.TaskID)
+		if err == nil && gate != nil {
+			blockersList := make([]map[string]interface{}, 0, len(gate.Blockers))
+			for _, b := range gate.Blockers {
+				blockersList = append(blockersList, map[string]interface{}{
+					"criterion_id": b.CriterionID,
+					"reason":       b.Reason,
+				})
+			}
+			details["blockers"] = blockersList
+
+			unverifiedList := make([]map[string]interface{}, 0)
+			for _, c := range gate.Criteria {
+				if c.VerifiedRevision != c.CriterionRevision {
+					unverifiedList = append(unverifiedList, map[string]interface{}{
+						"id":                 c.ID,
+						"description":        c.Description,
+						"criterion_revision": c.CriterionRevision,
+						"verified_revision":  c.VerifiedRevision,
+					})
+				}
+			}
+			details["unverified_criteria"] = unverifiedList
+			details["gate_revision"] = gate.Revision
+		}
+
+		task, err := h.taskSvc.GetTask(ctx, req.TaskID)
+		if err == nil && task != nil {
+			details["current_step_id"] = task.WorkflowStepID
+			if h.workflowCtrl != nil {
+				stepResp, stepErr := h.workflowCtrl.GetStep(ctx, task.WorkflowStepID)
+				if stepErr == nil && stepResp != nil && stepResp.Step != nil {
+					details["current_step"] = stepResp.Step.Name
+					var transitions []map[string]interface{}
+					for _, tr := range stepResp.Step.Events.Transitions {
+						transitions = append(transitions, map[string]interface{}{
+							"name":       tr.Name,
+							"direction":  tr.Direction,
+							"to_step_id": tr.ToStepID,
+						})
+					}
+					details["available_transitions"] = transitions
+				}
+			}
+		}
+	}
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeTaskCompletionGateBlocked, "Task completion requirements are not satisfied", details)
+}
+
 func classifyMoveTaskError(err error) string {
 	if err == nil {
 		return ws.ErrorCodeInternalError
+	}
+	if errors.Is(err, repoerrors.ErrTaskCompletionGateBlocked) {
+		return ws.ErrorCodeTaskCompletionGateBlocked
 	}
 	if errors.Is(err, workflowmove.ErrMoveConflict) {
 		return ws.ErrorCodeConflict
@@ -498,6 +644,8 @@ func classifyMoveTaskError(err error) string {
 
 func moveTaskErrorMessage(err error) string {
 	switch classifyMoveTaskError(err) {
+	case ws.ErrorCodeTaskCompletionGateBlocked:
+		return "Task completion requirements are not satisfied"
 	case ws.ErrorCodeConflict:
 		return "Move task conflicts with the current task or workflow state"
 	case ws.ErrorCodeValidation:

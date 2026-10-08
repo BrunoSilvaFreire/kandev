@@ -483,6 +483,10 @@ export type Task = ActiveSubagentCountFields & {
   parked_revision?: number;
   /** Process-start epoch (Unix nanoseconds) the revision counter is scoped to; a lower epoch is always stale. */
   parked_epoch?: number;
+  /** True when the primary session ended with a possible question hint in agent prose. */
+  possible_question?: boolean;
+  /** Turn identity behind possible_question; keys the inbox nudge per turn. */
+  possible_question_turn_id?: string;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;
@@ -706,6 +710,10 @@ export type TaskSession = ActiveSubagentCountFields & {
    * persisted. The composer uses it to promise delivery, not folding.
    */
   supports_steering?: boolean;
+  /** True when the session ended with an advisory possible question hint in agent prose. */
+  possible_question?: boolean;
+  /** Turn identity behind possible_question; keys the inbox nudge per turn. */
+  possible_question_turn_id?: string;
   /** Compact pending-input projection used when this session's messages are unloaded. */
   pending_action?: TaskPendingAction | null;
   /** Cross-channel logical clock for pending_action snapshots. */

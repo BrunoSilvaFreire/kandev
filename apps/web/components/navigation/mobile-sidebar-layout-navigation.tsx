@@ -8,6 +8,7 @@ import { Badge } from "@kandev/ui/badge";
 import Link from "@/components/routing/app-link";
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
+import { useInboxTriageNudge } from "@/hooks/domains/inbox-triage/use-inbox-triage";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useQuickTerminalLauncher } from "@/hooks/use-quick-terminal-launcher";
 import { useStaticDestinations } from "@/hooks/use-app-destinations";
@@ -149,6 +150,39 @@ function MobileNewTaskRow({ onNavigate }: { onNavigate: () => void }) {
   );
 }
 
+/**
+ * The phone Inbox entry: the clarification-backed count plus the triage lane's
+ * additional nudge (stale review / possible question). Rendered from both the
+ * default primary section and the saved-layout required rows so the count is
+ * visible wherever the Inbox is reached on a phone.
+ */
+export function MobileInboxNavRow({ onNavigate }: { onNavigate: () => void }) {
+  const { t } = useTranslation();
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const mode = useOfficeModeState();
+  const needsYouEnabled = useFeature("needsYouInbox");
+  const needsYouCount = useAppStore(selectNeedsYouInboxCount);
+  const needsYouHasMore = useAppStore(selectNeedsYouInboxHasMore);
+  const triage = useInboxTriageNudge();
+  const needsYouBadge = needsYouCount + triage.additionalCount;
+  if (!needsYouEnabled || !workspaceId) return null;
+  return (
+    <Button
+      asChild
+      variant="outline"
+      className="h-11 w-full cursor-pointer justify-start gap-3 px-3"
+    >
+      <Link href={NEEDS_YOU_INBOX_HREF} onClick={onNavigate}>
+        <IconInbox className="h-4 w-4 shrink-0" />
+        <span className="flex-1 text-left">
+          {mode === "office" ? t("sidebar:needsYouInbox") : t("sidebar:inbox")}
+        </span>
+        {needsYouBadge > 0 && <Badge>{`${needsYouBadge}${needsYouHasMore ? "+" : ""}`}</Badge>}
+      </Link>
+    </Button>
+  );
+}
+
 function MobileRequiredRows({
   onNavigate,
   omitSections,
@@ -163,8 +197,6 @@ function MobileRequiredRows({
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const mode = useOfficeModeState();
   const needsYouEnabled = useFeature("needsYouInbox");
-  const needsYouCount = useAppStore(selectNeedsYouInboxCount);
-  const needsYouHasMore = useAppStore(selectNeedsYouInboxHasMore);
   const officeInboxCount = useAppStore(selectOfficeInboxCount);
   if (omitSections.has("primary")) return null;
   const fixedDestinations = primary.filter(
@@ -196,21 +228,7 @@ function MobileRequiredRows({
           </Link>
         </Button>
       )}
-      {needsYouEnabled && workspaceId && (
-        <Button
-          asChild
-          variant="outline"
-          className="h-11 w-full cursor-pointer justify-start gap-3 px-3"
-        >
-          <Link href={NEEDS_YOU_INBOX_HREF} onClick={onNavigate}>
-            <IconInbox className="h-4 w-4 shrink-0" />
-            <span className="flex-1 text-left">
-              {mode === "office" ? t("sidebar:needsYouInbox") : t("sidebar:inbox")}
-            </span>
-            {needsYouCount > 0 && <Badge>{`${needsYouCount}${needsYouHasMore ? "+" : ""}`}</Badge>}
-          </Link>
-        </Button>
-      )}
+      {needsYouEnabled && workspaceId && <MobileInboxNavRow onNavigate={onNavigate} />}
     </div>
   );
 }

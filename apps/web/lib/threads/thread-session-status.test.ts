@@ -40,6 +40,28 @@ describe("resolveThreadSessionStatus", () => {
     });
   });
 
+  it("reflects possible_question when waiting for input", () => {
+    expect(
+      resolveThreadSessionStatus(session({ state: "WAITING_FOR_INPUT", possible_question: true })),
+    ).toMatchObject({
+      kind: "possible_question",
+      labelKey: "threads:statusPossibleQuestion",
+      hasAttention: false,
+    });
+  });
+
+  it("yields to clarification even if possible_question is set", () => {
+    expect(
+      resolveThreadSessionStatus(
+        session({
+          state: "WAITING_FOR_INPUT",
+          pending_action: "clarification",
+          possible_question: true,
+        }),
+      ),
+    ).toMatchObject({ kind: "clarification", labelKey: "threads:statusQuestionFromAgent" });
+  });
+
   it("distinguishes starting, foreground work, and a finished turn", () => {
     expect(resolveThreadSessionStatus(session({ state: "STARTING" })).kind).toBe("starting");
     expect(resolveThreadSessionStatus(session({ state: "RUNNING" })).kind).toBe("working");
@@ -85,6 +107,27 @@ describe("resolveThreadColumnStatus", () => {
         session: session({ state: "WAITING_FOR_INPUT", pending_action: null }),
       }),
     ).toMatchObject({ kind: "needs-you", hasAttention: true });
+  });
+
+  it("shows possible_question when no higher precedence action is active", () => {
+    expect(
+      resolveThreadColumnStatus({
+        session: session({ state: "WAITING_FOR_INPUT", possible_question: true }),
+      }),
+    ).toMatchObject({
+      kind: "possible_question",
+      labelKey: "threads:statusPossibleQuestion",
+      hasAttention: false,
+    });
+  });
+
+  it("ranks review readiness ahead of possible_question", () => {
+    expect(
+      resolveThreadColumnStatus({
+        taskState: "REVIEW",
+        session: session({ state: "WAITING_FOR_INPUT", possible_question: true }),
+      }),
+    ).toMatchObject({ kind: "review-ready", labelKey: "threads:statusReadyForReview" });
   });
 });
 

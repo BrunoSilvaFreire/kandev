@@ -327,6 +327,13 @@ type TaskDTO struct {
 	// ParkedEpoch identifies the backend process that produced ParkedRevision
 	// (see "Revision epoch"); a lower-or-equal epoch update is stale.
 	ParkedEpoch uint64 `json:"parked_epoch"`
+	// PossibleQuestion indicates the primary session finished an agent turn
+	// with trailing decision/question prose without a structured clarification or move.
+	PossibleQuestion bool `json:"possible_question,omitempty"`
+	// PossibleQuestionTurnID is the turn identity behind PossibleQuestion. The
+	// client keys its in-app nudge by it, so a later turn nudges again instead
+	// of inheriting an earlier acknowledgement.
+	PossibleQuestionTurnID string `json:"possible_question_turn_id,omitempty"`
 }
 
 type TaskRepositoryDTO struct {
@@ -452,6 +459,10 @@ type TaskSessionDTO struct {
 	// ParkedEpoch identifies the backend process that produced Revision (see
 	// "Revision epoch"); a lower-or-equal epoch update is stale.
 	ParkedEpoch uint64 `json:"parked_epoch"`
+	// PossibleQuestion indicates the session finished an agent turn
+	// with trailing decision/question prose without a structured clarification or move.
+	PossibleQuestion       bool   `json:"possible_question,omitempty"`
+	PossibleQuestionTurnID string `json:"possible_question_turn_id,omitempty"`
 }
 
 // TaskSessionSummaryDTO is a lightweight version of TaskSessionDTO without snapshot fields.
@@ -525,6 +536,10 @@ type TaskSessionSummaryDTO struct {
 	Revision uint64 `json:"revision"`
 	// ParkedEpoch mirrors TaskSessionDTO.ParkedEpoch.
 	ParkedEpoch uint64 `json:"parked_epoch"`
+	// PossibleQuestion indicates the session finished an agent turn
+	// with trailing decision/question prose without a structured clarification or move.
+	PossibleQuestion       bool   `json:"possible_question,omitempty"`
+	PossibleQuestionTurnID string `json:"possible_question_turn_id,omitempty"`
 }
 
 // ListTaskSessionSummariesResponse is the list response using summary DTOs.
@@ -1065,35 +1080,37 @@ func FromTaskWithSessionInfo(
 // FromTaskSessionSummary converts a session model to a summary DTO (no snapshot fields).
 func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 	result := TaskSessionSummaryDTO{
-		ID:                 session.ID,
-		TaskID:             session.TaskID,
-		QueueIncarnationID: session.QueueIncarnationID,
-		Name:               session.Name,
-		AgentExecutionID:   session.AgentExecutionID,
-		ContainerID:        session.ContainerID,
-		AgentProfileID:     session.AgentProfileID,
-		ExecutionProfileID: session.ExecutionProfileID,
-		RouteGeneration:    session.RouteGeneration,
-		RouteState:         session.RouteState,
-		RouteReason:        session.RouteReason,
-		ExecutorID:         session.ExecutorID,
-		ExecutorProfileID:  session.ExecutorProfileID,
-		EnvironmentID:      session.EnvironmentID,
-		RepositoryID:       session.RepositoryID,
-		BaseBranch:         session.BaseBranch,
-		BaseCommitSHA:      session.BaseCommitSHA,
-		WorkspacePath:      session.WorkspacePath,
-		State:              session.State,
-		ErrorMessage:       session.ErrorMessage,
-		Metadata:           session.Metadata,
-		StartedAt:          session.StartedAt,
-		CompletedAt:        session.CompletedAt,
-		UpdatedAt:          session.UpdatedAt,
-		IsPrimary:          session.IsPrimary,
-		IsPassthrough:      session.IsPassthrough,
-		ReviewStatus:       session.ReviewStatus,
-		TaskEnvironmentID:  session.TaskEnvironmentID,
-		LastReadMessageID:  session.LastReadMessageID,
+		ID:                     session.ID,
+		TaskID:                 session.TaskID,
+		QueueIncarnationID:     session.QueueIncarnationID,
+		Name:                   session.Name,
+		AgentExecutionID:       session.AgentExecutionID,
+		ContainerID:            session.ContainerID,
+		AgentProfileID:         session.AgentProfileID,
+		ExecutionProfileID:     session.ExecutionProfileID,
+		RouteGeneration:        session.RouteGeneration,
+		RouteState:             session.RouteState,
+		RouteReason:            session.RouteReason,
+		ExecutorID:             session.ExecutorID,
+		ExecutorProfileID:      session.ExecutorProfileID,
+		EnvironmentID:          session.EnvironmentID,
+		RepositoryID:           session.RepositoryID,
+		BaseBranch:             session.BaseBranch,
+		BaseCommitSHA:          session.BaseCommitSHA,
+		WorkspacePath:          session.WorkspacePath,
+		State:                  session.State,
+		ErrorMessage:           session.ErrorMessage,
+		Metadata:               session.Metadata,
+		StartedAt:              session.StartedAt,
+		CompletedAt:            session.CompletedAt,
+		UpdatedAt:              session.UpdatedAt,
+		IsPrimary:              session.IsPrimary,
+		IsPassthrough:          session.IsPassthrough,
+		ReviewStatus:           session.ReviewStatus,
+		TaskEnvironmentID:      session.TaskEnvironmentID,
+		LastReadMessageID:      session.LastReadMessageID,
+		PossibleQuestion:       models.SessionPossibleQuestion(session.Metadata),
+		PossibleQuestionTurnID: models.SessionPossibleQuestionTurnID(session.Metadata),
 	}
 	if worktrees := session.WorktreesAPI(); len(worktrees) > 0 {
 		result.WorktreeID = session.Worktrees[0].WorktreeID
@@ -1135,15 +1152,17 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		CompletedAt:          session.CompletedAt,
 		UpdatedAt:            session.UpdatedAt,
 		// Workflow fields
-		IsPrimary:         session.IsPrimary,
-		IsPassthrough:     session.IsPassthrough,
-		ReviewStatus:      session.ReviewStatus,
-		TaskEnvironmentID: session.TaskEnvironmentID,
-		LastReadMessageID: session.LastReadMessageID,
-		CostSubcents:      session.CostSubcents,
-		TokensIn:          session.TokensIn,
-		TokensCachedIn:    session.TokensCachedIn,
-		TokensOut:         session.TokensOut,
+		IsPrimary:              session.IsPrimary,
+		IsPassthrough:          session.IsPassthrough,
+		ReviewStatus:           session.ReviewStatus,
+		TaskEnvironmentID:      session.TaskEnvironmentID,
+		LastReadMessageID:      session.LastReadMessageID,
+		CostSubcents:           session.CostSubcents,
+		TokensIn:               session.TokensIn,
+		TokensCachedIn:         session.TokensCachedIn,
+		TokensOut:              session.TokensOut,
+		PossibleQuestion:       models.SessionPossibleQuestion(session.Metadata),
+		PossibleQuestionTurnID: models.SessionPossibleQuestionTurnID(session.Metadata),
 	}
 	if worktrees := session.WorktreesAPI(); len(worktrees) > 0 {
 		result.WorktreeID = session.Worktrees[0].WorktreeID

@@ -27,6 +27,8 @@ import { NeedsYouInboxEmptyState } from "@/components/needs-you-inbox/needs-you-
 import { NeedsYouInboxErrorState } from "@/components/needs-you-inbox/needs-you-inbox-error-state";
 import { NeedsYouInboxHiddenPanel } from "@/components/needs-you-inbox/needs-you-inbox-hidden-panel";
 import { InboxTabStrip } from "@/components/needs-you-inbox/inbox-tab-strip";
+import { TriageTabPanel } from "@/components/needs-you-inbox/triage-tab-panel";
+import { useInboxTriageNudge } from "@/hooks/domains/inbox-triage/use-inbox-triage";
 import { FailedInboxTabPanel } from "@/components/needs-you-inbox/failed-inbox-tab-panel";
 import { useFailedInboxController } from "@/hooks/domains/failed-inbox/use-failed-inbox-controller";
 import { buildInboxTabHref, resolveInboxTab, type InboxTab } from "@/lib/failed-inbox/inbox-tab";
@@ -234,6 +236,9 @@ export function NeedsYouInboxPageClient() {
   // The History tab's own bundle count, populated the moment the Inbox page
   // opens, without requiring a click into the tab.
   const historyCount = useAppStore(selectInboxHistoryCount);
+  // The triage lane is computed once here so both the tab-strip nudge badge
+  // and the tab body share one ordered, deduplicated projection.
+  const triage = useInboxTriageNudge();
 
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -261,12 +266,16 @@ export function NeedsYouInboxPageClient() {
         onSelectTab={selectTab}
         needsYouCount={needsYouCount}
         needsYouHasMore={needsYouHasMore}
+        triageCount={triage.newCount}
         failedCount={failedCountKnown ? failedCount : undefined}
         failedTruncated={failedTruncated}
         historyCount={historyCount}
       >
         <TabsContent value="needs-you">
           <NeedsYouInboxTabContent retry={retry} />
+        </TabsContent>
+        <TabsContent value="triage">
+          <TriageTabPanel controller={triage} />
         </TabsContent>
         <TabsContent value="failed">
           <FailedInboxTabPanel />

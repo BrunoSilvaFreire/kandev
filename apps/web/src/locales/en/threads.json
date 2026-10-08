@@ -142,6 +142,7 @@
   "statusNeedsYou": "Needs you",
   "statusNotStarted": "Not started",
   "statusPermissionNeeded": "Permission needed",
+  "statusPossibleQuestion": "Possible question",
   "statusQuestionFromAgent": "Question from agent",
   "statusReadyForReview": "Ready for review",
   "statusStarting": "Starting",

@@ -14,6 +14,7 @@ import {
   selectNeedsYouInboxHasMore,
 } from "@/lib/state/slices/needs-you-inbox/selectors";
 import { useFeature } from "@/hooks/domains/features/use-feature";
+import { useInboxTriageNudge } from "@/hooks/domains/inbox-triage/use-inbox-triage";
 import { useOfficeModeState } from "@/hooks/use-in-office";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useQuickChatActivity } from "@/components/quick-chat/use-quick-chat-activity";
@@ -60,6 +61,10 @@ export function AppSidebarFixedNav({ collapsed }: { collapsed: boolean }) {
   const needsYouInboxHasMore = useAppStore(selectNeedsYouInboxHasMore);
   const mode = useOfficeModeState();
   const inOffice = mode === "office";
+  // The clarification count already covers bundle-backed items; the triage
+  // lane's additional (stale-review / possible-question) nudge is added so it
+  // is visible from the navigation entry, not only on the inbox page.
+  const triage = useInboxTriageNudge();
   const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
   const { activity: quickChatActivity, label: quickChatLabel } = useQuickChatActivity(workspaceId);
 
@@ -83,7 +88,7 @@ export function AppSidebarFixedNav({ collapsed }: { collapsed: boolean }) {
           icon={IconInbox}
           label={inOffice ? t("sidebar:needsYouInbox") : t("sidebar:inbox")}
           href={NEEDS_YOU_INBOX_HREF}
-          badge={needsYouInboxCount}
+          badge={needsYouInboxCount + triage.additionalCount}
           badgeSuffix={needsYouInboxHasMore ? "+" : undefined}
           collapsed={collapsed}
           testId="sidebar-needs-you-inbox"

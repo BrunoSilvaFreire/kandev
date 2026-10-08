@@ -186,6 +186,10 @@ type projectionState struct {
 	launchQueueObserved    bool
 	completionGate         *CompletionGateSummary
 	completionGateObserved bool
+	possibleQuestion       bool
+	// possibleQuestionTurnID identifies the turn whose trailing prose produced
+	// the advisory hint, so a later turn's hint is a distinct identity.
+	possibleQuestionTurnID string
 }
 
 type sessionObservation struct {

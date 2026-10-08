@@ -9,6 +9,10 @@ describe("resolveInboxTab", () => {
     expect(resolveInboxTab(new URLSearchParams("tab=failed"))).toBe("failed");
   });
 
+  it("selects triage for exactly one tab=triage value", () => {
+    expect(resolveInboxTab(new URLSearchParams("tab=triage"))).toBe("triage");
+  });
+
   it("selects needs-you when the param is absent", () => {
     expect(resolveInboxTab(new URLSearchParams(""))).toBe("needs-you");
   });

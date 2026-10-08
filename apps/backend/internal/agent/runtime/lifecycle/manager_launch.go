@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/gitconfigenv"
@@ -1976,6 +1977,15 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		// state; otherwise standalone receives the repository path (or an empty
 		// path) that was present before preparation completed.
 		reqWithWorktree.WorkspacePath = workspacePath
+	}
+
+	// 6a. Preflight referenced profile skills: fail fast if any skill cannot be resolved or is incompatible.
+	if req.AgentProfileID != "" {
+		isOffice := reqWithWorktree.McpMode == mcpmode.Office && strings.TrimSpace(reqWithWorktree.Env["KANDEV_CLI"]) != ""
+		if err := m.PreflightProfileSkills(ctx, req.AgentProfileID, isOffice); err != nil {
+			m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
+			return nil, fmt.Errorf("skill preflight failed: %w", err)
+		}
 	}
 
 	// 6b. Deploy per-profile skills + custom prompt (ADR 0005 Wave A).

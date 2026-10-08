@@ -95,20 +95,27 @@ func TestValidateRuntimeBundleRejectsMissingLauncher(t *testing.T) {
 	}
 }
 
-func TestValidateRuntimeBundleRejectsMissingRemoteHelper(t *testing.T) {
+func TestValidateRuntimeBundleAcceptsHostOnlyLegacyBundle(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "bin", "kandev"))
 	writeFile(t, filepath.Join(dir, "bin", "agentctl"))
 	writeFile(t, filepath.Join(dir, "bin", "agentctl-linux-amd64"))
 	writeFile(t, filepath.Join(dir, "bin", "agentctl-linux-arm64"))
 	writeFile(t, filepath.Join(dir, "bin", "agentctl-darwin-amd64"))
+	// darwin/arm64 intentionally absent: a host-only bundle omits it.
 
-	_, err := validateRuntimeBundle(dir, "test")
-	if err == nil {
-		t.Fatal("expected error")
+	if _, err := validateRuntimeBundle(dir, "test"); err != nil {
+		t.Fatalf("host-only manifest-less bundle should be accepted: %v", err)
 	}
-	if got, want := err.Error(), "agentctl darwin/arm64 helper not found"; !strings.Contains(got, want) {
-		t.Fatalf("error = %q, want substring %q", got, want)
+}
+
+func TestValidateRuntimeBundleAcceptsBareLegacyBundle(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "bin", "kandev"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl"))
+
+	if _, err := validateRuntimeBundle(dir, "test"); err != nil {
+		t.Fatalf("manifest-less bundle with no helpers should be accepted: %v", err)
 	}
 }
 

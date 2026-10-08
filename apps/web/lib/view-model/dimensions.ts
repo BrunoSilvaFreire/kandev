@@ -19,6 +19,7 @@ export type ViewDimensionValueKind = "boolean" | "enum" | "text";
 export type ViewFixedOption = { value: string; labelKey: string };
 
 export type ViewDimensionMeta = {
+  labelKey: string;
   valueKind: ViewDimensionValueKind;
   ops: readonly ViewFilterOp[];
   defaultOp: ViewFilterOp;
@@ -27,21 +28,21 @@ export type ViewDimensionMeta = {
   fixedOptions?: readonly ViewFixedOption[];
 };
 
-const BOOLEAN_IS: ViewDimensionMeta = {
+const BOOLEAN_IS: Omit<ViewDimensionMeta, "labelKey"> = {
   valueKind: "boolean",
   ops: ["is", "is_not"],
   defaultOp: "is",
   defaultValue: true,
 };
 
-const ENUM_IN: ViewDimensionMeta = {
+const ENUM_IN: Omit<ViewDimensionMeta, "labelKey"> = {
   valueKind: "enum",
   ops: ["is", "is_not", "in", "not_in"],
   defaultOp: "is",
   defaultValue: "",
 };
 
-const TEXT: ViewDimensionMeta = {
+const TEXT: Omit<ViewDimensionMeta, "labelKey"> = {
   valueKind: "text",
   ops: ["matches", "not_matches"],
   defaultOp: "matches",
@@ -56,8 +57,9 @@ const TEXT: ViewDimensionMeta = {
  */
 export const VIEW_DIMENSION_METAS: Record<string, ViewDimensionMeta> = {
   // Sidebar task navigation.
-  archived: BOOLEAN_IS,
+  archived: { ...BOOLEAN_IS, labelKey: "task:filterDimensionArchived" },
   state: {
+    labelKey: "task:filterDimensionState",
     valueKind: "enum",
     ops: ["in", "not_in", "is", "is_not"],
     defaultOp: "in",
@@ -68,20 +70,21 @@ export const VIEW_DIMENSION_METAS: Record<string, ViewDimensionMeta> = {
       { value: "backlog", labelKey: "task:filterStateBacklog" },
     ],
   },
-  isPRReview: BOOLEAN_IS,
-  isIssueWatch: BOOLEAN_IS,
+  isPRReview: { ...BOOLEAN_IS, labelKey: "task:filterDimensionPrReview" },
+  isIssueWatch: { ...BOOLEAN_IS, labelKey: "task:filterDimensionIssueWatch" },
   // Shared by both views.
-  hasDiff: BOOLEAN_IS,
-  hasPR: BOOLEAN_IS,
-  workflow: ENUM_IN,
-  workflowStep: ENUM_IN,
-  executorType: ENUM_IN,
-  repository: ENUM_IN,
-  repositoryGroup: ENUM_IN,
-  titleMatch: TEXT,
-  priority: { ...ENUM_IN, defaultValue: "medium" },
+  hasDiff: { ...BOOLEAN_IS, labelKey: "task:filterDimensionHasDiff" },
+  hasPR: { ...BOOLEAN_IS, labelKey: "task:filterDimensionHasPr" },
+  workflow: { ...ENUM_IN, labelKey: "task:filterDimensionWorkflow" },
+  workflowStep: { ...ENUM_IN, labelKey: "task:filterDimensionWorkflowStep" },
+  executorType: { ...ENUM_IN, labelKey: "task:filterDimensionExecutorType" },
+  repository: { ...ENUM_IN, labelKey: "task:filterDimensionRepository" },
+  repositoryGroup: { ...ENUM_IN, labelKey: "task:filterDimensionRepositoryGroup" },
+  titleMatch: { ...TEXT, labelKey: "task:filterDimensionTitle" },
+  priority: { ...ENUM_IN, labelKey: "task:filterDimensionPriority", defaultValue: "medium" },
   // Threads-only dimensions.
   threadStatus: {
+    labelKey: "threads:filterThreadStatus",
     valueKind: "enum",
     ops: ["is", "is_not", "in", "not_in"],
     defaultOp: "is",
@@ -94,6 +97,7 @@ export const VIEW_DIMENSION_METAS: Record<string, ViewDimensionMeta> = {
     ],
   },
   pendingAction: {
+    labelKey: "threads:filterPendingAction",
     valueKind: "enum",
     ops: ["is", "is_not", "in", "not_in"],
     defaultOp: "is",
@@ -104,8 +108,9 @@ export const VIEW_DIMENSION_METAS: Record<string, ViewDimensionMeta> = {
       { value: "none", labelKey: "threads:pendingNone" },
     ],
   },
-  taskState: { ...ENUM_IN, defaultValue: "IN_PROGRESS" },
+  taskState: { ...ENUM_IN, labelKey: "threads:filterTaskState", defaultValue: "IN_PROGRESS" },
   taskType: {
+    labelKey: "threads:filterTaskType",
     valueKind: "enum",
     ops: ["is", "is_not", "in", "not_in"],
     defaultOp: "is",
@@ -116,15 +121,15 @@ export const VIEW_DIMENSION_METAS: Record<string, ViewDimensionMeta> = {
       { value: "issue_watch", labelKey: "threads:taskTypeIssueWatch" },
     ],
   },
-  primaryAgent: ENUM_IN,
-  blocked: BOOLEAN_IS,
-  hasQueuedPrompts: BOOLEAN_IS,
-  hasActiveSubagents: BOOLEAN_IS,
-  prNeedsAttention: BOOLEAN_IS,
-  hasActiveError: BOOLEAN_IS,
-  taskLabel: ENUM_IN,
-  taskOrigin: { ...ENUM_IN, defaultValue: "manual" },
-  hasMultipleSessions: BOOLEAN_IS,
+  primaryAgent: { ...ENUM_IN, labelKey: "threads:filterPrimaryAgent" },
+  blocked: { ...BOOLEAN_IS, labelKey: "threads:filterBlocked" },
+  hasQueuedPrompts: { ...BOOLEAN_IS, labelKey: "threads:filterQueuedPrompts" },
+  hasActiveSubagents: { ...BOOLEAN_IS, labelKey: "threads:filterActiveSubagents" },
+  prNeedsAttention: { ...BOOLEAN_IS, labelKey: "threads:filterPullRequestAttention" },
+  hasActiveError: { ...BOOLEAN_IS, labelKey: "threads:filterActiveError" },
+  taskLabel: { ...ENUM_IN, labelKey: "threads:filterTaskLabel" },
+  taskOrigin: { ...ENUM_IN, labelKey: "threads:filterTaskOrigin", defaultValue: "manual" },
+  hasMultipleSessions: { ...BOOLEAN_IS, labelKey: "threads:filterMultipleSessions" },
 };
 
 /** The metadata for a dimension id; throws rather than silently filtering it out. */

@@ -29,6 +29,7 @@ type ApprovalMeta struct {
 	DocumentKey      string `json:"document_key,omitempty"`
 	Title            string `json:"title"`
 	VersionAtRequest string `json:"version_at_request,omitempty"`
+	PlanRevisionID   string `json:"plan_revision_id,omitempty"`
 }
 
 // ApprovalQuestion returns the fixed single question of an approval bundle.

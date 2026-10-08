@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle/skill"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 )
 
 // concreteDeployer is the actual deployer interface implemented by
@@ -12,6 +13,7 @@ import (
 // concrete struct.
 type concreteDeployer interface {
 	Deploy(ctx context.Context, req skill.Request) (skill.DeployResult, error)
+	ValidateSkills(ctx context.Context, profile *settingsmodels.AgentProfile, officeRuntime bool) error
 }
 
 // skillDeployerAdapter bridges the skill package's Deployer to the
@@ -50,4 +52,12 @@ func (a *skillDeployerAdapter) DeploySkills(ctx context.Context, req SkillDeploy
 		Metadata:        res.Metadata,
 		InstructionsDir: res.InstructionsDir,
 	}, nil
+}
+
+// ValidateSkills satisfies SkillDeployer by delegating to the inner runtime-tier deployer.
+func (a *skillDeployerAdapter) ValidateSkills(ctx context.Context, profile *settingsmodels.AgentProfile, officeRuntime bool) error {
+	if a.inner == nil {
+		return nil
+	}
+	return a.inner.ValidateSkills(ctx, profile, officeRuntime)
 }

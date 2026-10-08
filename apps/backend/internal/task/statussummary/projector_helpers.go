@@ -308,6 +308,25 @@ func boolValue(value interface{}) bool {
 	return out
 }
 
+// possibleQuestionActive decodes the possible_question metadata value as it
+// arrives over the wire: a bare bool from older records, a string bool, or the
+// structured {active, session_id, turn_id} hint the orchestrator now stores.
+func possibleQuestionActive(value interface{}) bool {
+	switch v := value.(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(v, "true")
+	case map[string]interface{}:
+		if active, ok := v["active"].(bool); ok {
+			return active
+		}
+		return len(v) > 0
+	default:
+		return false
+	}
+}
+
 func intValue(value interface{}) (int, bool) {
 	switch number := value.(type) {
 	case int:

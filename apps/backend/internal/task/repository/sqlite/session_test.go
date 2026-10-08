@@ -1016,6 +1016,35 @@ func TestSetSessionMetadataKeyIfStateGuardsTheSessionState(t *testing.T) {
 	require.Equal(t, "value", stored.Metadata["keep"])
 }
 
+func TestSetSessionAdvisoryMetadataKeyPersistsWithoutBumpingUpdatedAt(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-advisory", "session-advisory", "turn-advisory")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "session-advisory", "keep", "value"))
+
+	before, err := repo.GetTaskSession(ctx, "session-advisory")
+	require.NoError(t, err)
+
+	hint := map[string]interface{}{"active": true, "turn_id": "turn-9"}
+	require.NoError(t, repo.SetSessionAdvisoryMetadataKey(
+		ctx, "session-advisory", models.SessionMetaKeyPossibleQuestion, hint,
+	))
+
+	stored, err := repo.GetTaskSession(ctx, "session-advisory")
+	require.NoError(t, err)
+	require.True(t, models.SessionPossibleQuestion(stored.Metadata))
+	require.Equal(t, "turn-9", models.SessionPossibleQuestionTurnID(stored.Metadata))
+	require.Equal(t, "value", stored.Metadata["keep"])
+	require.True(t, stored.UpdatedAt.Equal(before.UpdatedAt), "advisory write must not bump updated_at")
+
+	require.NoError(t, repo.SetSessionAdvisoryMetadataKey(
+		ctx, "session-advisory", models.SessionMetaKeyPossibleQuestion, false,
+	))
+	stored, err = repo.GetTaskSession(ctx, "session-advisory")
+	require.NoError(t, err)
+	require.False(t, models.SessionPossibleQuestion(stored.Metadata))
+}
+
 func TestSetSessionMetadataKeyIfAbsentOrDifferentStepSQLiteReplacesOnlyStaleStep(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	seedForMsgTest(t, repo, "task-step-claim", "session-step-claim", "turn-step-claim")

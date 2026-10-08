@@ -19,6 +19,7 @@ export function InboxTabStrip({
   onSelectTab,
   needsYouCount,
   needsYouHasMore,
+  triageCount,
   failedCount,
   failedTruncated,
   historyCount,
@@ -28,6 +29,7 @@ export function InboxTabStrip({
   onSelectTab: (tab: InboxTab) => void;
   needsYouCount: number;
   needsYouHasMore: boolean;
+  triageCount: number;
   failedCount: number | undefined;
   failedTruncated: boolean;
   historyCount: number;
@@ -35,6 +37,7 @@ export function InboxTabStrip({
 }) {
   const { t } = useTranslation();
   const needsYouBadge = badgeText(needsYouCount, needsYouHasMore);
+  const triageBadge = badgeText(triageCount, false);
   const failedBadge = badgeText(failedCount, failedTruncated);
   const historyBadge = badgeText(historyCount, false);
 
@@ -49,6 +52,18 @@ export function InboxTabStrip({
           {needsYouBadge && (
             <Badge variant="secondary" data-testid="inbox-tab-needs-you-badge">
               {needsYouBadge}
+            </Badge>
+          )}
+        </TabsTrigger>
+        <TabsTrigger
+          value="triage"
+          data-testid="inbox-tab-triage"
+          className="max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+        >
+          {t("needsYouInbox:triageTabLabel")}
+          {triageBadge && (
+            <Badge variant="secondary" data-testid="inbox-tab-triage-badge">
+              {triageBadge}
             </Badge>
           )}
         </TabsTrigger>

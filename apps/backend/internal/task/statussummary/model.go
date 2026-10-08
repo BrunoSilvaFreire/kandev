@@ -22,18 +22,19 @@ const (
 
 	// MaxActiveErrorPreviewBytes keeps an error decoration safe to send with
 	// every task row without turning it into a message-stream transport.
-	MaxActiveErrorPreviewBytes    = 512
-	MaxActiveErrorDetailsBytes    = 4096
-	maxSessionIDBytes             = 256
-	maxTaskRepositoryIDBytes      = 256
-	maxPendingActionBytes         = 128
-	maxActiveErrorStampBytes      = 64
-	maxActiveErrorCategoryBytes   = 64
-	maxPullRequestStateBytes      = 64
-	maxPullRequestURLBytes        = 2048
-	maxPullRequestRepositoryBytes = 256
-	maxLaunchQueueIDBytes         = 256
-	maxLaunchQueueReasonBytes     = 64
+	MaxActiveErrorPreviewBytes     = 512
+	MaxActiveErrorDetailsBytes     = 4096
+	maxSessionIDBytes              = 256
+	maxPossibleQuestionTurnIDBytes = 256
+	maxTaskRepositoryIDBytes       = 256
+	maxPendingActionBytes          = 128
+	maxActiveErrorStampBytes       = 64
+	maxActiveErrorCategoryBytes    = 64
+	maxPullRequestStateBytes       = 64
+	maxPullRequestURLBytes         = 2048
+	maxPullRequestRepositoryBytes  = 256
+	maxLaunchQueueIDBytes          = 256
+	maxLaunchQueueReasonBytes      = 64
 )
 
 const (
@@ -53,10 +54,15 @@ type TaskStatusSummary struct {
 	ForegroundActivity  string                 `json:"foreground_activity,omitempty"`
 	ActiveSubagentCount int                    `json:"active_subagent_count,omitempty"`
 	PendingAction       string                 `json:"pending_action,omitempty"`
-	ActiveError         *ActiveErrorSummary    `json:"active_error,omitempty"`
-	TaskError           *ActiveErrorSummary    `json:"task_error,omitempty"`
-	Git                 *GitSummary            `json:"git,omitempty"`
-	PullRequest         *PullRequestSummary    `json:"pull_request,omitempty"`
+	PossibleQuestion    bool                   `json:"possible_question,omitempty"`
+	// PossibleQuestionTurnID is the turn identity of the agent message that
+	// produced the advisory hint. Omitted when no hint is active, so a hint
+	// acknowledged on one turn can still nudge again on a later turn.
+	PossibleQuestionTurnID string              `json:"possible_question_turn_id,omitempty"`
+	ActiveError            *ActiveErrorSummary `json:"active_error,omitempty"`
+	TaskError              *ActiveErrorSummary `json:"task_error,omitempty"`
+	Git                    *GitSummary         `json:"git,omitempty"`
+	PullRequest            *PullRequestSummary `json:"pull_request,omitempty"`
 	// QueuedPromptCount is the number of prompts currently en-queued for the
 	// task across all of its sessions (pending semantics identical to
 	// message.queue.get). Omitted when zero so task rows without queued work
@@ -180,6 +186,9 @@ func (s TaskStatusSummary) Validate() error {
 		return err
 	}
 	if err := validateUTF8Bytes("pending action", s.PendingAction, maxPendingActionBytes); err != nil {
+		return err
+	}
+	if err := validateUTF8Bytes("possible question turn id", s.PossibleQuestionTurnID, maxPossibleQuestionTurnIDBytes); err != nil {
 		return err
 	}
 	if err := validateActiveError(s.ActiveError); err != nil {
@@ -371,32 +380,36 @@ func (s TaskStatusSummary) SemanticJSON() ([]byte, error) {
 		return nil, err
 	}
 	return json.Marshal(semanticPayload{
-		LastActivityAt:      s.LastActivityAt,
-		PrimarySession:      s.PrimarySession,
-		ForegroundActivity:  s.ForegroundActivity,
-		ActiveSubagentCount: s.ActiveSubagentCount,
-		PendingAction:       s.PendingAction,
-		ActiveError:         s.ActiveError,
-		TaskError:           s.TaskError,
-		Git:                 s.Git,
-		PullRequest:         s.PullRequest,
-		QueuedPromptCount:   s.QueuedPromptCount,
-		LaunchQueue:         s.LaunchQueue,
-		CompletionGate:      s.CompletionGate,
+		LastActivityAt:         s.LastActivityAt,
+		PrimarySession:         s.PrimarySession,
+		ForegroundActivity:     s.ForegroundActivity,
+		ActiveSubagentCount:    s.ActiveSubagentCount,
+		PendingAction:          s.PendingAction,
+		PossibleQuestion:       s.PossibleQuestion,
+		PossibleQuestionTurnID: s.PossibleQuestionTurnID,
+		ActiveError:            s.ActiveError,
+		TaskError:              s.TaskError,
+		Git:                    s.Git,
+		PullRequest:            s.PullRequest,
+		QueuedPromptCount:      s.QueuedPromptCount,
+		LaunchQueue:            s.LaunchQueue,
+		CompletionGate:         s.CompletionGate,
 	})
 }
 
 type semanticPayload struct {
-	LastActivityAt      *time.Time             `json:"last_activity_at,omitempty"`
-	PrimarySession      *PrimarySessionSummary `json:"primary_session,omitempty"`
-	ForegroundActivity  string                 `json:"foreground_activity,omitempty"`
-	ActiveSubagentCount int                    `json:"active_subagent_count,omitempty"`
-	PendingAction       string                 `json:"pending_action,omitempty"`
-	ActiveError         *ActiveErrorSummary    `json:"active_error,omitempty"`
-	TaskError           *ActiveErrorSummary    `json:"task_error,omitempty"`
-	Git                 *GitSummary            `json:"git,omitempty"`
-	PullRequest         *PullRequestSummary    `json:"pull_request,omitempty"`
-	QueuedPromptCount   int                    `json:"queued_prompt_count,omitempty"`
-	LaunchQueue         *LaunchQueueSummary    `json:"launch_queue,omitempty"`
-	CompletionGate      *CompletionGateSummary `json:"completion_gate,omitempty"`
+	LastActivityAt         *time.Time             `json:"last_activity_at,omitempty"`
+	PrimarySession         *PrimarySessionSummary `json:"primary_session,omitempty"`
+	ForegroundActivity     string                 `json:"foreground_activity,omitempty"`
+	ActiveSubagentCount    int                    `json:"active_subagent_count,omitempty"`
+	PendingAction          string                 `json:"pending_action,omitempty"`
+	PossibleQuestion       bool                   `json:"possible_question,omitempty"`
+	PossibleQuestionTurnID string                 `json:"possible_question_turn_id,omitempty"`
+	ActiveError            *ActiveErrorSummary    `json:"active_error,omitempty"`
+	TaskError              *ActiveErrorSummary    `json:"task_error,omitempty"`
+	Git                    *GitSummary            `json:"git,omitempty"`
+	PullRequest            *PullRequestSummary    `json:"pull_request,omitempty"`
+	QueuedPromptCount      int                    `json:"queued_prompt_count,omitempty"`
+	LaunchQueue            *LaunchQueueSummary    `json:"launch_queue,omitempty"`
+	CompletionGate         *CompletionGateSummary `json:"completion_gate,omitempty"`
 }

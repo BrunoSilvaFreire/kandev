@@ -24,39 +24,37 @@ export type ThreadDimensionMeta = {
   placeholder?: string;
 };
 
-// Substantive metadata (kind, operators, defaults) is shared with the sidebar
-// through `lib/view-model/dimensions`; only the display copy is Threads-local.
-const THREAD_DIMENSIONS: ReadonlyArray<{ dimension: ThreadFilterDimension; labelKey: string }> = [
-  { dimension: "threadStatus", labelKey: "threads:filterThreadStatus" },
-  { dimension: "pendingAction", labelKey: "threads:filterPendingAction" },
-  { dimension: "taskState", labelKey: "threads:filterTaskState" },
-  { dimension: "workflow", labelKey: "threads:filterWorkflow" },
-  { dimension: "workflowStep", labelKey: "threads:filterWorkflowStep" },
-  { dimension: "repository", labelKey: "threads:filterRepository" },
-  { dimension: "repositoryGroup", labelKey: "threads:filterRepositoryGroup" },
-  { dimension: "primaryAgent", labelKey: "threads:filterPrimaryAgent" },
-  { dimension: "executorType", labelKey: "threads:filterExecutorType" },
-  { dimension: "priority", labelKey: "threads:filterPriority" },
-  { dimension: "blocked", labelKey: "threads:filterBlocked" },
-  { dimension: "hasQueuedPrompts", labelKey: "threads:filterQueuedPrompts" },
-  { dimension: "hasActiveSubagents", labelKey: "threads:filterActiveSubagents" },
-  { dimension: "hasDiff", labelKey: "threads:filterDiff" },
-  { dimension: "hasPR", labelKey: "threads:filterPullRequest" },
-  { dimension: "prNeedsAttention", labelKey: "threads:filterPullRequestAttention" },
-  { dimension: "taskType", labelKey: "threads:filterTaskType" },
-  { dimension: "titleMatch", labelKey: "threads:filterTitle" },
-  { dimension: "hasActiveError", labelKey: "threads:filterActiveError" },
-  { dimension: "taskLabel", labelKey: "threads:filterTaskLabel" },
-  { dimension: "taskOrigin", labelKey: "threads:filterTaskOrigin" },
-  { dimension: "hasMultipleSessions", labelKey: "threads:filterMultipleSessions" },
+const THREAD_DIMENSION_ORDER: readonly ThreadFilterDimension[] = [
+  "threadStatus",
+  "pendingAction",
+  "taskState",
+  "workflow",
+  "workflowStep",
+  "repository",
+  "repositoryGroup",
+  "primaryAgent",
+  "executorType",
+  "priority",
+  "blocked",
+  "hasQueuedPrompts",
+  "hasActiveSubagents",
+  "hasDiff",
+  "hasPR",
+  "prNeedsAttention",
+  "taskType",
+  "titleMatch",
+  "hasActiveError",
+  "taskLabel",
+  "taskOrigin",
+  "hasMultipleSessions",
 ];
 
-export const THREAD_DIMENSION_METAS: readonly ThreadDimensionMeta[] = THREAD_DIMENSIONS.map(
-  ({ dimension, labelKey }) => {
+export const THREAD_DIMENSION_METAS: readonly ThreadDimensionMeta[] = THREAD_DIMENSION_ORDER.map(
+  (dimension) => {
     const shared = getViewDimensionMeta(dimension);
     return {
       dimension,
-      labelKey,
+      labelKey: shared.labelKey,
       valueKind: shared.valueKind,
       ops: [...shared.ops],
       defaultOp: shared.defaultOp,

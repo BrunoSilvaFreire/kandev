@@ -141,6 +141,7 @@
   "statusNeedsYou": "처리 필요",
   "statusNotStarted": "시작 안 함",
   "statusPermissionNeeded": "권한 필요",
+  "statusPossibleQuestion": "질문 가능성",
   "statusQuestionFromAgent": "에이전트의 질문",
   "statusStarting": "시작 중",
   "statusTurnFinished": "턴 완료",

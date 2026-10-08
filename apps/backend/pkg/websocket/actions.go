@@ -511,6 +511,11 @@ const (
 	ActionMCPClarificationTimeout                  = "mcp.clarification_timeout"
 	ActionMCPSetTaskTitle                          = "mcp.set_task_title"
 	ActionMCPGetDiagnosticBundle                   = "mcp.get_diagnostic_bundle"
+	ActionMCPGetTaskCompletionGate                 = "mcp.get_task_completion_gate"
+	ActionMCPSetTaskCompletionCriteria             = "mcp.set_task_completion_criteria"
+	ActionMCPEnrollTaskPlanIncrements              = "mcp.enroll_task_plan_increments"
+	ActionMCPVerifyTaskCompletionCriterion         = "mcp.verify_task_completion_criterion"
+	ActionMCPManageTaskCompletionCriteria          = "mcp.manage_task_completion_criteria"
 
 	// Office task handoffs (cross-task context).
 	ActionMCPListRelatedTasks         = "mcp.list_related_tasks"
@@ -723,16 +728,17 @@ const (
 
 // Error codes
 const (
-	ErrorCodeBadRequest             = "BAD_REQUEST"
-	ErrorCodeNotFound               = "NOT_FOUND"
-	ErrorCodeInternalError          = "INTERNAL_ERROR"
-	ErrorCodeUnauthorized           = "UNAUTHORIZED"
-	ErrorCodeForbidden              = "FORBIDDEN"
-	ErrorCodeValidation             = "VALIDATION_ERROR"
-	ErrorCodeConflict               = "CONFLICT"
-	ErrorCodeUnavailable            = "UNAVAILABLE"
-	ErrorCodeUnknownAction          = "UNKNOWN_ACTION"
-	ErrorCodePlanCommentsChanged    = "plan_comments_changed"
-	ErrorCodePreviewFeedbackChanged = "preview_feedback_changed"
-	ErrorCodePrimarySessionChanged  = "primary_session_changed"
+	ErrorCodeBadRequest                = "BAD_REQUEST"
+	ErrorCodeNotFound                  = "NOT_FOUND"
+	ErrorCodeInternalError             = "INTERNAL_ERROR"
+	ErrorCodeUnauthorized              = "UNAUTHORIZED"
+	ErrorCodeForbidden                 = "FORBIDDEN"
+	ErrorCodeValidation                = "VALIDATION_ERROR"
+	ErrorCodeConflict                  = "CONFLICT"
+	ErrorCodeUnavailable               = "UNAVAILABLE"
+	ErrorCodeUnknownAction             = "UNKNOWN_ACTION"
+	ErrorCodePlanCommentsChanged       = "plan_comments_changed"
+	ErrorCodePreviewFeedbackChanged    = "preview_feedback_changed"
+	ErrorCodePrimarySessionChanged     = "primary_session_changed"
+	ErrorCodeTaskCompletionGateBlocked = "task_completion_gate_blocked"
 )

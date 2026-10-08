@@ -33,7 +33,10 @@ import type { NavSection } from "@/lib/navigation/types";
 import { useRouter } from "@/lib/routing/client-router";
 import { cn } from "@/lib/utils";
 import { useTaskViewNavigation } from "./use-task-view-navigation";
-import { MobileSidebarLayoutNavigation } from "./mobile-sidebar-layout-navigation";
+import {
+  MobileInboxNavRow,
+  MobileSidebarLayoutNavigation,
+} from "./mobile-sidebar-layout-navigation";
 import { useHasSavedSidebarLayout } from "@/hooks/domains/sidebar/use-sidebar-layout-navigation";
 import { SIDEBAR_LAYOUT_TAB_HREF } from "@/lib/settings-discovery/catalog/preferences";
 
@@ -230,18 +233,20 @@ function PrimaryNavSection({
 }) {
   const all = useStaticDestinations("mobileMenu", "primary");
   const destinations = all.filter((destination) => !omitDestinations.includes(destination.id));
-  if (destinations.length === 0) return null;
   return (
     <div
       className={cn("flex flex-col", phoneNavigation ? "gap-2" : "gap-3")}
       data-testid="app-nav-primary"
     >
-      <DestinationRows
-        destinations={destinations}
-        onNavigate={onNavigate}
-        homeCoversListings={phoneNavigation}
-        className="gap-3 px-3 text-sm aria-[current=page]:bg-primary/10"
-      />
+      {destinations.length > 0 && (
+        <DestinationRows
+          destinations={destinations}
+          onNavigate={onNavigate}
+          homeCoversListings={phoneNavigation}
+          className="gap-3 px-3 text-sm aria-[current=page]:bg-primary/10"
+        />
+      )}
+      <MobileInboxNavRow onNavigate={onNavigate} />
       {quickActions}
     </div>
   );

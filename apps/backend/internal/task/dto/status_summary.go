@@ -15,4 +15,8 @@ func EnrichTaskStatusSummary(
 	summary, known := summaries[taskID]
 	task.StatusSummary = summary
 	task.StatusSummaryInvalidated = known && summary == nil
+	if summary != nil {
+		task.PossibleQuestion = summary.PossibleQuestion
+		task.PossibleQuestionTurnID = summary.PossibleQuestionTurnID
+	}
 }

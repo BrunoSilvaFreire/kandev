@@ -21,36 +21,34 @@ export type DimensionMeta = {
 };
 
 /** The dimensions the sidebar offers, in display order, with their display copy. */
-const SIDEBAR_DIMENSIONS: ReadonlyArray<{ dimension: FilterDimension; labelKey: string }> = [
-  { dimension: "archived", labelKey: "task:filterDimensionArchived" },
-  { dimension: "isPRReview", labelKey: "task:filterDimensionPrReview" },
-  { dimension: "isIssueWatch", labelKey: "task:filterDimensionIssueWatch" },
-  { dimension: "hasDiff", labelKey: "task:filterDimensionHasDiff" },
-  { dimension: "hasPR", labelKey: "task:filterDimensionHasPr" },
-  { dimension: "state", labelKey: "task:filterDimensionState" },
-  { dimension: "workflow", labelKey: "task:filterDimensionWorkflow" },
-  { dimension: "workflowStep", labelKey: "task:filterDimensionWorkflowStep" },
-  { dimension: "executorType", labelKey: "task:filterDimensionExecutorType" },
-  { dimension: "repository", labelKey: "task:filterDimensionRepository" },
-  { dimension: "repositoryGroup", labelKey: "task:filterDimensionRepositoryGroup" },
-  { dimension: "titleMatch", labelKey: "task:filterDimensionTitle" },
+const SIDEBAR_DIMENSION_ORDER: readonly FilterDimension[] = [
+  "archived",
+  "isPRReview",
+  "isIssueWatch",
+  "hasDiff",
+  "hasPR",
+  "state",
+  "workflow",
+  "workflowStep",
+  "executorType",
+  "repository",
+  "repositoryGroup",
+  "titleMatch",
 ];
 
-export const DIMENSION_METAS: DimensionMeta[] = SIDEBAR_DIMENSIONS.map(
-  ({ dimension, labelKey }) => {
-    const shared = getViewDimensionMeta(dimension);
-    return {
-      dimension,
-      labelKey,
-      valueKind: shared.valueKind,
-      ops: [...shared.ops],
-      enumOptions: shared.fixedOptions ? [...shared.fixedOptions] : undefined,
-      placeholderKey: shared.placeholderKey,
-      defaultOp: shared.defaultOp,
-      defaultValue: shared.defaultValue,
-    };
-  },
-);
+export const DIMENSION_METAS: DimensionMeta[] = SIDEBAR_DIMENSION_ORDER.map((dimension) => {
+  const shared = getViewDimensionMeta(dimension);
+  return {
+    dimension,
+    labelKey: shared.labelKey,
+    valueKind: shared.valueKind,
+    ops: [...shared.ops],
+    enumOptions: shared.fixedOptions ? [...shared.fixedOptions] : undefined,
+    placeholderKey: shared.placeholderKey,
+    defaultOp: shared.defaultOp,
+    defaultValue: shared.defaultValue,
+  };
+});
 
 export function getDimensionMeta(dim: FilterDimension): DimensionMeta {
   const meta = DIMENSION_METAS.find((m) => m.dimension === dim);

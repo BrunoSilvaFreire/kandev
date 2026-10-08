@@ -2,11 +2,14 @@ package service
 
 import (
 	"context"
+	"errors"
+	"strconv"
 	"strings"
 
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -29,6 +32,7 @@ type TaskCompletionHumanConfirmation struct {
 // Host adapters use the plugin actor identity and reject that field.
 type SetTaskCompletionCriteriaRequest struct {
 	ExpectedRevision  int64                            `json:"expected_revision"`
+	PlanRevisionID    string                           `json:"plan_revision_id,omitempty"`
 	Criteria          []models.TaskCompletionCriterion `json:"criteria"`
 	HumanConfirmation *TaskCompletionHumanConfirmation `json:"human_confirmation,omitempty"`
 }
@@ -115,7 +119,8 @@ func (s *Service) SetTaskCompletionCriteria(ctx context.Context, taskID string, 
 	actorKind, actorID, human := taskCompletionActor(ctx)
 	change := models.TaskCompletionCriteriaChange{
 		TaskID: task.ID, WorkspaceID: task.WorkspaceID, ExpectedRevision: request.ExpectedRevision,
-		Criteria: sanitizeCompletionCriteria(request.Criteria), ActorKind: actorKind, ActorID: actorID,
+		PlanRevisionID: strings.TrimSpace(request.PlanRevisionID),
+		Criteria:       sanitizeCompletionCriteria(request.Criteria), ActorKind: actorKind, ActorID: actorID,
 	}
 	if request.HumanConfirmation != nil {
 		if !human || strings.TrimSpace(request.HumanConfirmation.Reason) == "" {
@@ -130,6 +135,32 @@ func (s *Service) SetTaskCompletionCriteria(ctx context.Context, taskID string, 
 	}
 	s.publishCompletionGateTaskUpdate(ctx, task.ID)
 	return snapshot, nil
+}
+
+// EnrollTaskPlanIncrements binds declared plan increments from an approved plan revision
+// to task completion criteria.
+func (s *Service) EnrollTaskPlanIncrements(ctx context.Context, taskID string, request models.EnrollTaskPlanIncrementsRequest) (*models.TaskCompletionGateSnapshot, error) {
+	if strings.TrimSpace(request.PlanRevisionID) == "" {
+		return nil, errors.New("plan_revision_id is required")
+	}
+	criteria := make([]models.TaskCompletionCriterion, len(request.Increments))
+	for i, inc := range request.Increments {
+		id := strings.TrimSpace(inc.ID)
+		desc := strings.TrimSpace(inc.Description)
+		criteria[i] = models.TaskCompletionCriterion{
+			ID:          id,
+			Description: desc,
+			EvidenceSubject: models.TaskCompletionEvidenceSubject{
+				Kind: models.TaskCompletionEvidencePlanIncrement,
+				ID:   id,
+			},
+		}
+	}
+	return s.SetTaskCompletionCriteria(ctx, taskID, SetTaskCompletionCriteriaRequest{
+		ExpectedRevision: request.ExpectedRevision,
+		PlanRevisionID:   request.PlanRevisionID,
+		Criteria:         criteria,
+	})
 }
 
 // SetTaskCompletionCriteriaExact applies an approved plugin command with
@@ -166,6 +197,12 @@ func sanitizeCompletionCriteria(criteria []models.TaskCompletionCriterion) []mod
 		criterion.VerifierID = ""
 		criterion.VerifiedAt = nil
 		criterion.EvidenceSubject.Revision = ""
+		if strings.TrimSpace(criterion.EvidenceSubject.Kind) == "" {
+			criterion.EvidenceSubject.Kind = models.TaskCompletionEvidencePlanIncrement
+		}
+		if strings.TrimSpace(criterion.EvidenceSubject.ID) == "" {
+			criterion.EvidenceSubject.ID = strings.TrimSpace(criterion.ID)
+		}
 		clean[index] = criterion
 	}
 	return clean
@@ -184,6 +221,23 @@ func (s *Service) VerifyTaskCompletionCriterion(ctx context.Context, taskID stri
 	repo, ok := s.tasks.(repository.TaskCompletionGateRepository)
 	if !ok {
 		return nil, repoerrors.ErrTaskCompletionGateBlocked
+	}
+	if strings.TrimSpace(request.Evidence.Subject.Kind) == "" {
+		request.Evidence.Subject.Kind = models.TaskCompletionEvidencePlanIncrement
+	}
+	if strings.TrimSpace(request.Evidence.Subject.ID) == "" {
+		request.Evidence.Subject.ID = strings.TrimSpace(request.CriterionID)
+	}
+	if strings.TrimSpace(request.Evidence.Subject.Revision) == "" {
+		gate, readErr := repo.GetTaskCompletionGate(ctx, task.ID)
+		if readErr == nil && gate != nil {
+			for _, candidate := range gate.Criteria {
+				if candidate.ID == request.CriterionID {
+					request.Evidence.Subject.Revision = strconv.FormatInt(candidate.CriterionRevision, 10)
+					break
+				}
+			}
+		}
 	}
 	actorKind, actorID, _ := taskCompletionActor(ctx)
 	snapshot, err := repo.VerifyTaskCompletionCriterion(ctx, models.TaskCompletionEvidenceChange{
@@ -238,6 +292,13 @@ func (s *Service) ListTaskCompletionGateHistory(ctx context.Context, taskID stri
 }
 
 func taskCompletionActor(ctx context.Context) (kind, id string, human bool) {
+	if attr := steptelemetry.FromContext(ctx); attr.ActorKind == steptelemetry.ActorAgent {
+		actorID := attr.ActorID
+		if actorID == "" {
+			actorID = attr.SessionID
+		}
+		return string(steptelemetry.ActorAgent), actorID, false
+	}
 	identity, ok := authn.IdentityFromContext(ctx)
 	if !ok || strings.TrimSpace(identity.UserID) == "" {
 		return completionGateActorSystem, completionGateActorSystem, false

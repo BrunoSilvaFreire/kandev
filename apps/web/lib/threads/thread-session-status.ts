@@ -9,6 +9,7 @@ import type {
 export type ThreadSessionStatusKind =
   | "permission"
   | "clarification"
+  | "possible_question"
   | "starting"
   | "working"
   | "failed"
@@ -29,6 +30,7 @@ export type ThreadStatus = {
 type ThreadSessionStatusInput = Pick<TaskSession, "state"> & {
   pending_action?: TaskPendingAction | null;
   foreground_activity?: ForegroundActivity | null;
+  possible_question?: boolean | null;
 };
 
 const STATUS = {
@@ -41,6 +43,11 @@ const STATUS = {
     kind: "clarification",
     labelKey: "threads:statusQuestionFromAgent",
     hasAttention: true,
+  },
+  possible_question: {
+    kind: "possible_question",
+    labelKey: "threads:statusPossibleQuestion",
+    hasAttention: false,
   },
   starting: { kind: "starting", labelKey: "threads:statusStarting", hasAttention: false },
   working: { kind: "working", labelKey: "threads:statusWorking", hasAttention: false },
@@ -81,7 +88,10 @@ export function resolveThreadSessionStatus(session: ThreadSessionStatusInput): T
   if (session.state === "FAILED") return STATUS.failed;
   if (session.state === "CANCELLED") return STATUS.cancelled;
   if (session.state === "IDLE") return STATUS.finished;
-  if (session.state === "WAITING_FOR_INPUT") return STATUS.waiting;
+  if (session.state === "WAITING_FOR_INPUT") {
+    if (session.possible_question) return STATUS.possible_question;
+    return STATUS.waiting;
+  }
   if (session.state === "COMPLETED") return STATUS.completed;
   return STATUS.created;
 }

@@ -1,6 +1,8 @@
 import { primaryTaskRepository, type Task } from "@/lib/types/http";
 import type { TaskListFacetValue } from "@/lib/plugins/types";
 import { repositoryGroupKeyAndLabel } from "@/lib/view-model/repository-group";
+import { applyViewGroup } from "@/lib/view-model/groups";
+import type { ViewGroupKey } from "@/lib/view-model/types";
 import type { RepositoryGroup } from "@/lib/view-model/repository-group";
 import { t } from "@/lib/i18n";
 
@@ -68,17 +70,25 @@ export function buildTaskSections(
     return buildWorkflowStepSections(roots, workflows, workflowStepPreviews);
   }
 
-  const sections = new Map<string, TaskListSection>();
-  for (const node of roots) {
-    const { key, title } = groupForTask(node.task, groupBy, workflowMap, repoMap, repositoryGroups);
-    const section = sections.get(key) ?? { key, title, nodes: [] };
-    section.nodes.push(node);
-    sections.set(key, section);
-  }
+  const groupKey = normalizeSharedGroup(groupBy);
+  const grouped = applyViewGroup(roots, groupKey, (node) => {
+    const extracted = groupForTask(node.task, groupBy, workflowMap, repoMap, repositoryGroups);
+    return { key: extracted.key, label: extracted.title ?? "" };
+  });
+  return grouped.groups.map((group) => ({
+    key: group.key,
+    title: group.label,
+    nodes: group.items,
+  }));
+}
 
-  return Array.from(sections.values()).sort((a, b) =>
-    (a.title ?? "").localeCompare(b.title ?? "", undefined, { sensitivity: "base" }),
-  );
+function normalizeSharedGroup(group: string): ViewGroupKey {
+  if (group === "workflow_step") return "workflowStep";
+  if (group === "repository_group") return "repositoryGroup";
+  if (["repository", "workflow", "state", "priority", "none"].includes(group)) {
+    return group as ViewGroupKey;
+  }
+  return "none";
 }
 
 function buildFacetSections(
