@@ -24,7 +24,9 @@ Do NOT create or update the task plan: the implementation plan is owned by the A
 Then call step_complete_kandev.
 """
 
-ARCHITECT_PROMPT = """ROLE: Architect (plan owner and adviser). Never discard, reset, stash or commit the working tree's uncommitted work.
+# The pre-2026-10-09 Architect prompt is retained verbatim so the guarded updater
+# still recognizes the deployed prompt as a reviewed baseline (see KNOWN_PRIOR_BASELINES).
+ARCHITECT_PROMPT_PRE_ENROLL = """ROLE: Architect (plan owner and adviser). Never discard, reset, stash or commit the working tree's uncommitted work.
 You are the only writer of the task plan. Answer every question asked. Do NOT implement.
 
 How you were entered decides what to do:
@@ -82,6 +84,25 @@ or next free key "handoff-architect-to-implement-2", ...) containing:
 Then pass its document_key in entry_options.instructions so the Implementer resumes without re-searching the repository or conversation.
 If set_task_completion_criteria_kandev, move_task_kandev, or named transitions are unavailable in the deployed tool schema, report the capability error or fall back to step_complete_kandev.
 """
+
+# ENROLLMENT INVARIANT: closes the gap where an agent approves a revised plan but
+# leaves the completion criteria enrolled against the previous revision, making the
+# plan stale and permanently blocking the Architect->Implement handoff.
+_ENROLLMENT_INVARIANT = """ENROLLMENT INVARIANT (applies to EVERY approved plan, first or revised, in case A): the completion
+criteria you enroll must reference the exact plan revision you just got approved. After each approval
+- including after a revise - re-run set_task_completion_criteria_kandev(plan_revision_id=<the newly
+approved revision_id>, expected_revision=<current gate revision>, criteria=[...]) (or
+enroll_task_plan_increments_kandev) against that revision. If you write another plan revision after
+enrolling and it is approved, re-enroll against the newest revision before step_complete_kandev: a
+completion set bound to an older revision makes the plan stale and blocks the handoff to Implement.
+Before step_complete_kandev, call get_task_completion_gate_kandev and confirm there is no
+"plan_revision_stale" or "unenrolled_plan" blocker."""
+
+_ARCHITECT_ESCALATION_ANCHOR = 'B) Escalation from the Implementer (instructions below start with "ESCALATION"): read the current plan, technical design, and the evidence'
+ARCHITECT_PROMPT = ARCHITECT_PROMPT_PRE_ENROLL.replace(
+    _ARCHITECT_ESCALATION_ANCHOR,
+    _ENROLLMENT_INVARIANT + "\n" + _ARCHITECT_ESCALATION_ANCHOR,
+)
 
 ARCHITECT_PROMPT_INITIAL = """ROLE: Architect. Read the task plan with get_task_plan_kandev: it is a resume handoff produced by a
 cheap spike agent from an earlier Codex planning conversation. Verify its claims against the
@@ -318,6 +339,7 @@ create_task_plan_kandev MCP tool (update it if one exists), then call step_compl
     "Architect": {
         "prompts": [
             ARCHITECT_PROMPT.strip(),
+            ARCHITECT_PROMPT_PRE_ENROLL.strip(),
             ARCHITECT_PROMPT_PRIOR.strip(),
             ARCHITECT_PROMPT_INITIAL.strip(),
         ],

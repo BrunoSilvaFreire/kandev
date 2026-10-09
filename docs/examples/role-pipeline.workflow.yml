@@ -67,6 +67,16 @@ workflows:
              - reject: end your turn without calling step_complete_kandev, with a short summary of why the plan stopped.
              If the answer arrives as the next message instead (the user answered after the tool call timed out), act on it exactly
              the same way.
+
+          ENROLLMENT INVARIANT (applies to EVERY approved plan, first or revised, in case A): the completion
+          criteria you enroll must reference the exact plan revision you just got approved. After each approval
+          - including after a revise - re-run set_task_completion_criteria_kandev(plan_revision_id=<the newly
+          approved revision_id>, expected_revision=<current gate revision>, criteria=[...]) (or
+          enroll_task_plan_increments_kandev) against that revision. If you write another plan revision after
+          enrolling and it is approved, re-enroll against the newest revision before step_complete_kandev: a
+          completion set bound to an older revision makes the plan stale and blocks the handoff to Implement.
+          Before step_complete_kandev, call get_task_completion_gate_kandev and confirm there is no
+          "plan_revision_stale" or "unenrolled_plan" blocker.
           B) Escalation from the Implementer (instructions below start with "ESCALATION"): read the current plan, technical design, and the evidence
              given, verify it against the repository, and decide. If a technical decision changed, revise the technical design file and publish the updated content with write_task_document_kandev(document_key="technical-design", type="custom") while keeping prior design decisions traceable. Either revise the plan with update_task_plan_kandev(new_revision=true),
              keeping untouched sections and putting a note at the top: "Revision N (supersedes revision M): what changed, why, where

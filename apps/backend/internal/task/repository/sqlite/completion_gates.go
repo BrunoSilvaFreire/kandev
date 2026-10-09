@@ -392,7 +392,11 @@ func (r *Repository) guardTaskCompletionTransitionTx(ctx context.Context, tx *sq
 
 	if isArchitectHandoff {
 		scoped, _ := r.isScopedWorkflowTx(ctx, tx, taskID)
-		if scoped && (snapshot.Blocked || snapshot.PlanStale || len(snapshot.Criteria) == 0) {
+		// The handoff only fails closed when no plan increment set has been
+		// enrolled or the enrolled plan is stale. Unverified criteria are the
+		// normal state here: plan increments are verified by the Review step
+		// after implementation, so snapshot.Blocked must not gate the handoff.
+		if scoped && (snapshot.PlanStale || len(snapshot.Criteria) == 0) {
 			override, ok := models.TaskCompletionMoveOverrideFromContext(ctx)
 			if !ok {
 				return repoerrors.ErrTaskCompletionGateBlocked
