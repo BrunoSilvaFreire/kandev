@@ -381,6 +381,12 @@ export const test = backendFixture.extend<
         thread_active_view_id: DEFAULT_THREAD_VIEW.id,
         thread_view_draft: null,
         saved_layouts: [],
+        // View filters, grouping, and presets persist per user; start each test clean.
+        task_view_filters: {},
+        task_view_groups: {},
+        task_view_group_order: {},
+        task_view_presets: {},
+        task_view_active_preset: {},
         lsp_auto_start_languages: [],
         lsp_auto_install_languages: [],
         lsp_server_configs: {},
@@ -643,6 +649,12 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
       thread_active_view_id: DEFAULT_THREAD_VIEW.id,
       thread_view_draft: null,
       saved_layouts: [],
+      // View filters, grouping, and presets persist per user; start each test clean.
+      task_view_filters: {},
+      task_view_groups: {},
+      task_view_group_order: {},
+      task_view_presets: {},
+      task_view_active_preset: {},
       // Status-surface specs opt in from their local beforeEach hooks; unrelated
       // tests start from the portable setting's default-off state.
       app_status_bar_enabled: false,

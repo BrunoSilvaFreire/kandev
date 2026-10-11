@@ -519,7 +519,7 @@ func TestExportWorkflowEndpoints(t *testing.T) {
 	t.Run("single workflow export carries its steps", func(t *testing.T) {
 		h := newExportHarness(t)
 		export := decodeExport(t, doJSON(t, h.router, http.MethodGet, "/api/v1/workflows/workflow-1/export", nil))
-		if export.Version != models.LegacyExportVersion || export.Type != models.ExportType {
+		if export.Version != models.ExportVersion || export.Type != models.ExportType {
 			t.Fatalf("export envelope = %d/%q", export.Version, export.Type)
 		}
 		if len(export.Workflows) != 1 || export.Workflows[0].Name != "Main" {
@@ -563,6 +563,67 @@ func TestExportWorkflowEndpoints(t *testing.T) {
 		rec := doJSON(t, h.router, http.MethodGet, "/api/v1/workspaces/ws-1/workflows/export", nil)
 		requireJSONError(t, rec, http.StatusInternalServerError, "Failed to export workflows")
 	})
+}
+
+func TestWorkflowUpdatePreviewAndConfirmEndpoints(t *testing.T) {
+	h := setupStepRouter(t)
+	if _, err := h.db.Exec(`INSERT INTO workflows (id, workspace_id, name, created_at, updated_at) VALUES ('workflow-update', 'ws-update', 'Main', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`); err != nil {
+		t.Fatal(err)
+	}
+	h.service.SetWorkflowProvider(&fakeWorkflowProvider{workflows: []*taskmodels.Workflow{{ID: "workflow-update", WorkspaceID: "ws-update", Name: "Main"}}})
+	current := createStepViaHTTP(t, h.router, map[string]interface{}{"workflow_id": "workflow-update", "name": "Queued", "position": 0})
+	definition := models.WorkflowExport{Version: models.ExportVersion, Type: models.ExportType, Workflows: []models.WorkflowPortable{{
+		Name:  "Updated",
+		Steps: []models.StepPortable{{Key: current.PortableKey, Name: "Ready", Position: 0, IsStartStep: true, CompleteTaskOnEnter: false}},
+	}}}
+	yamlData, err := yaml.Marshal(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	multiDefinition := definition
+	multiDefinition.Workflows = append(multiDefinition.Workflows, models.WorkflowPortable{Name: "Second", Steps: []models.StepPortable{}})
+	multiYAML, err := yaml.Marshal(multiDefinition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	omittedSelection := doJSON(t, h.router, http.MethodPost, "/api/v1/workspaces/ws-update/workflows/workflow-update/update/preview", map[string]interface{}{"yaml": string(multiYAML), "update": map[string]interface{}{}})
+	if omittedSelection.Code != http.StatusOK {
+		t.Fatalf("omitted selection preview status = %d, body=%s", omittedSelection.Code, omittedSelection.Body.String())
+	}
+	var omittedBody workflowservice.WorkflowUpdatePreview
+	if err := json.Unmarshal(omittedSelection.Body.Bytes(), &omittedBody); err != nil {
+		t.Fatal(err)
+	}
+	if omittedBody.CanApply || len(omittedBody.Errors) == 0 {
+		t.Fatalf("omitted multi-definition selection preview = %#v, want selection error", omittedBody)
+	}
+	omittedApply := doJSON(t, h.router, http.MethodPost, "/api/v1/workspaces/ws-update/workflows/workflow-update/update", map[string]interface{}{
+		"yaml": string(multiYAML), "version": omittedBody.Version, "update": map[string]interface{}{},
+	})
+	if omittedApply.Code < http.StatusBadRequest {
+		t.Fatalf("omitted selection apply status = %d, body=%s, want rejection", omittedApply.Code, omittedApply.Body.String())
+	}
+	envelope := map[string]interface{}{"yaml": string(yamlData), "update": map[string]interface{}{"workflow_index": 0}}
+	preview := doJSON(t, h.router, http.MethodPost, "/api/v1/workspaces/ws-update/workflows/workflow-update/update/preview", envelope)
+	if preview.Code != http.StatusOK {
+		t.Fatalf("preview status = %d, body=%s", preview.Code, preview.Body.String())
+	}
+	var previewBody workflowservice.WorkflowUpdatePreview
+	if err := json.Unmarshal(preview.Body.Bytes(), &previewBody); err != nil {
+		t.Fatal(err)
+	}
+	if !previewBody.CanApply || previewBody.WorkflowID != "workflow-update" || previewBody.Version == "" {
+		t.Fatalf("preview = %#v", previewBody)
+	}
+	envelope["version"] = previewBody.Version
+	confirmed := doJSON(t, h.router, http.MethodPost, "/api/v1/workspaces/ws-update/workflows/workflow-update/update", envelope)
+	if confirmed.Code != http.StatusOK {
+		t.Fatalf("confirm status = %d, body=%s", confirmed.Code, confirmed.Body.String())
+	}
+	updated, err := h.repo.GetStep(context.Background(), current.ID)
+	if err != nil || updated.Name != "Ready" {
+		t.Fatalf("updated step = %#v, error = %v", updated, err)
+	}
 }
 
 // TestImportWorkflowsEndpoint covers a successful import (created workflow and

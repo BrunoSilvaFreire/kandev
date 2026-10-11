@@ -6,6 +6,7 @@ requirements:
   - REQ-UI-QUICK-CHATS-SURFACE-002
   - REQ-UI-QUICK-CHATS-SURFACE-003
   - REQ-UI-QUICK-CHATS-SURFACE-004
+  - REQ-UI-QUICK-CHATS-SURFACE-005
 ---
 
 # Quick Chats Surface System Design
@@ -28,6 +29,7 @@ slice remain the fast path and are unchanged by this design.
 | `REQ-UI-QUICK-CHATS-SURFACE-002` | [Browse page](#browse-page) |
 | `REQ-UI-QUICK-CHATS-SURFACE-003` | [Detail page](#detail-page), [Surface capabilities](#surface-capabilities) |
 | `REQ-UI-QUICK-CHATS-SURFACE-004` | [Creation flow](#creation-flow) |
+| `REQ-UI-QUICK-CHATS-SURFACE-005` | [Browse order, dates, titles, and context](#browse-order-dates-titles-and-context) |
 
 ## Navigation
 
@@ -51,6 +53,47 @@ page reflects the restorable conversations.
 Rows reuse the task list row and list primitives. Row actions are open (navigate
 to the detail route), open in panel (existing launcher), rename, and delete.
 Delete reuses the Phase 1 confirmed delete action.
+
+## Browse order, dates, titles, and context
+
+Three defects in the first browse page share one cause: it presented tab-strip
+data as conversation data.
+
+- **Dates.** The row read `task_sessions.updated_at`. That column is rewritten
+  by state changes, restart recovery, and the reconciliation sweeps, so after a
+  restart every open chat received the same timestamp and the list showed
+  clusters of identical ages unrelated to when anyone last wrote.
+- **Order.** `ListQuickChatSessions` sorts by task creation time ascending. That
+  is the tab strip's stable baseline and is correct there, but it put the
+  oldest chat first on the browse page.
+- **Titles.** A Quick Chat started without a prompt keeps the placeholder task
+  title, which the list deliberately omits as a name, so the row fell back to
+  the untitled label even when the conversation had content.
+
+`GET /api/v1/workspaces/:id/quick-chats?include=browse` adds a `browse` object
+to each item. The parameter keeps the three extra batch reads off the resync
+path, which every client calls on reconnect. Without it the response is
+unchanged.
+
+| Field | Source | Notes |
+| --- | --- | --- |
+| `last_activity_at` | `MAX(task_session_messages.updated_at)` for the primary session over conversation rows only | Rows of type `status`, `log`, `progress`, `error`, and `script_execution` are written by session start, restart, and recovery, so they are excluded; a chat started and never used has only such rows. Falls back to the task's `created_at`. |
+| `activity_source` | `message` or `created` | Lets the row say the chat has no messages yet. |
+| `title_fallback` | First `user` message of the primary session, whitespace-collapsed and cut to 80 characters | Present only when the chat has no name. Never written to the task. |
+| `repository_ids` | `task_repositories` rows of the Quick Chat's task | Attachment only. The model records no per-repository interaction, so the badge says linked and nothing stronger. |
+| `tasks` | Unarchived tasks whose `parent_id` is the Quick Chat's task, at most five, with a total count | `create_task_kandev` with `parent_id: "self"` is the durable evidence that the chat created the task. |
+
+The task service authorizes the workspace before any of these reads, and child
+tasks share that workspace, so a caller never receives a title from a workspace
+it cannot read.
+
+The client resolves repository names from the workspace repository store and
+drops an ID it cannot resolve, which covers a deleted repository. Sorting is a
+pure function in `apps/web/lib/quick-chat/browse.ts`: activity time, then
+session ID, with missing times last in both directions. The order choice is
+view state on the page and is not persisted. The title precedence is name, then
+`title_fallback`, then the untitled label; rename and agent titling continue to
+write the task title through their existing paths and are not changed.
 
 ## Detail page
 

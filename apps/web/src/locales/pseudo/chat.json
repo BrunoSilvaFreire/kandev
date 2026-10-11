@@ -198,5 +198,16 @@
   "unpinQueuedMessages": "Ũńƥĩń ḿēśśàĝē qũēũē",
   "untitledQuickChat": "Ũńţĩţĺēď Qũĩćķ Ćĥàţ",
   "useWorkspaceDefault": "Ũśē ŵōŕķśƥàćē ďēƒàũĺţ...",
-  "useWorkspaceDefaultOption": "Ũśē ŵōŕķśƥàćē ďēƒàũĺţ"
+  "useWorkspaceDefaultOption": "Ũśē ŵōŕķśƥàćē ďēƒàũĺţ",
+  "quickChatsOrderLabel": "Ōŕďēŕ",
+  "quickChatsOrderRecent": "Ŕēćēńţ àćţĩvĩţŷ ƒĩŕśţ",
+  "quickChatsOrderOldest": "Ōĺďēśţ àćţĩvĩţŷ ƒĩŕśţ",
+  "quickChatLastActivity": "{{relative}} ({{date}})",
+  "quickChatNoMessagesYet": "Ńō ḿēśśàĝēś ŷēţ. Ćŕēàţēď {{date}}",
+  "quickChatLinkedRepository": "Ĺĩńķēď ŕēƥōśĩţōŕŷ: {{name}}",
+  "quickChatLinkedRepositoryPrefix": "Ĺĩńķēď ŕēƥōśĩţōŕŷ:",
+  "quickChatCreatedTask": "Ţàśķ ćŕēàţēď ƒŕōḿ ţĥĩś ćĥàţ: {{title}}",
+  "quickChatCreatedTaskPrefix": "Ţàśķ ćŕēàţēď ƒŕōḿ ţĥĩś ćĥàţ:",
+  "quickChatMoreTasks_one": "àńď {{count}} ḿōŕē ţàśķ",
+  "quickChatMoreTasks_other": "àńď {{count}} ḿōŕē ţàśķś"
 }

@@ -114,6 +114,9 @@ export function createDefaultUserSettings(): UserSettingsState {
     homeQuickFilters: {},
     taskViewFilters: {},
     taskViewGroups: {},
+    taskViewGroupOrder: {},
+    taskViewPresets: {},
+    taskViewActivePreset: {},
     loaded: false,
   };
 }
@@ -329,6 +332,9 @@ function buildHomeViewFields(s: UserSettingsData, current: UserSettingsState) {
     homeQuickFilters: s.home_quick_filters ?? current.homeQuickFilters,
     taskViewFilters: s.task_view_filters ?? current.taskViewFilters,
     taskViewGroups: s.task_view_groups ?? current.taskViewGroups,
+    taskViewGroupOrder: s.task_view_group_order ?? current.taskViewGroupOrder,
+    taskViewPresets: s.task_view_presets ?? current.taskViewPresets,
+    taskViewActivePreset: s.task_view_active_preset ?? current.taskViewActivePreset,
   };
 }
 

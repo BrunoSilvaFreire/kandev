@@ -234,6 +234,12 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	if err := r.backfillTaskPlanWriteVersions(); err != nil {
 		return err
 	}
+	if err := r.migrateTaskRecoveryReviewEpisodes(); err != nil {
+		return err
+	}
+	if err := r.migrateTaskTransitionFailures(); err != nil {
+		return err
+	}
 
 	// Authoritative per-message change signal (chat render-perf). SQLite forbids a
 	// non-constant default on ADD COLUMN, so the column is added nullable and
@@ -584,12 +590,24 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 			write_version TEXT NOT NULL,
 			decision TEXT NOT NULL,
 			subject_edited INTEGER NOT NULL DEFAULT 0,
+			kind TEXT NOT NULL DEFAULT 'human',
+			baseline_revision_id TEXT NOT NULL DEFAULT '',
+			baseline_write_version TEXT NOT NULL DEFAULT '',
+			actor_session_id TEXT NOT NULL DEFAULT '',
+			summary TEXT NOT NULL DEFAULT '',
+			attestation TEXT NOT NULL DEFAULT '',
 			created_at TIMESTAMP NOT NULL,
 			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		)`)
 	_ = r.migrate.Apply("task_plan_approval_receipts.lookup", `
 		CREATE INDEX IF NOT EXISTS idx_plan_approval_receipts_lookup
 			ON task_plan_approval_receipts(task_id, plan_revision_id, write_version)`)
+	_ = r.migrate.Apply("task_plan_approval_receipts.kind", `ALTER TABLE task_plan_approval_receipts ADD COLUMN kind TEXT NOT NULL DEFAULT 'human'`)
+	_ = r.migrate.Apply("task_plan_approval_receipts.baseline_revision_id", `ALTER TABLE task_plan_approval_receipts ADD COLUMN baseline_revision_id TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("task_plan_approval_receipts.baseline_write_version", `ALTER TABLE task_plan_approval_receipts ADD COLUMN baseline_write_version TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("task_plan_approval_receipts.actor_session_id", `ALTER TABLE task_plan_approval_receipts ADD COLUMN actor_session_id TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("task_plan_approval_receipts.summary", `ALTER TABLE task_plan_approval_receipts ADD COLUMN summary TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("task_plan_approval_receipts.attestation", `ALTER TABLE task_plan_approval_receipts ADD COLUMN attestation TEXT NOT NULL DEFAULT ''`)
 	_ = r.migrate.Apply("task_completion_criteria.table", `
 		CREATE TABLE IF NOT EXISTS task_completion_criteria (
 			task_id TEXT NOT NULL,

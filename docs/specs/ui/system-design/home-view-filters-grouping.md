@@ -5,6 +5,8 @@ requirements:
   - REQ-UI-HOME-VIEW-FILTERS-001
   - REQ-UI-HOME-VIEW-FILTERS-002
   - REQ-UI-HOME-VIEW-FILTERS-003
+  - REQ-UI-HOME-VIEW-FILTERS-004
+  - REQ-UI-HOME-VIEW-FILTERS-005
 ---
 
 # Home View Filters and Grouping System Design
@@ -28,6 +30,8 @@ fields.
 | `REQ-UI-HOME-VIEW-FILTERS-001` | [Model](#model), [Dimension registry](#dimension-registry), [Migration](#migration) |
 | `REQ-UI-HOME-VIEW-FILTERS-002` | [Grouping](#grouping), [Rendering](#rendering) |
 | `REQ-UI-HOME-VIEW-FILTERS-003` | [Quick Filters](#quick-filters), [Persistence](#persistence) |
+| `REQ-UI-HOME-VIEW-FILTERS-004` | [Nested grouping](#nested-grouping), [Persistence](#persistence) |
+| `REQ-UI-HOME-VIEW-FILTERS-005` | [Named presets](#named-presets), [Persistence](#persistence) |
 
 ## Model
 
@@ -81,6 +85,40 @@ existing generic multi-repository group.
 placed under the first group in set order that contains its first repository,
 and under Ungrouped when none does.
 
+## Nested grouping
+
+`applyViewGroupPath(items, levels)` takes an ordered list of
+`{ groupKey, extract }` levels and returns a tree. Each node carries its own
+level key and label, and `path`: the level keys from the outermost node joined
+with a separator that cannot occur in a key. `path` is the node identity for
+React keys, collapse state, and drag targets. Labels are never part of it.
+`applyViewGroup` stays as the one-level form.
+
+Kanban/Pipeline builds the tree once over the tasks of every visible workflow
+and only then renders. When the key list does not contain `workflow`, the
+workflow is appended as the innermost structural level, because a lane's
+columns are one workflow's steps; the outer levels are therefore never
+re-partitioned per workflow. List renders each level as a nested section.
+Threads and the sidebar keep one level.
+
+A stored group list is normalized on read: unsupported keys and repeats are
+dropped, `none` ends the list, and an empty result is `["none"]`.
+
+## Named presets
+
+A preset is `{ id, name, filters, groups }`: a stable opaque ID, a display
+name, the shared filter clauses, and the ordered group keys. Kanban/Pipeline and
+List each keep their own ordered preset list and active preset ID. The client
+derives "dirty" by comparing the live clauses and group list with the active
+preset; it is never stored.
+
+Create, update, rename, and delete are whole-list writes of the view's presets
+through the existing user-settings update. The backend normalizes the list:
+trims names, drops entries with an empty ID or name, keeps the first of two
+names that collide ignoring case, caps the list at 20, and clears an active ID
+that no longer names a preset. The client validates
+names before writing so the user sees the reason.
+
 ## Migration
 
 - Sidebar and Threads: no persisted change. Editors become one shared
@@ -121,6 +159,15 @@ to the dimensions each view supports. Unknown view ids and unsupported
 dimensions are ignored without dropping valid entries.
 
 ## Persistence
+
+Kanban/Pipeline and List persist three user settings beside
+`task_view_filters`: `task_view_group_order: Record<view, GroupKey[]>`,
+`task_view_presets: Record<view, Preset[]>`, and
+`task_view_active_preset: Record<view, string>`. `task_view_groups` stays as the
+single-key compatibility field: a write stores the outermost key there, and a
+read without `task_view_group_order` for a view lifts the single key into a
+one-key list. Removing the new fields therefore restores the previous behavior
+with filters intact.
 
 Active filters and grouping stay in each view's existing preference store:
 sidebar views and draft, Threads views and draft, and the Kanban/List user

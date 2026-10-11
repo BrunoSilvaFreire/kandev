@@ -30,6 +30,9 @@ func (e *WorkflowChangeValidationError) Error() string {
 	return "invalid workflow change"
 }
 
+// TransitionFailureCode exposes the stable code to the shared classifier.
+func (e *WorkflowChangeValidationError) TransitionFailureCode() string { return e.Code }
+
 func (e *WorkflowChangeValidationError) Unwrap() error {
 	return ErrInvalidWorkflowChange
 }

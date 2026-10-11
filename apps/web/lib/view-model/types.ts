@@ -48,3 +48,23 @@ export type GroupedViewItems<Item> = {
   groups: ViewGroup<Item>[];
   groupKey: ViewGroupKey;
 };
+
+/** One node of a nested grouping. `path` is its identity; labels never are. */
+export type ViewGroupNode<Item> = {
+  key: string;
+  label: string;
+  groupKey: ViewGroupKey;
+  path: string;
+  /** Every item under this node, in input order. */
+  items: Item[];
+  /** Subgroups for the next level; empty at the innermost level. */
+  children: ViewGroupNode<Item>[];
+};
+
+/** A saved filter and grouping setup for one Home view. */
+export type ViewPreset = {
+  id: string;
+  name: string;
+  filters: ViewFilterClause[];
+  groups: ViewGroupKey[];
+};

@@ -2,31 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
-import { listQuickChatSessions } from "@/lib/api/domains/workspace-api";
+import { listQuickChatsForBrowse } from "@/lib/api/domains/workspace-api";
+import {
+  buildQuickChatBrowseItems,
+  sortQuickChatBrowseItems,
+  type QuickChatBrowseItem,
+  type QuickChatBrowseOrder,
+} from "@/lib/quick-chat/browse";
 import { persistQuickChatRename } from "@/lib/quick-chat/rename";
-import type { TaskSession } from "@/lib/types/http";
-import type { QuickChatBrowseItem } from "./quick-chat-browse-row";
 
 async function deleteQuickChatTask(taskId: string): Promise<void> {
   const { deleteTask } = await import("@/lib/api/domains/kanban-api");
   await deleteTask(taskId);
-}
-
-function buildBrowseItems(
-  response: Awaited<ReturnType<typeof listQuickChatSessions>>,
-): QuickChatBrowseItem[] {
-  const updatedAtBySession = new Map<string, string>(
-    response.task_sessions.map((session: TaskSession) => [session.id, session.updated_at]),
-  );
-  return response.sessions.map((session) => ({
-    sessionId: session.session_id,
-    taskId: session.task_id,
-    workspaceId: session.workspace_id,
-    kind: session.kind,
-    name: session.name ?? "",
-    agentProfileId: session.agent_profile_id,
-    lastActivityAt: updatedAtBySession.get(session.session_id) ?? null,
-  }));
 }
 
 /** Data and actions for the Quick Chats browse page. */
@@ -37,6 +24,8 @@ export function useQuickChatsBrowse() {
   const renameQuickChatSession = useAppStore((state) => state.renameQuickChatSession);
   const [items, setItems] = useState<QuickChatBrowseItem[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [order, setOrder] = useState<QuickChatBrowseOrder>("recent");
+  const sortedItems = useMemo(() => sortQuickChatBrowseItems(items, order), [items, order]);
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
   const [sessionToRename, setSessionToRename] = useState<QuickChatBrowseItem | null>(null);
 
@@ -44,7 +33,7 @@ export function useQuickChatsBrowse() {
     if (!workspaceId) return;
     setStatus("loading");
     try {
-      setItems(buildBrowseItems(await listQuickChatSessions(workspaceId)));
+      setItems(buildQuickChatBrowseItems((await listQuickChatsForBrowse(workspaceId)).sessions));
       setStatus("ready");
     } catch {
       setStatus("error");
@@ -100,7 +89,9 @@ export function useQuickChatsBrowse() {
   );
 
   return {
-    items,
+    items: sortedItems,
+    order,
+    setOrder,
     status,
     reload: load,
     sessionToDelete,

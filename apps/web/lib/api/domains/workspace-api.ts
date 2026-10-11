@@ -379,6 +379,8 @@ export type QuickChatSessionResponse = {
   kind: "chat" | "config";
   name?: string;
   agent_profile_id?: string;
+  /** Conversation detail for the browse page; only with `include=browse`. */
+  browse?: import("@/lib/quick-chat/browse").QuickChatBrowseDetail;
 };
 
 export type ListQuickChatSessionsResponse = {
@@ -399,6 +401,14 @@ export async function listQuickChatSessions(workspaceId: string, options?: ApiRe
   return fetchJson<ListQuickChatSessionsResponse>(
     `/api/v1/workspaces/${workspaceId}/quick-chats`,
     options,
+  );
+}
+
+/** The same list with each chat's activity time, title fallback, and links. */
+export async function listQuickChatsForBrowse(workspaceId: string, options?: ApiRequestOptions) {
+  return fetchJson<ListQuickChatSessionsResponse>(
+    `/api/v1/workspaces/${workspaceId}/quick-chats?include=browse`,
+    { cache: "no-store", ...options },
   );
 }
 

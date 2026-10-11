@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { failedInboxOriginMarkerKey, hasResolvableFailedInboxReason } from "./row-presentation";
+import {
+  failedInboxOriginMarkerKey,
+  failedInboxReasonKindKey,
+  hasResolvableFailedInboxReason,
+} from "./row-presentation";
 
 // AC-UI-INBOX-FAILED-001.9a: `manual` is the only origin treated as a
 // person and renders no marker; each of the five non-person origins gets its
@@ -44,5 +48,19 @@ describe("hasResolvableFailedInboxReason", () => {
 
   it("is true for a non-blank reason", () => {
     expect(hasResolvableFailedInboxReason("connection refused")).toBe(true);
+  });
+});
+
+describe("failedInboxReasonKindKey", () => {
+  it("labels only the server's typed classifications", () => {
+    expect(failedInboxReasonKindKey("quota")).toBe("failedInbox:reasonKindQuota");
+    expect(failedInboxReasonKindKey("provider_unavailable")).toBe(
+      "failedInbox:reasonKindProviderUnavailable",
+    );
+  });
+
+  it("leaves a generic or unknown failure unlabelled", () => {
+    expect(failedInboxReasonKindKey(undefined)).toBeNull();
+    expect(failedInboxReasonKindKey("some_future_kind")).toBeNull();
   });
 });

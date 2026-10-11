@@ -1,3 +1,4 @@
+import type { TransitionFailure, TransitionFailureRecord } from "@/lib/tasks/transition-failure";
 import type { ConnectionIssueSeverity, ConnectionStatus } from "@/lib/types/connection";
 import type { HealthCheckSummary, HealthIssue, SystemHealthResponse } from "@/lib/types/health";
 import type { SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
@@ -347,6 +348,10 @@ export type UISliceState = {
   sessionFailureNotification: SessionFailureNotification | null;
   /** Set when the focused task is deleted live, so a toast can explain why. */
   taskDeletedNotification: TaskDeletedNotification | null;
+  /** The last refused move reported by a surface that only has a toast. */
+  transitionFailureNotice: TransitionFailure | null;
+  /** Unresolved asynchronous transition failure per task. */
+  taskTransitionFailures: Record<string, TransitionFailureRecord>;
   /** Set when the background updates poller reports a newly detected release. */
   updateAvailableNotification: UpdateAvailableNotification | null;
   updateAvailableNotificationQueue: UpdateAvailableNotification[];
@@ -474,6 +479,8 @@ export type UISliceActions = {
   setQuickChatSelectionIdentity: (identity: string | null) => void;
   setSessionFailureNotification: (n: SessionFailureNotification | null) => void;
   setTaskDeletedNotification: (n: TaskDeletedNotification | null) => void;
+  setTransitionFailureNotice: (failure: TransitionFailure | null) => void;
+  setTaskTransitionFailure: (taskId: string, record: TransitionFailureRecord | null) => void;
   setUpdateAvailableNotification: (n: UpdateAvailableNotification | null) => void;
   toggleBottomTerminal: () => void;
   openBottomTerminalWithCommand: (command: string) => void;

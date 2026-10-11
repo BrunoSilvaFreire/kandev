@@ -145,7 +145,7 @@ func (s *Service) AuthorizeStep(ctx context.Context, stepID string) error {
 	if s.workflowAccessChecker == nil {
 		return nil
 	}
-	step, err := s.repo.GetStep(ctx, stepID)
+	step, err := s.repo.GetActiveStep(ctx, stepID)
 	if err != nil {
 		if isNotFoundError(err) {
 			return ErrNotVisible

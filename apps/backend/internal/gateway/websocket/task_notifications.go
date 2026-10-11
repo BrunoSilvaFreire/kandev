@@ -90,6 +90,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.TaskSessionCancellationChanged, ws.ActionSessionCancellationChanged)
 	b.subscribe(eventBus, events.SessionPendingActionChanged, ws.ActionSessionPendingActionChanged)
 	b.subscribe(eventBus, events.TaskStatusSummaryUpdated, ws.ActionTaskStatusSummaryUpdated)
+	b.subscribe(eventBus, events.TaskTransitionFailureUpdated, ws.ActionTaskTransitionFailureUpdated)
 	b.subscribeOrderedMessageEvents(eventBus)
 	b.subscribe(eventBus, events.AgentctlStarting, ws.ActionSessionAgentctlStarting)
 	b.subscribe(eventBus, events.AgentctlReady, ws.ActionSessionAgentctlReady)

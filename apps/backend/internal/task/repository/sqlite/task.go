@@ -85,6 +85,20 @@ var taskScanColumns = []taskScanColumn{
 	}},
 	{name: "created_at"},
 	{name: "updated_at"},
+	{name: "review_episode_id"},
+	{name: "review_entered_at"},
+	{name: "review_entry_origin"},
+	// ponytail: one correlated subquery packs the oldest unresolved episode as
+	// "episode|reason|session" (opaque IDs and a closed vocabulary, so no
+	// escaping); split into typed columns if a consumer needs to filter on it.
+	{name: "interruption", selectExpr: func(alias string) string {
+		return `COALESCE((
+			SELECT s.interruption_episode_id || '|' || COALESCE(s.interruption_reason, '') || '|' || s.id
+			FROM task_sessions s
+			WHERE s.task_id = ` + alias + `.id AND COALESCE(s.interruption_episode_id, '') != ''
+			ORDER BY s.interruption_observed_at, s.id LIMIT 1
+		), '') AS interruption`
+	}},
 	{name: "assignee_agent_profile_id", selectExpr: func(alias string) string {
 		return runnerProjection(alias) + ` AS assignee_agent_profile_id`
 	}},
@@ -1438,6 +1452,9 @@ func (r *Repository) updateTaskTx(
 		}
 		return "", 0, fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 	}
+	if err := r.applyTaskReviewEpisodeTx(ctx, tx, task.ID, currentState, task.State, "", r.nowUTC()); err != nil {
+		return "", 0, err
+	}
 
 	transitionID, err := r.recordStepTransition(ctx, tx, stepTransitionInput{
 		taskID:             task.ID,
@@ -1750,6 +1767,20 @@ func (r *Repository) validateDeferredMoveGuardTx(
 	}
 	if matched != 1 {
 		return messagequeue.ErrSessionIdentityMismatch
+	}
+	// Both session activation and deferred admission lock the task row, so a
+	// sibling cannot become active between this read and the move commit.
+	var activeSiblings int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT COUNT(*) FROM task_sessions
+		 WHERE task_id = ? AND id <> ? AND state IN (?, ?)
+	`), move.TaskID, record.SessionID,
+		models.TaskSessionStateStarting, models.TaskSessionStateRunning,
+	).Scan(&activeSiblings); err != nil {
+		return fmt.Errorf("check active sibling before deferred move: %w", err)
+	}
+	if activeSiblings != 0 {
+		return repoerrors.ErrTaskVersionConflict
 	}
 	return nil
 }
@@ -3292,6 +3323,9 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 	}
+	if err := r.syncTaskReviewEpisodeTx(ctx, tx, task.ID, task.State, task.UpdatedAt); err != nil {
+		return err
+	}
 	transitionID, err := r.recordStepTransition(ctx, tx, stepTransitionInput{
 		taskID:             task.ID,
 		fromWorkflowID:     fromWorkflowID,
@@ -3447,6 +3481,9 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return false, nil
+	}
+	if err := r.syncTaskReviewEpisodeTx(ctx, tx, task.ID, task.State, task.UpdatedAt); err != nil {
+		return false, err
 	}
 	transitionID, err := r.recordStepTransition(ctx, tx, stepTransitionInput{
 		taskID:             task.ID,
@@ -4503,12 +4540,15 @@ func (r *Repository) scanSingleTask(row *sql.Row) (*models.Task, error) {
 	var identifier sql.NullString
 	var externalID sql.NullString
 	var externalIDSettledAt sql.NullTime
+	var reviewEnteredAt sql.NullTime
+	var interruption string
 	err := row.Scan(
 		&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID, &workflowAgentOverrides,
 		&task.Title, &task.Description, &task.State, &task.Priority, &task.Position,
 		&task.WIPAdmitted, &task.QueuedForStepID, &queuedAt,
 		&metadata, &task.IsEphemeral, &task.ParentID, &task.Autopilot, &archivedAt, &task.ArchivedByCascadeID,
 		&task.CreatedAt, &task.UpdatedAt,
+		&task.ReviewEpisodeID, &reviewEnteredAt, &task.ReviewEntryOrigin, &interruption,
 		&task.AssigneeAgentProfileID, &task.AssigneeUserID, &task.Origin, &task.ProjectID,
 		&task.Labels, &identifier, &externalID, &externalIDSettledAt, &task.IsFromOffice,
 	)
@@ -4536,6 +4576,10 @@ func (r *Repository) scanSingleTask(row *sql.Row) (*models.Task, error) {
 	if externalIDSettledAt.Valid {
 		task.ExternalIDSettledAt = &externalIDSettledAt.Time
 	}
+	if reviewEnteredAt.Valid {
+		task.ReviewEnteredAt = &reviewEnteredAt.Time
+	}
+	task.Interruption = parseTaskInterruption(interruption)
 	_ = json.Unmarshal([]byte(metadata), &task.Metadata)
 	return task, nil
 }
@@ -4552,12 +4596,15 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 		var identifier sql.NullString
 		var externalID sql.NullString
 		var externalIDSettledAt sql.NullTime
+		var reviewEnteredAt sql.NullTime
+		var interruption string
 		err := rows.Scan(
 			&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID, &workflowAgentOverrides,
 			&task.Title, &task.Description, &task.State, &task.Priority, &task.Position,
 			&task.WIPAdmitted, &task.QueuedForStepID, &queuedAt,
 			&metadata, &task.IsEphemeral, &task.ParentID, &task.Autopilot, &archivedAt, &task.ArchivedByCascadeID,
 			&task.CreatedAt, &task.UpdatedAt,
+			&task.ReviewEpisodeID, &reviewEnteredAt, &task.ReviewEntryOrigin, &interruption,
 			&task.AssigneeAgentProfileID, &task.AssigneeUserID, &task.Origin, &task.ProjectID,
 			&task.Labels, &identifier, &externalID, &externalIDSettledAt, &task.IsFromOffice,
 		)
@@ -4585,6 +4632,10 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 		if externalIDSettledAt.Valid {
 			task.ExternalIDSettledAt = &externalIDSettledAt.Time
 		}
+		if reviewEnteredAt.Valid {
+			task.ReviewEnteredAt = &reviewEnteredAt.Time
+		}
+		task.Interruption = parseTaskInterruption(interruption)
 		_ = json.Unmarshal([]byte(metadata), &task.Metadata)
 		result = append(result, task)
 	}
@@ -5484,6 +5535,9 @@ func (r *Repository) UpdateTaskState(ctx context.Context, id string, state v1.Ta
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`), state, r.nowUTC(), id); err != nil {
 		return err
 	}
+	if err := r.applyTaskReviewEpisodeTx(ctx, tx, id, currentState, state, "", r.nowUTC()); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -5615,6 +5669,9 @@ func (r *Repository) tryUpdateTaskStateIfSessionState(
 	if rows == 0 {
 		return oldState, false, true, nil
 	}
+	if err := r.applyTaskReviewEpisodeTx(ctx, tx, taskID, oldState, state, "", r.nowUTC()); err != nil {
+		return "", false, false, err
+	}
 	if err := tx.Commit(); err != nil {
 		return "", false, false, err
 	}
@@ -5674,6 +5731,9 @@ func (r *Repository) RestoreTaskMessageRollbackIfSessionState(
 	}
 	if rows == 0 {
 		return false, tx.Commit()
+	}
+	if err := r.syncTaskReviewEpisodeTx(ctx, tx, task.ID, task.State, updatedAt); err != nil {
+		return false, err
 	}
 	// workflow_id is not part of this UPDATE — a rollback restore only moves
 	// the step, never the workflow — so to_workflow_id equals from_workflow_id.
@@ -5754,6 +5814,9 @@ func (r *Repository) UpdateTaskStateIfCurrentIn(
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return currentState, false, nil
+	}
+	if err := r.applyTaskReviewEpisodeTx(ctx, tx, id, currentState, state, "", r.nowUTC()); err != nil {
+		return "", false, err
 	}
 	if err := tx.Commit(); err != nil {
 		return "", false, err
@@ -5873,6 +5936,9 @@ func (r *Repository) tryUpdateTaskStateIfNotArchived(
 		// archived_at. Retry with a fresh read rather than reporting a
 		// stale old-state/no-op.
 		return currentState, false, true, nil
+	}
+	if err := r.applyTaskReviewEpisodeTx(ctx, tx, id, currentState, state, "", r.nowUTC()); err != nil {
+		return "", false, false, err
 	}
 	if err := tx.Commit(); err != nil {
 		return "", false, false, err

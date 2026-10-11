@@ -321,7 +321,7 @@ func (s *Service) settleRecoveredSession(
 		candidate.ExpectedState == models.TaskSessionStateCreated ||
 		candidate.ExpectedState == models.TaskSessionStateStarting ||
 		candidate.ExpectedState == models.TaskSessionStateRunning {
-		if _, err := s.markTaskInterrupted(ctx, recovered); err != nil {
+		if _, err := s.markTaskInterrupted(ctx, recovered, candidate.ExpectedTurnID); err != nil {
 			settlementComplete = false
 		}
 	}
@@ -518,7 +518,7 @@ type interruptedTaskMetadataRecoverySetter interface {
 	) (bool, error)
 }
 
-func (s *Service) markTaskInterrupted(ctx context.Context, recovered *models.TaskSession) (bool, error) {
+func (s *Service) markTaskInterrupted(ctx context.Context, recovered *models.TaskSession, turnID string) (bool, error) {
 	if recovered == nil || recovered.TaskID == "" || recovered.ID == "" {
 		return false, nil
 	}
@@ -530,34 +530,21 @@ func (s *Service) markTaskInterrupted(ctx context.Context, recovered *models.Tas
 	if !ok {
 		return false, errors.New("task repository does not support recovery interruption markers")
 	}
-	value := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC()
+	// Idempotent per session: a repeated sweep keeps the first episode.
+	if marker, supported := s.sessions.(interface {
+		MarkSessionInterrupted(ctx context.Context, sessionID, reason, turnID string, observedAt time.Time) error
+	}); supported {
+		if err := marker.MarkSessionInterrupted(ctx, recovered.ID, models.InterruptionReasonExecutionLost, turnID, now); err != nil {
+			return false, err
+		}
+	}
+	value := now.Format(time.RFC3339Nano)
 	expectedUpdatedAt := recovered.UpdatedAt
 	if hasSettlement && !settlement.RecoveredUpdatedAt.IsZero() {
 		expectedUpdatedAt = settlement.RecoveredUpdatedAt
 	}
-	var changed bool
-	var err error
-	if recoverySetter, supported := s.tasks.(interruptedTaskMetadataRecoverySetter); supported && hasSettlement {
-		changed, err = recoverySetter.SetTaskMetadataKeyIfRecoveryCurrent(
-			ctx,
-			recovered.TaskID,
-			recovered.ID,
-			expectedUpdatedAt,
-			settlement.Token,
-			models.MetaKeyInterruptedAt,
-			value,
-		)
-	} else if absentSetter, supported := s.tasks.(interruptedTaskMetadataAbsentSetter); supported {
-		changed, err = absentSetter.SetTaskMetadataKeyIfAbsentNotArchived(ctx, recovered.TaskID, models.MetaKeyInterruptedAt, value)
-	} else {
-		// A plain archive guard does not protect a recovery marker from a
-		// newer interruption arriving between the ownership check and this write.
-		// Fail closed when the adapter lacks either generation-safe primitive.
-		s.logger.Warn("skipping recovery interruption marker without generation-safe setter",
-			zap.String("task_id", recovered.TaskID),
-			zap.String("session_id", recovered.ID))
-		return false, errors.New("task repository does not support generation-safe recovery interruption markers")
-	}
+	changed, err := s.writeInterruptedMarker(ctx, recovered, settlement, hasSettlement, expectedUpdatedAt, value)
 	if err != nil {
 		return false, err
 	}
@@ -573,4 +560,36 @@ func (s *Service) markTaskInterrupted(ctx context.Context, recovered *models.Tas
 	// without a reload.
 	s.PublishTaskUpdated(ctx, task)
 	return changed, nil
+}
+
+// writeInterruptedMarker sets the task's interruption marker through the
+// repository's generation-safe primitive, failing closed when it has none.
+func (s *Service) writeInterruptedMarker(
+	ctx context.Context,
+	recovered *models.TaskSession,
+	settlement models.InterruptedRecoverySettlement,
+	hasSettlement bool,
+	expectedUpdatedAt time.Time,
+	value string,
+) (bool, error) {
+	if recoverySetter, supported := s.tasks.(interruptedTaskMetadataRecoverySetter); supported && hasSettlement {
+		return recoverySetter.SetTaskMetadataKeyIfRecoveryCurrent(
+			ctx,
+			recovered.TaskID,
+			recovered.ID,
+			expectedUpdatedAt,
+			settlement.Token,
+			models.MetaKeyInterruptedAt,
+			value,
+		)
+	}
+	if absentSetter, supported := s.tasks.(interruptedTaskMetadataAbsentSetter); supported {
+		return absentSetter.SetTaskMetadataKeyIfAbsentNotArchived(ctx, recovered.TaskID, models.MetaKeyInterruptedAt, value)
+	}
+	// A plain archive guard does not protect a recovery marker from a
+	// newer interruption arriving between the ownership check and this write.
+	s.logger.Warn("skipping recovery interruption marker without generation-safe setter",
+		zap.String("task_id", recovered.TaskID),
+		zap.String("session_id", recovered.ID))
+	return false, errors.New("task repository does not support generation-safe recovery interruption markers")
 }

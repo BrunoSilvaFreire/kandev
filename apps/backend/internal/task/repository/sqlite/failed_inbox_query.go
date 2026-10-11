@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/db/dialect"
@@ -63,7 +64,7 @@ func failedInboxRowOrder(drv string) string {
 
 func failedInboxQuery(drv string) string {
 	return fmt.Sprintf(`
-		SELECT t.id, t.title, t.workspace_id, t.origin, cs.completed_at, cs.error_message
+		SELECT t.id, t.title, t.workspace_id, t.origin, cs.completed_at, cs.error_message, cs.metadata
 		FROM tasks t
 		LEFT JOIN task_sessions cs ON cs.id = (
 			SELECT s.id FROM task_sessions s
@@ -84,7 +85,8 @@ func scanFailedInboxRows(rows *sql.Rows) ([]models.FailedInboxTaskRow, error) {
 		var origin sql.NullString
 		var completedAt sql.NullTime
 		var errorMessage sql.NullString
-		if err := rows.Scan(&row.TaskID, &row.Title, &row.WorkspaceID, &origin, &completedAt, &errorMessage); err != nil {
+		var metadata sql.NullString
+		if err := rows.Scan(&row.TaskID, &row.Title, &row.WorkspaceID, &origin, &completedAt, &errorMessage, &metadata); err != nil {
 			return nil, err
 		}
 		row.Origin = origin.String
@@ -93,10 +95,28 @@ func scanFailedInboxRows(rows *sql.Rows) ([]models.FailedInboxTaskRow, error) {
 			row.FailureInstant = &completedAtCopy
 		}
 		row.Reason = errorMessage.String
+		row.ReasonCode = failedInboxReasonCode(metadata.String)
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// failedInboxReasonCode returns the typed code of the session's undismissed
+// last agent error, or "" when the failure carries no typed classification.
+func failedInboxReasonCode(metadata string) string {
+	if metadata == "" {
+		return ""
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(metadata), &parsed); err != nil {
+		return ""
+	}
+	lastError, found := models.LoadLastAgentError(parsed)
+	if !found || lastError.IsDismissed() {
+		return ""
+	}
+	return lastError.Code
 }

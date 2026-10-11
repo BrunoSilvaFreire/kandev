@@ -306,7 +306,11 @@ func TestHandleMoveTask_SameStepValidation(t *testing.T) {
 			return context.Background()
 		}, wantCode: ws.ErrorCodeConflict},
 		{name: "missing step", prepare: func(t *testing.T, f *sameStepMoveFixture) context.Context {
-			require.NoError(t, f.workflowRepo.DeleteStep(context.Background(), f.stepID))
+			// Simulate a step row that no longer exists without going through
+			// the retention-guarded DeleteStep, which now rejects a step an
+			// active task still references.
+			_, err := f.db.Exec(f.db.Rebind(`DELETE FROM workflow_steps WHERE id = ?`), f.stepID)
+			require.NoError(t, err)
 			return context.Background()
 		}, wantCode: ws.ErrorCodeValidation},
 		{name: "step belongs to another workflow", prepare: func(t *testing.T, f *sameStepMoveFixture) context.Context {
@@ -314,7 +318,8 @@ func TestHandleMoveTask_SameStepValidation(t *testing.T) {
 			require.NoError(t, f.repo.CreateWorkflow(ctx, &models.Workflow{
 				ID: "wf-other", WorkspaceID: f.workspaceID, Name: "Other", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 			}))
-			require.NoError(t, f.workflowRepo.DeleteStep(ctx, f.stepID))
+			_, err := f.db.Exec(f.db.Rebind(`DELETE FROM workflow_steps WHERE id = ?`), f.stepID)
+			require.NoError(t, err)
 			require.NoError(t, f.workflowRepo.CreateStep(ctx, &workflowmodels.WorkflowStep{
 				ID: f.stepID, WorkflowID: "wf-other", Name: "Foreign step", Position: 0,
 				CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),

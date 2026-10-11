@@ -141,7 +141,8 @@ func setupStepRouterWithDriver(t *testing.T, driverName string, logOverride ...*
 	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS workflows (
 		id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT '',
 		workflow_template_id TEXT DEFAULT '', name TEXT NOT NULL,
-		description TEXT DEFAULT '', created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
+		description TEXT DEFAULT '', prompt TEXT DEFAULT '', agent_profile_id TEXT,
+		source TEXT DEFAULT '', source_path TEXT DEFAULT '', created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
 	)`); err != nil {
 		t.Fatalf("create workflows table: %v", err)
 	}

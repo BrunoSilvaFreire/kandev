@@ -68,6 +68,28 @@ var ErrTaskParentMismatch = errors.New("task parent relation no longer matches")
 // ErrTaskPlanNotFound reports that no task plan row matched the supplied task id.
 var ErrTaskPlanNotFound = errors.New("task plan not found")
 
+// ErrTaskPlanMinorApprovalNotBaselinePrefix reports a self-approval request
+// whose new plan content is not the prior approved content plus exactly one
+// trailing "## Architect clarifications (advisory)" section.
+var ErrTaskPlanMinorApprovalNotBaselinePrefix = errors.New("minor_approval_not_baseline_prefix")
+
+// ErrTaskPlanMinorApprovalCriteriaChanged reports a self-approval request whose
+// declared increments change criterion IDs, descriptions, or evidence subjects.
+var ErrTaskPlanMinorApprovalCriteriaChanged = errors.New("minor_approval_criteria_changed")
+
+// ErrTaskPlanMinorApprovalActorNotPlanOwner reports a self-approval request
+// from a session that is not the task's active session running in the same
+// workflow step that obtained the human baseline approval.
+var ErrTaskPlanMinorApprovalActorNotPlanOwner = errors.New("minor_approval_actor_not_plan_owner")
+
+// ErrTaskPlanMinorApprovalNoHumanBaseline reports a self-approval request with
+// no prior human-approved plan baseline to clarify.
+var ErrTaskPlanMinorApprovalNoHumanBaseline = errors.New("minor_approval_no_human_baseline")
+
+// ErrTaskPlanMinorApprovalStaleHead reports a self-approval request whose
+// asserted head revision is no longer the task's current plan head.
+var ErrTaskPlanMinorApprovalStaleHead = errors.New("minor_approval_stale_head")
+
 // ErrTaskPlanCommentsChanged reports that a comment mutation was based on a
 // stale plan identity, row version, or caller-generated comment identity.
 var ErrTaskPlanCommentsChanged = errors.New("task plan comments changed")

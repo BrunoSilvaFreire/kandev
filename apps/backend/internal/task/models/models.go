@@ -20,6 +20,12 @@ var ErrExecutorRunningNotFound = errors.New("executor running not found")
 // ErrTaskSessionNotFound is returned when no task session record exists.
 var ErrTaskSessionNotFound = errors.New("task session not found")
 
+var ErrStepVisitConflict = errors.New("session step visit association changed")
+
+var ErrStepVisitRetired = errors.New("retired workflow steps cannot receive new session associations")
+
+var ErrStepVisitNotFound = errors.New("eligible task step visit not found")
+
 // ErrTaskWalkthroughNotFound is returned when no walkthrough record exists.
 var ErrTaskWalkthroughNotFound = errors.New("task walkthrough not found")
 
@@ -250,6 +256,19 @@ const (
 	// so task-list surfaces show the warning indicator. The orchestrator removes
 	// the key only after the provider confirms recovery.
 	MetaKeyInterruptedAt = "interrupted_at"
+	// Interruption reason vocabulary (REQ-TASKS-RECOVERY-REVIEW-001). These are
+	// the closed set recorded on task_sessions.interruption_reason; provider
+	// quota/unavailable and execution failure keep their existing typed owners.
+	InterruptionReasonBackendRestart = "backend_restart"
+	InterruptionReasonExecutionLost  = "execution_lost"
+	InterruptionReasonUnknownLegacy  = "unknown_legacy"
+	// Task Review-entry origins (REQ-TASKS-RECOVERY-REVIEW-001). observed_baseline
+	// is only set by migration; manual/workflow/agent_completion are real entries.
+	ReviewEntryOriginManual           = "manual"
+	ReviewEntryOriginWorkflow         = "workflow"
+	ReviewEntryOriginAgentCompletion  = "agent_completion"
+	ReviewEntryOriginUnknownLegacy    = "unknown_legacy"
+	ReviewEntryOriginObservedBaseline = "observed_baseline"
 	// MetaKeyAutoStartFailed is set when a workflow step's auto_start_agent
 	// on_enter action fails to launch a run (kanban StartTask error, or an
 	// Office task queue-run error/unresolvable agent). Its presence makes the
@@ -1558,6 +1577,13 @@ func IsAutomationTaskOrigin(origin string) bool {
 	return origin == TaskOriginAutomationRun || origin == TaskOriginAutomationTask
 }
 
+// TaskInterruption identifies one unresolved session interruption episode.
+type TaskInterruption struct {
+	EpisodeID string `json:"episode_id"`
+	Reason    string `json:"reason"`
+	SessionID string `json:"session_id"`
+}
+
 // Task represents a task in the database
 type Task struct {
 	ID             string `json:"id"`
@@ -1593,6 +1619,20 @@ type Task struct {
 	ArchivedByCascadeID string    `json:"archived_by_cascade_id,omitempty"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
+	// Interruption is the read-only projection of the task's oldest unresolved
+	// session interruption episode; nil when no session carries one. The
+	// session row stays the authority.
+	Interruption *TaskInterruption `json:"interruption,omitempty"`
+	// ReviewEpisodeID identifies the task's current active Review episode. It
+	// is empty outside Review and is written in the same transaction as a real
+	// non-Review to Review transition. See REQ-TASKS-RECOVERY-REVIEW-001.
+	ReviewEpisodeID string `json:"review_episode_id,omitempty"`
+	// ReviewEnteredAt is the authoritative entry time of the active Review
+	// episode. Review age is measured from here, never tasks.updated_at.
+	ReviewEnteredAt *time.Time `json:"review_entered_at,omitempty"`
+	// ReviewEntryOrigin records why the task entered Review. A direct write
+	// without an explicit origin is deliberately recorded as unknown_legacy.
+	ReviewEntryOrigin string `json:"review_entry_origin,omitempty"`
 	// WorkflowStepTransitionID is the immutable ledger row identifier for the
 	// latest workflow-step write. Repositories populate it after a transition;
 	// it is transient and is not stored in the tasks table.
@@ -2451,6 +2491,18 @@ type TaskSession struct {
 	// never re-derived. It is the immutable session/step provenance that lets
 	// task history attribute a session to a step visit. Empty for legacy rows.
 	WorkflowStepIDAtCreation string `json:"workflow_step_id_at_creation,omitempty"`
+	AssociatedStepVisitID    string `json:"associated_step_visit_id,omitempty"`
+	// InterruptionEpisodeID identifies one unresolved execution-loss episode for
+	// this session. It is empty when the session is not interrupted. See
+	// REQ-TASKS-RECOVERY-REVIEW-001.
+	InterruptionEpisodeID string `json:"interruption_episode_id,omitempty"`
+	// InterruptionReason is the closed reason vocabulary for the episode.
+	InterruptionReason string `json:"interruption_reason,omitempty"`
+	// InterruptionObservedAt is when the loss was first observed; it is stable
+	// across repeated reconciliation of the same episode.
+	InterruptionObservedAt *time.Time `json:"interruption_observed_at,omitempty"`
+	// InterruptionTurnID is the source turn when known; never an unrelated turn.
+	InterruptionTurnID string `json:"interruption_turn_id,omitempty"`
 	// LastReadMessageID is the id of the newest message the frontend has
 	// marked as read for this session — the Slack-style "read cursor" used
 	// to position the unread ("New") divider in the transcript. Advanced to
@@ -3315,16 +3367,68 @@ type TaskPlanRevision struct {
 	UpdatedAt         time.Time `json:"updated_at"` // bumps on coalesce merge
 }
 
-// TaskPlanApprovalReceipt is an immutable record proving human approval of a
-// specific plan revision and HEAD write_version.
+// TaskPlanApprovalReceiptKind classifies the authority behind an enrollable
+// plan approval receipt: a human approval answer or an audited Architect
+// minor-revision self-approval atop a human baseline.
+type TaskPlanApprovalReceiptKind = string
+
+const (
+	TaskPlanApprovalReceiptKindHuman TaskPlanApprovalReceiptKind = "human"
+	TaskPlanApprovalReceiptKindMinor TaskPlanApprovalReceiptKind = "minor"
+)
+
+// TaskPlanApprovalReceipt is an immutable record proving approval of a specific
+// plan revision and HEAD write_version. Human receipts come from a winning
+// clarification answer; minor receipts come from RecordPlanMinorApproval and
+// additionally cite the prior human-approved baseline and the authoring
+// session.
 type TaskPlanApprovalReceipt struct {
-	ID             string    `json:"id"`
-	TaskID         string    `json:"task_id"`
-	PlanRevisionID string    `json:"plan_revision_id"`
-	WriteVersion   string    `json:"write_version"`
-	Decision       string    `json:"decision"`
-	SubjectEdited  bool      `json:"subject_edited"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID                   string                      `json:"id"`
+	TaskID               string                      `json:"task_id"`
+	PlanRevisionID       string                      `json:"plan_revision_id"`
+	WriteVersion         string                      `json:"write_version"`
+	Decision             string                      `json:"decision"`
+	SubjectEdited        bool                        `json:"subject_edited"`
+	Kind                 TaskPlanApprovalReceiptKind `json:"kind"`
+	BaselineRevisionID   string                      `json:"baseline_revision_id,omitempty"`
+	BaselineWriteVersion string                      `json:"baseline_write_version,omitempty"`
+	ActorSessionID       string                      `json:"actor_session_id,omitempty"`
+	Summary              string                      `json:"summary,omitempty"`
+	Attestation          string                      `json:"attestation,omitempty"`
+	CreatedAt            time.Time                   `json:"created_at"`
+}
+
+// RecordPlanMinorApprovalCommand records an audited Architect minor-revision
+// approval for the task's current plan head. The repository reads the head and
+// baseline itself; callers cannot supply the binding identity.
+type RecordPlanMinorApprovalCommand struct {
+	TaskID                 string
+	ExpectedRevision       int64
+	ExpectedPlanRevisionID string
+	ActorSessionID         string
+	ActorKind              string
+	ActorID                string
+	Summary                string
+	Attestation            string
+	Increments             []TaskPlanIncrementDeclaration
+}
+
+// RecordPlanMinorApprovalResult reports the newly approved head revision and
+// the gate snapshot observed at approval time (criteria unchanged).
+type RecordPlanMinorApprovalResult struct {
+	PlanRevisionID string
+	WriteVersion   string
+	Gate           *TaskCompletionGateSnapshot
+}
+
+// RecordPlanMinorApprovalRequest is the task-service command surface used by
+// the Architect to record a minor plan revision approval.
+type RecordPlanMinorApprovalRequest struct {
+	ExpectedRevision       int64                          `json:"expected_revision"`
+	ExpectedPlanRevisionID string                         `json:"plan_revision_id,omitempty"`
+	Summary                string                         `json:"summary"`
+	Attestation            string                         `json:"attestation"`
+	Increments             []TaskPlanIncrementDeclaration `json:"increments"`
 }
 
 // TaskWalkthrough is an agent-authored guided code tour attached to a task.

@@ -98,10 +98,50 @@ completion set bound to an older revision makes the plan stale and blocks the ha
 Before step_complete_kandev, call get_task_completion_gate_kandev and confirm there is no
 "plan_revision_stale" or "unenrolled_plan" blocker."""
 
+# MINOR PLAN APPROVALS: a guidance-only revision can be approved by the Architect
+# through the server-verified operation instead of another human round trip.
+_MINOR_PLAN_APPROVALS = """MINOR PLAN APPROVALS: a first plan and any revision that changes product, API, persistence, security,
+destructive behavior, dependencies, risk, or completion criteria still require request_approval_kandev. A
+non-normative clarification may instead use record_plan_minor_approval_kandev, which is accepted only when the
+new plan head is the previously approved content byte-for-byte followed by exactly one trailing
+"## Architect clarifications (advisory)" section and the increment IDs, descriptions, and evidence subjects are
+unchanged; the call is authorized by your session's workflow step. On any minor_approval_* rejection, request
+human approval instead."""
+
+# DESIGN AND PLAN ARTIFACTS: the design is the contract and the plan is the
+# delivery order, so neither repeats the other; the preflight closes avoidable
+# gaps before the first handoff.
+_DESIGN_AND_PLAN_ARTIFACTS = """DESIGN AND PLAN ARTIFACTS (two documents with different jobs; never repeat one in the other):
+- The technical design is a repository-grounded contract. State the current architecture as you verified it in the code,
+  the proposed responsibility boundaries, the data, API and state changes, failure and recovery behavior, migration,
+  security and concurrency where they apply, representative shapes, the alternatives you rejected and why, and the
+  decisions still open. Scale each part to its real risk. Leave out increment tables, command checklists and delivery
+  order. Keep the repository file and the "technical-design" task document byte-identical.
+- The plan is the delivery order. Name the ordered increments, their dependencies, the exact verification commands, the
+  stop/rollback gates and the completion criteria, and link the design by repository path and document key. Do not
+  restate contract prose from the design.
+PREFLIGHT BEFORE THE FIRST HANDOFF: for each increment, check its owning specification, the code that reads and writes
+the data it touches, its migration and transaction boundaries, and that its verification commands can run. Resolve what
+you find in the design or plan and record a compact checklist in the handoff document. Do not hand over a gap you could
+have closed, and never invent evidence."""
+
 _ARCHITECT_ESCALATION_ANCHOR = 'B) Escalation from the Implementer (instructions below start with "ESCALATION"): read the current plan, technical design, and the evidence'
-ARCHITECT_PROMPT = ARCHITECT_PROMPT_PRE_ENROLL.replace(
-    _ARCHITECT_ESCALATION_ANCHOR,
-    _ENROLLMENT_INVARIANT + "\n" + _ARCHITECT_ESCALATION_ANCHOR,
+
+
+def _architect_prompt_with(*blocks: str) -> str:
+    """Insert the blocks, in order, just before the escalation case."""
+    return ARCHITECT_PROMPT_PRE_ENROLL.replace(
+        _ARCHITECT_ESCALATION_ANCHOR,
+        "\n\n".join(blocks) + "\n" + _ARCHITECT_ESCALATION_ANCHOR,
+    )
+
+
+# Earlier shipped Architect prompts stay recognizable so the guard can tell an
+# upgrade from a user edit.
+ARCHITECT_PROMPT_ENROLL_ONLY = _architect_prompt_with(_ENROLLMENT_INVARIANT)
+ARCHITECT_PROMPT_MINOR_APPROVAL = _architect_prompt_with(_ENROLLMENT_INVARIANT, _MINOR_PLAN_APPROVALS)
+ARCHITECT_PROMPT = _architect_prompt_with(
+    _ENROLLMENT_INVARIANT, _MINOR_PLAN_APPROVALS, _DESIGN_AND_PLAN_ARTIFACTS
 )
 
 ARCHITECT_PROMPT_INITIAL = """ROLE: Architect. Read the task plan with get_task_plan_kandev: it is a resume handoff produced by a
@@ -339,6 +379,8 @@ create_task_plan_kandev MCP tool (update it if one exists), then call step_compl
     "Architect": {
         "prompts": [
             ARCHITECT_PROMPT.strip(),
+            ARCHITECT_PROMPT_MINOR_APPROVAL.strip(),
+            ARCHITECT_PROMPT_ENROLL_ONLY.strip(),
             ARCHITECT_PROMPT_PRE_ENROLL.strip(),
             ARCHITECT_PROMPT_PRIOR.strip(),
             ARCHITECT_PROMPT_INITIAL.strip(),

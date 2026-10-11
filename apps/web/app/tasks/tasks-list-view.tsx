@@ -1,5 +1,8 @@
 "use client";
 
+import { useAppStore } from "@/components/state-provider";
+import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
+import { useRepositorySets } from "@/hooks/domains/workspace/use-repository-sets";
 import { useMemo, useRef, useState } from "react";
 import type { PaginationState } from "@tanstack/react-table";
 import { Button } from "@kandev/ui/button";
@@ -22,6 +25,7 @@ import type { TaskListFacetValue } from "@/lib/plugins/types";
 import { workspaceModeFromMetadata } from "@/lib/kanban/map-task";
 
 import {
+  buildNestedTaskSections,
   buildTaskSections,
   type TaskTreeNode,
   type TaskListSection,
@@ -158,22 +162,30 @@ function TaskRows({
   workflowStepPreviews?: TaskListStepPreviews;
 }) {
   const { t, i18n } = useTranslation();
+  // Same reason as the board: the group catalog is not hydrated on every route.
+  useRepositorySets(useAppStore((state) => state.workspaces?.activeId ?? null));
   const repositoryGroups = useRepositoryGroups();
   const workflowMap = useMemo(() => new Map(workflows.map((w) => [w.id, w.name])), [workflows]);
   const repoMap = useMemo(() => new Map(repositories.map((r) => [r.id, r.name])), [repositories]);
   // Section headings resolve from the active locale even when the tasks do not change.
+  // The shared ordered grouping wins when set; otherwise the list keeps its
+  // own grouping preference.
+  const { groups: sharedGroups } = useKanbanDisplaySettings();
   const sections = useMemo(
     () =>
-      buildTaskSections(tasks, {
-        groupBy: tasksListGroup,
-        workflowMap,
-        repoMap,
-        facetValues,
-        workflows,
-        workflowStepPreviews,
-        repositoryGroups,
-      }),
+      sharedGroups[0] !== "none"
+        ? buildNestedTaskSections(tasks, sharedGroups, { workflowMap, repoMap, repositoryGroups })
+        : buildTaskSections(tasks, {
+            groupBy: tasksListGroup,
+            workflowMap,
+            repoMap,
+            facetValues,
+            workflows,
+            workflowStepPreviews,
+            repositoryGroups,
+          }),
     [
+      sharedGroups,
       facetValues,
       repoMap,
       repositoryGroups,
@@ -325,8 +337,14 @@ function TaskListSectionView({
   onRowClick: (task: Task) => void;
 }) {
   const rows = flattenTaskTree(section.nodes);
+  const headingOnly = section.count !== undefined;
   return (
-    <section className="space-y-2" data-testid="tasks-list-section">
+    <section
+      className="space-y-2"
+      style={section.level ? { marginLeft: `${section.level}rem` } : undefined}
+      data-testid="tasks-list-section"
+      data-section-level={section.level ?? 0}
+    >
       {section.title && (
         <div className="flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-normal text-muted-foreground">
           {section.color && (
@@ -336,26 +354,28 @@ function TaskListSectionView({
             />
           )}
           <span>{section.title}</span>
-          <span className="text-muted-foreground/70">{rows.length}</span>
+          <span className="text-muted-foreground/70">{section.count ?? rows.length}</span>
         </div>
       )}
-      <div className="rounded-lg border border-border divide-y divide-border overflow-hidden">
-        {rows.map(({ task, level }) => (
-          <TaskListRow
-            key={task.id}
-            task={task}
-            level={level}
-            repositories={repositories}
-            parentTasks={parentTasks}
-            showTaskDetails={showTaskDetails}
-            deletingTaskId={deletingTaskId}
-            onArchive={onArchive}
-            onUnarchive={onUnarchive}
-            onDelete={onDelete}
-            onRowClick={onRowClick}
-          />
-        ))}
-      </div>
+      {headingOnly ? null : (
+        <div className="rounded-lg border border-border divide-y divide-border overflow-hidden">
+          {rows.map(({ task, level }) => (
+            <TaskListRow
+              key={task.id}
+              task={task}
+              level={level}
+              repositories={repositories}
+              parentTasks={parentTasks}
+              showTaskDetails={showTaskDetails}
+              deletingTaskId={deletingTaskId}
+              onArchive={onArchive}
+              onUnarchive={onUnarchive}
+              onDelete={onDelete}
+              onRowClick={onRowClick}
+            />
+          ))}
+        </div>
+      )}
     </section>
   );
 }

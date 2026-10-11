@@ -55,15 +55,18 @@ type TaskCompletionBlocker struct {
 
 // TaskCompletionGateSnapshot is the canonical task-owned completion view.
 type TaskCompletionGateSnapshot struct {
-	TaskID           string                    `json:"task_id"`
-	WorkspaceID      string                    `json:"workspace_id"`
-	Revision         int64                     `json:"revision"`
-	PlanRevisionID   string                    `json:"plan_revision_id,omitempty"`
-	PlanWriteVersion string                    `json:"plan_write_version,omitempty"`
-	PlanStale        bool                      `json:"plan_stale,omitempty"`
-	Criteria         []TaskCompletionCriterion `json:"criteria"`
-	Blockers         []TaskCompletionBlocker   `json:"blockers,omitempty"`
-	Blocked          bool                      `json:"blocked"`
+	TaskID           string `json:"task_id"`
+	WorkspaceID      string `json:"workspace_id"`
+	Revision         int64  `json:"revision"`
+	PlanRevisionID   string `json:"plan_revision_id,omitempty"`
+	PlanWriteVersion string `json:"plan_write_version,omitempty"`
+	// CurrentPlanWriteVersion is the task plan's head at snapshot time; it
+	// differs from PlanWriteVersion exactly when PlanStale is set.
+	CurrentPlanWriteVersion string                    `json:"current_plan_write_version,omitempty"`
+	PlanStale               bool                      `json:"plan_stale,omitempty"`
+	Criteria                []TaskCompletionCriterion `json:"criteria"`
+	Blockers                []TaskCompletionBlocker   `json:"blockers,omitempty"`
+	Blocked                 bool                      `json:"blocked"`
 }
 
 // TaskCompletionGateHistory is an immutable criteria, evidence, or override
@@ -159,4 +162,21 @@ type EnrollTaskPlanIncrementsRequest struct {
 	PlanRevisionID   string                         `json:"plan_revision_id"`
 	ExpectedRevision int64                          `json:"expected_revision"`
 	Increments       []TaskPlanIncrementDeclaration `json:"increments"`
+}
+
+// Sources of an asynchronous transition failure.
+const (
+	TransitionFailureSourceDeferredMove = "deferred_move"
+	TransitionFailureSourceAutoAdvance  = "auto_advance"
+)
+
+// TaskTransitionFailure is a task's current unresolved asynchronous
+// transition failure. Failure is the serialized shared envelope.
+type TaskTransitionFailure struct {
+	TaskID    string    `json:"task_id"`
+	AttemptID string    `json:"attempt_id"`
+	Source    string    `json:"source"`
+	SessionID string    `json:"session_id,omitempty"`
+	Failure   string    `json:"-"`
+	CreatedAt time.Time `json:"created_at"`
 }

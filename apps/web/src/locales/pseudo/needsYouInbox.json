@@ -42,5 +42,20 @@
   "triageCaption": "Ƥōśśĩƀĺē qũēśţĩōńś àŕē àďvĩśōŕŷ ĥĩńţś; ōƥēń ţĥē ćōńvēŕśàţĩōń ţō ŕēƥĺŷ.",
   "triageKindClarification": "Ćĺàŕĩƒĩćàţĩōń",
   "triageKindStaleReview": "Śţàĺē ŕēvĩēŵ",
-  "triageKindPossibleQuestion": "Ƥōśśĩƀĺē qũēśţĩōń"
+  "triageKindPossibleQuestion": "Ƥōśśĩƀĺē qũēśţĩōń",
+  "triageKindInterrupted": "Ĩńţēŕŕũƥţēď",
+  "triageKindReview": "Ŕēvĩēŵ",
+  "triageKindDependency": "Ŵàĩţĩńĝ",
+  "triageActionAnswer": "Àńśŵēŕ",
+  "triageActionResume": "Ŕēśũḿē",
+  "triageActionReview": "Ŕēvĩēŵ",
+  "triageActionOpen": "Ōƥēń",
+  "triageReasonClarification": "Ţĥē àĝēńţ àśķēď à qũēśţĩōń àńď ĩś ŵàĩţĩńĝ ƒōŕ ŷōũŕ àńśŵēŕ.",
+  "triageReasonBackendRestart": "Ķàńďēv ŕēśţàŕţēď ŵĥĩĺē ţĥē àĝēńţ ŵàś ŵōŕķĩńĝ. Ŕēśũḿē ţō ćōńţĩńũē ţĥē śàḿē ćōńvēŕśàţĩōń.",
+  "triageReasonExecutionLost": "Ţĥē àĝēńţ śţōƥƥēď ŕēśƥōńďĩńĝ ḿĩď-ţũŕń. Ŕēśũḿē ţō ćōńţĩńũē ţĥē śàḿē ćōńvēŕśàţĩōń.",
+  "triageReasonInterruptedUnknown": "Ţĥē àĝēńţ ŵàś ĩńţēŕŕũƥţēď. Ţĥē ćàũśē ŵàś ńōţ ŕēćōŕďēď.",
+  "triageReasonStaleReview": "Ţĥĩś ţàśķ ĥàś ƀēēń ŵàĩţĩńĝ ƒōŕ ŕēvĩēŵ ƒōŕ ḿōŕē ţĥàń à ďàŷ.",
+  "triageReasonReview": "Ţĥĩś ţàśķ ĩś ŵàĩţĩńĝ ƒōŕ ŷōũŕ ŕēvĩēŵ.",
+  "triageReasonDependency": "Ţĥĩś ţàśķ ĩś ŵàĩţĩńĝ ōń àńōţĥēŕ ţàśķ ţō ƒĩńĩśĥ.",
+  "triageReasonPossibleQuestion": "Ţĥē àĝēńţ ḿàŷ ĥàvē àśķēď à qũēśţĩōń ĩń ĩţś ĺàśţ ḿēśśàĝē."
 }

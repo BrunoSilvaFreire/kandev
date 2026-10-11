@@ -161,6 +161,11 @@ func (s *Service) updateSyncedWorkflow(
 	dynamicBindings map[int]string,
 	result *SyncApplyResult,
 ) {
+	version, err := s.repo.WorkflowDefinitionVersion(ctx, wf.ID)
+	if err != nil {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: failed to read definition version: %v", wf.Name, err))
+		return
+	}
 	steps, err := s.repo.ListStepsByWorkflow(ctx, wf.ID)
 	if err != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: failed to list steps: %v", wf.Name, err))
@@ -172,51 +177,49 @@ func (s *Service) updateSyncedWorkflow(
 		return
 	}
 
-	posToID, warning := s.buildSyncedSteps(wf, pw, existingByName, dynamicBindings)
+	desiredSteps, warning := s.buildSyncedSteps(wf, pw, existingByName, dynamicBindings)
 	if warning != "" {
 		result.Warnings = append(result.Warnings, warning)
 		return
 	}
 
-	changed, err := s.applyWorkflowFields(ctx, wf, pw)
+	workflow := *wf
+	workflow.Name = pw.Name
+	workflow.Description = pw.Description
+	workflow.Prompt = pw.Prompt
+	workflow.AgentProfileID = ""
+	if pw.AgentProfile != nil && s.matchProfile != nil {
+		workflow.AgentProfileID = s.matchProfile(pw.AgentProfile.AgentName, pw.AgentProfile.Model, pw.AgentProfile.Mode, wf.AgentProfileID)
+	}
+	retired := make([]string, 0, len(toDelete))
+	for _, st := range toDelete {
+		retired = append(retired, st.ID)
+	}
+	changed, err := s.repo.ApplySyncedWorkflowDefinition(ctx, wf.ID, version, wf.SourcePath, &workflow, desiredSteps, retired)
 	if err != nil {
-		result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: failed to update: %v", wf.Name, err))
+		result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: failed to apply atomically: %v", wf.Name, err))
 		return
 	}
-	for _, sp := range pw.Steps {
-		existing := existingByName[sp.Name]
-		step := s.stepFromPortableForSync(wf.ID, sp, posToID, existing)
-		applyDynamicStepBinding(step, sp, dynamicBindings)
-		var rebinding bool
-		var oldProfileID, existingID string
-		var reviewRebindings []profileRebinding
-		if existing != nil {
-			step.CreatedAt = existing.CreatedAt
-			step.StageType = existing.StageType // not carried by the portable format
-			if stepMatchesDefinition(existing, step) {
-				continue
-			}
-			rebinding = existing.AgentProfileID != "" && existing.AgentProfileID != step.AgentProfileID
-			oldProfileID = existing.AgentProfileID
-			existingID = existing.ID
-			reviewRebindings = findReviewProfileRebindings(existing.Events, step.Events)
-			err = s.repo.UpdateStep(ctx, step)
-		} else {
-			err = s.repo.CreateStep(ctx, step)
-		}
-		if err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: failed to apply step %q: %v", wf.Name, sp.Name, err))
-			return
-		}
-		s.logStepProfileRebindings(wf, sp.Name, existingID, rebinding, oldProfileID, step.AgentProfileID, reviewRebindings)
-		changed = true
+	if !changed {
+		return
 	}
-	for _, st := range toDelete {
-		if err := s.DeleteStep(ctx, st.ID); err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: failed to remove step %q: %v", wf.Name, st.Name, err))
-			return
+	oldWorkflowProfileID := wf.AgentProfileID
+	wf.Name = workflow.Name
+	wf.Description = workflow.Description
+	wf.Prompt = workflow.Prompt
+	wf.AgentProfileID = workflow.AgentProfileID
+	if oldWorkflowProfileID != "" && oldWorkflowProfileID != workflow.AgentProfileID {
+		s.logger.Warn("workflow sync rebinding workflow's agent profile",
+			zap.String("workflow_id", wf.ID), zap.String("workflow_name", wf.Name),
+			zap.String("old_agent_profile_id", oldWorkflowProfileID), zap.String("new_agent_profile_id", workflow.AgentProfileID))
+	}
+	for _, step := range desiredSteps {
+		prior := existingByName[step.Name]
+		if prior == nil || stepMatchesDefinition(prior, step) {
+			continue
 		}
-		changed = true
+		reviewRebindings := findReviewProfileRebindings(prior.Events, step.Events)
+		s.logStepProfileRebindings(wf, step.Name, prior.ID, prior.AgentProfileID != "" && prior.AgentProfileID != step.AgentProfileID, prior.AgentProfileID, step.AgentProfileID, reviewRebindings)
 	}
 	if changed {
 		result.Updated = append(result.Updated, wf.Name)
@@ -234,7 +237,7 @@ func (s *Service) buildSyncedSteps(
 	pw models.WorkflowPortable,
 	existingByName map[string]*models.WorkflowStep,
 	dynamicBindings map[int]string,
-) (map[int]string, string) {
+) ([]*models.WorkflowStep, string) {
 	posToID := make(map[int]string, len(pw.Steps))
 	for _, sp := range pw.Steps {
 		if st, ok := existingByName[sp.Name]; ok {
@@ -245,7 +248,16 @@ func (s *Service) buildSyncedSteps(
 	}
 	desiredSteps := make([]*models.WorkflowStep, 0, len(pw.Steps))
 	for _, sp := range pw.Steps {
-		step := s.stepFromPortableForSync(wf.ID, sp, posToID, existingByName[sp.Name])
+		existing := existingByName[sp.Name]
+		step := s.stepFromPortableForSync(wf.ID, sp, posToID, existing)
+		step.PortableKey = sp.Key
+		if existing != nil {
+			step.CreatedAt = existing.CreatedAt
+			step.StageType = existing.StageType
+			if step.PortableKey == "" {
+				step.PortableKey = existing.PortableKey
+			}
+		}
 		applyDynamicStepBinding(step, sp, dynamicBindings)
 		if err := models.ValidateWorkflowStep(step); err != nil {
 			return nil, fmt.Sprintf("workflow %q: invalid step %q: %v", wf.Name, sp.Name, err)
@@ -255,7 +267,7 @@ func (s *Service) buildSyncedSteps(
 	if err := validateWorkflowSessionTargets(desiredSteps); err != nil {
 		return nil, fmt.Sprintf("workflow %q: invalid workflow session targets: %v", wf.Name, err)
 	}
-	return posToID, ""
+	return desiredSteps, ""
 }
 
 func (s *Service) logStepProfileRebindings(wf *taskmodels.Workflow, stepName, stepID string, rebinding bool, oldProfileID, newProfileID string, reviewRebindings []profileRebinding) {
@@ -433,24 +445,64 @@ func eventsEqual(a, b models.StepEvents) bool {
 // still holds tasks.
 func (s *Service) planStepChanges(ctx context.Context, wf *taskmodels.Workflow, pw models.WorkflowPortable, steps []*models.WorkflowStep) (map[string]*models.WorkflowStep, []*models.WorkflowStep, string) {
 	existingByName := make(map[string]*models.WorkflowStep, len(steps))
+	existingByKey := make(map[string]*models.WorkflowStep, len(steps))
 	for _, st := range steps {
 		if _, dup := existingByName[st.Name]; dup {
 			return nil, nil, fmt.Sprintf("workflow %q has multiple steps named %q; rename them, then sync again", wf.Name, st.Name)
 		}
 		existingByName[st.Name] = st
+		if st.PortableKey != "" {
+			if _, dup := existingByKey[st.PortableKey]; dup {
+				return nil, nil, fmt.Sprintf("workflow %q has duplicate portable step keys; repair the workflow before syncing", wf.Name)
+			}
+			existingByKey[st.PortableKey] = st
+		}
 	}
+	matched := make(map[string]*models.WorkflowStep, len(pw.Steps))
+	matchedIDs := make(map[string]bool, len(pw.Steps))
 	desiredNames := make(map[string]bool, len(pw.Steps))
+	desiredKeys := make(map[string]bool, len(pw.Steps))
 	for _, sp := range pw.Steps {
 		if desiredNames[sp.Name] {
 			return nil, nil, fmt.Sprintf("workflow %q defines multiple steps named %q; step names must be unique to sync", wf.Name, sp.Name)
 		}
 		desiredNames[sp.Name] = true
+		if sp.Key != "" {
+			if desiredKeys[sp.Key] {
+				return nil, nil, fmt.Sprintf("workflow %q defines duplicate portable step key %q", wf.Name, sp.Key)
+			}
+			desiredKeys[sp.Key] = true
+		}
+		var existing *models.WorkflowStep
+		if sp.Key != "" {
+			existing = existingByKey[sp.Key]
+		} else {
+			existing = existingByName[sp.Name]
+		}
+		if existing != nil {
+			matched[sp.Name] = existing
+			matchedIDs[existing.ID] = true
+		}
 	}
 	var toDelete []*models.WorkflowStep
+	var unmatchedDesired []models.StepPortable
 	for _, st := range steps {
-		if desiredNames[st.Name] {
+		if matchedIDs[st.ID] {
 			continue
 		}
+		toDelete = append(toDelete, st)
+	}
+	for _, sp := range pw.Steps {
+		if matched[sp.Name] == nil {
+			unmatchedDesired = append(unmatchedDesired, sp)
+		}
+	}
+	for _, sp := range unmatchedDesired {
+		if sp.Key == "" && len(toDelete) > 0 {
+			return nil, nil, fmt.Sprintf("workflow %q has an unkeyed step %q and a removed step; provide a stable key or explicit rename mapping before syncing", wf.Name, sp.Name)
+		}
+	}
+	for _, st := range toDelete {
 		count, err := s.syncOps.CountTasksByWorkflowStep(ctx, st.ID)
 		if err != nil {
 			return nil, nil, fmt.Sprintf("workflow %q: failed to count tasks in step %q: %v", wf.Name, st.Name, err)
@@ -458,35 +510,8 @@ func (s *Service) planStepChanges(ctx context.Context, wf *taskmodels.Workflow, 
 		if count > 0 {
 			return nil, nil, fmt.Sprintf("workflow %q not updated: step %q was removed from the definition but still has %d task(s); move or archive them, then sync again", wf.Name, st.Name, count)
 		}
-		toDelete = append(toDelete, st)
 	}
-	return existingByName, toDelete, ""
-}
-
-func (s *Service) applyWorkflowFields(ctx context.Context, wf *taskmodels.Workflow, pw models.WorkflowPortable) (bool, error) {
-	profileID := ""
-	if pw.AgentProfile != nil && s.matchProfile != nil {
-		profileID = s.matchProfile(pw.AgentProfile.AgentName, pw.AgentProfile.Model, pw.AgentProfile.Mode, wf.AgentProfileID)
-	}
-	if wf.Description == pw.Description && wf.Prompt == pw.Prompt && wf.AgentProfileID == profileID {
-		return false, nil
-	}
-	oldProfileID := wf.AgentProfileID
-	rebinding := oldProfileID != "" && oldProfileID != profileID
-	wf.Description = pw.Description
-	wf.Prompt = pw.Prompt
-	wf.AgentProfileID = profileID
-	if err := s.workflowProvider.UpdateWorkflow(ctx, wf); err != nil {
-		return true, err
-	}
-	if rebinding {
-		s.logger.Warn("workflow sync rebinding workflow's agent profile",
-			zap.String("workflow_id", wf.ID),
-			zap.String("workflow_name", wf.Name),
-			zap.String("old_agent_profile_id", oldProfileID),
-			zap.String("new_agent_profile_id", profileID))
-	}
-	return true, nil
+	return matched, toDelete, ""
 }
 
 // ReleaseSyncedWorkflows converts every GitHub-sourced workflow in the

@@ -688,6 +688,9 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"home_quick_filters":                       models.NormalizeHomeQuickFilters(settings.HomeQuickFilters),
 		"task_view_filters":                        models.NormalizeTaskViewFilters(settings.TaskViewFilters),
 		"task_view_groups":                         models.NormalizeTaskViewGroups(settings.TaskViewGroups),
+		"task_view_group_order":                    models.NormalizeTaskViewGroupOrder(settings.TaskViewGroupOrder, settings.TaskViewGroups),
+		"task_view_presets":                        models.NormalizeTaskViewPresets(settings.TaskViewPresets),
+		"task_view_active_preset":                  settings.TaskViewActivePreset,
 	})
 }
 
@@ -784,6 +787,9 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		HomeQuickFilters:                  map[string][]string{},
 		TaskViewFilters:                   map[string][]models.ViewFilterClause{},
 		TaskViewGroups:                    map[string]string{},
+		TaskViewGroupOrder:                map[string][]string{},
+		TaskViewPresets:                   map[string][]models.TaskViewPreset{},
+		TaskViewActivePreset:              map[string]string{},
 	}
 }
 
@@ -889,6 +895,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		HomeQuickFilters                  map[string][]string                     `json:"home_quick_filters"`
 		TaskViewFilters                   map[string][]models.ViewFilterClause    `json:"task_view_filters"`
 		TaskViewGroups                    map[string]string                       `json:"task_view_groups"`
+		TaskViewGroupOrder                map[string][]string                     `json:"task_view_group_order"`
+		TaskViewPresets                   map[string][]models.TaskViewPreset      `json:"task_view_presets"`
+		TaskViewActivePreset              map[string]string                       `json:"task_view_active_preset"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -1084,6 +1093,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.HomeQuickFilters = models.NormalizeHomeQuickFilters(payload.HomeQuickFilters)
 	settings.TaskViewFilters = models.NormalizeTaskViewFilters(payload.TaskViewFilters)
 	settings.TaskViewGroups = models.NormalizeTaskViewGroups(payload.TaskViewGroups)
+	settings.TaskViewGroupOrder = models.NormalizeTaskViewGroupOrder(payload.TaskViewGroupOrder, settings.TaskViewGroups)
+	settings.TaskViewPresets = models.NormalizeTaskViewPresets(payload.TaskViewPresets)
+	settings.TaskViewActivePreset = models.NormalizeTaskViewActivePreset(payload.TaskViewActivePreset, settings.TaskViewPresets)
 	return settings, nil
 }
 

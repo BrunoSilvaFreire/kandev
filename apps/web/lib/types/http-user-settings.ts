@@ -1,5 +1,5 @@
 import type { WorkspaceId } from "./ids";
-import type { ViewFilterClause } from "@/lib/view-model/types";
+import type { ViewFilterClause, ViewPreset } from "@/lib/view-model/types";
 
 export type MCPTaskAgentProfileDefault = "current_task" | "workspace_default";
 export type StartupPage = "task_overview" | "last_task" | "threads";
@@ -259,6 +259,9 @@ export type UserSettings = {
   home_quick_filters?: Record<string, string[]>;
   task_view_filters?: Record<string, ViewFilterClause[]>;
   task_view_groups?: Record<string, string>;
+  task_view_group_order?: Record<string, string[]>;
+  task_view_presets?: Record<string, ViewPreset[]>;
+  task_view_active_preset?: Record<string, string>;
   revision?: number;
   updated_at: string;
 };
@@ -353,6 +356,9 @@ export type UserSettingsUpdatePayload = {
   home_quick_filters?: Record<string, string[]>;
   task_view_filters?: Record<string, ViewFilterClause[]>;
   task_view_groups?: Record<string, string>;
+  task_view_group_order?: Record<string, string[]>;
+  task_view_presets?: Record<string, ViewPreset[]>;
+  task_view_active_preset?: Record<string, string>;
 };
 
 export type SidebarWorkspaceStateApi = {

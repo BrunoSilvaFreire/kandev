@@ -3,6 +3,7 @@ package sqlite
 import (
 	"errors"
 
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
@@ -74,3 +75,9 @@ var ErrOfficeSessionRaceConflict = errors.New("office task session race conflict
 // workflow id no longer matches the row's persisted workflow_id, checked
 // atomically inside the write transaction. See repoerrors.ErrWorkflowResolutionConflict.
 var ErrWorkflowResolutionConflict = repoerrors.ErrWorkflowResolutionConflict
+
+var ErrStepVisitConflict = models.ErrStepVisitConflict
+
+var ErrStepVisitRetired = models.ErrStepVisitRetired
+
+var ErrStepVisitNotFound = models.ErrStepVisitNotFound

@@ -258,6 +258,8 @@ export type AppState = KanbanSlice & {
   quickChat: (typeof defaultUIState)["quickChat"];
   sessionFailureNotification: (typeof defaultUIState)["sessionFailureNotification"];
   taskDeletedNotification: (typeof defaultUIState)["taskDeletedNotification"];
+  taskTransitionFailures: (typeof defaultUIState)["taskTransitionFailures"];
+  transitionFailureNotice: (typeof defaultUIState)["transitionFailureNotice"];
   updateAvailableNotification: (typeof defaultUIState)["updateAvailableNotification"];
   updateAvailableNotificationQueue: (typeof defaultUIState)["updateAvailableNotificationQueue"];
   bottomTerminal: (typeof defaultUIState)["bottomTerminal"];
@@ -425,6 +427,8 @@ export type AppState = KanbanSlice & {
   renameQuickChatSession: (sessionId: string, name: string) => void;
   setSessionFailureNotification: (n: UISliceTypes.SessionFailureNotification | null) => void;
   setTaskDeletedNotification: (n: UISliceTypes.TaskDeletedNotification | null) => void;
+  setTaskTransitionFailure: UISliceTypes.UISlice["setTaskTransitionFailure"];
+  setTransitionFailureNotice: UISliceTypes.UISlice["setTransitionFailureNotice"];
   setUpdateAvailableNotification: (n: UISliceTypes.UpdateAvailableNotification | null) => void;
   toggleBottomTerminal: () => void;
   openBottomTerminalWithCommand: (command: string) => void;

@@ -163,6 +163,42 @@ func (s *Service) EnrollTaskPlanIncrements(ctx context.Context, taskID string, r
 	})
 }
 
+// RecordPlanMinorApproval records an audited, server-validated Architect
+// minor-revision plan approval for the current plan head, then re-enrolls the
+// unchanged increments against that exact head. The calling session must come
+// from the MCP transport binding; no caller-supplied identity is accepted.
+func (s *Service) RecordPlanMinorApproval(ctx context.Context, taskID string, request models.RecordPlanMinorApprovalRequest) (*models.TaskCompletionGateSnapshot, error) {
+	if err := s.authorizeTaskScope(ctx, taskID, authz.ScopeTaskWrite); err != nil {
+		return nil, err
+	}
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	repo, ok := s.tasks.(repository.TaskPlanMinorApprovalRepository)
+	if !ok {
+		return nil, repoerrors.ErrTaskCompletionGateBlocked
+	}
+	if strings.TrimSpace(request.Summary) == "" || strings.TrimSpace(request.Attestation) == "" || len(request.Increments) == 0 {
+		return nil, repoerrors.ErrTaskPlanMinorApprovalNotBaselinePrefix
+	}
+	actorKind, actorID, human := taskCompletionActor(ctx)
+	if human || actorKind != string(steptelemetry.ActorAgent) || strings.TrimSpace(actorID) == "" {
+		return nil, repoerrors.ErrTaskPlanMinorApprovalActorNotPlanOwner
+	}
+	result, err := repo.RecordPlanMinorApproval(ctx, models.RecordPlanMinorApprovalCommand{
+		TaskID: task.ID, ExpectedRevision: request.ExpectedRevision,
+		ExpectedPlanRevisionID: strings.TrimSpace(request.ExpectedPlanRevisionID),
+		ActorSessionID:         actorID, ActorKind: actorKind, ActorID: actorID,
+		Summary: request.Summary, Attestation: request.Attestation, Increments: request.Increments,
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.publishCompletionGateTaskUpdate(ctx, taskID)
+	return result.Gate, nil
+}
+
 // SetTaskCompletionCriteriaExact applies an approved plugin command with
 // resource-version and management-generation fencing in the repository.
 func (s *Service) SetTaskCompletionCriteriaExact(ctx context.Context, taskID string, request ExactTaskCompletionCriteriaRequest) (*ExactTaskCompletionGateResult, error) {

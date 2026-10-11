@@ -11,6 +11,10 @@ var ErrWIPLimitExceeded = errors.New("workflow step WIP limit exceeded")
 // ErrWorkflowStepNotFound reports that no workflow step row matched the supplied id.
 var ErrWorkflowStepNotFound = errors.New("workflow step not found")
 
+var ErrWorkflowStepReferenced = errors.New("workflow step has active references")
+
+var ErrWorkflowStepRetirementUnsupported = errors.New("workflow step retirement is disabled for this database")
+
 // ErrInvalidWorkflowStepOrder identifies an incomplete or duplicate step order.
 var ErrInvalidWorkflowStepOrder = errors.New("invalid workflow step order")
 

@@ -36,6 +36,9 @@ func newReactivityTestRepo(t *testing.T) *officesqlite.Repository {
 	ctx := context.Background()
 	if _, err := repo.ExecRaw(ctx, `
 		CREATE TABLE IF NOT EXISTS tasks (
+			review_episode_id TEXT NOT NULL DEFAULT '',
+			review_entered_at TIMESTAMP,
+			review_entry_origin TEXT NOT NULL DEFAULT '',
 			id TEXT PRIMARY KEY,
 			workspace_id TEXT DEFAULT '',
 			workflow_id TEXT DEFAULT '',

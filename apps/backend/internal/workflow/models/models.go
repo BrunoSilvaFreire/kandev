@@ -228,6 +228,8 @@ type StepDefinition struct {
 type WorkflowStep struct {
 	ID                          string                                       `json:"id"`
 	WorkflowID                  string                                       `json:"workflow_id"`
+	PortableKey                 string                                       `json:"portable_key,omitempty"`
+	RetiredAt                   *time.Time                                   `json:"retired_at,omitempty"`
 	Name                        string                                       `json:"name"`
 	Position                    int                                          `json:"position"`
 	Color                       string                                       `json:"color"`

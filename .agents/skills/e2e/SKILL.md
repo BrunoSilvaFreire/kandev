@@ -105,9 +105,21 @@ See [resource-safety.md](references/resource-safety.md) before any full local te
 
 The runner solves the sharp edges hand-rolling would hit: in docker it builds the CGO backend on the **host** and runs it in the runtime image (forward-compatible when the host glibc ≤ the image's — the usual case; it smoke-tests this and only falls back to the build image if the host is newer), builds the Vite web assets on the host, runs them through the Go-served SPA, and keeps Playwright output container-local. See `apps/web/e2e/README.md` → "the managed runner".
 
-`--no-build` reuses Vite, backend, and packaged fixtures; prefer normal managed builds
-after source/base changes. If intentional, rebuild both with `make -C apps/backend build`
-and `make -C apps/backend e2e-plugin-package`; global setup requires the plugin tarball.
+`--no-build` reuses Vite, backend, and packaged fixtures. Use it for every rerun where
+only files under `apps/web/e2e/` changed since the last managed build: on a warm host it
+takes a one-spec run from about 24 s to about 7 s (see the measurements in
+`apps/web/e2e/README.md`). Run a normal managed build after any change to `apps/backend`
+or to web source outside `e2e/`. Global setup rejects backend artifacts older than
+backend sources, but it does not detect a stale web bundle, so a `--no-build` pass after
+a web source edit proves nothing. If intentional, rebuild both with
+`make -C apps/backend build` and `make -C apps/backend e2e-plugin-package`; global setup
+requires the plugin tarball.
+
+The managed runner needs `go` and a matching `pnpm` on `PATH`. A non-interactive agent
+shell may not load the profile that adds Go (`export PATH="$PATH:/usr/local/go/bin"`),
+and `pnpm --dir apps/web ...` from the repository root fails with
+`ERR_PNPM_BAD_PM_VERSION` when the shell's pnpm is not the pinned version; run
+`pnpm e2e:run ...` from `apps/web` in that case.
 
 For raw Docker/SSH/container runs, `make build-backend` does not build the Linux
 mock-agent fixture. Prefer managed; otherwise run `make build-backend

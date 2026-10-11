@@ -84,13 +84,13 @@ func (r *Repository) insertTemplateSteps(ctx context.Context, tx *sqlx.Tx, workf
 		}
 		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 			INSERT INTO workflow_steps (
-				id, workflow_id, name, position, color, prompt, events,
+				id, workflow_id, portable_key, name, position, color, prompt, events,
 				allow_manual_move, is_start_step, show_in_command_panel,
 				auto_archive_after_hours, agent_profile_id, profile_session_start_policy, profile_session_end_policy, disable_unclassified_fallback, stage_type, session_target,
 				auto_advance_requires_signal, cancel_triggers_turn_complete, wip_limit, pull_from_step_id,
 				complete_task_on_enter, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`), idMap[stepDef.ID], workflowID, stepDef.Name, stepDef.Position, stepDef.Color, stepDef.Prompt, string(events),
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`), idMap[stepDef.ID], workflowID, idMap[stepDef.ID], stepDef.Name, stepDef.Position, stepDef.Color, stepDef.Prompt, string(events),
 			dialect.BoolToInt(stepDef.AllowManualMove), dialect.BoolToInt(stepDef.IsStartStep), dialect.BoolToInt(stepDef.ShowInCommandPanel),
 			stepDef.AutoArchiveAfterHours, stepDef.AgentProfileID, models.NormalizeWorkflowProfileSessionStartPolicy(string(stepDef.ProfileSessionStartPolicy)), models.NormalizeWorkflowProfileSessionEndPolicy(string(stepDef.ProfileSessionEndPolicy)), dialect.BoolToInt(stepDef.DisableUnclassifiedFallback), normalizeBootstrapStageType(stepDef.StageType), string(sessionTarget),
 			dialect.BoolToInt(stepDef.AutoAdvanceRequiresSignal), dialect.BoolToInt(stepDef.CancelTriggersTurnComplete), stepDef.WIPLimit, wfmodels.RemapStepID(stepDef.PullFromStepID, idMap), dialect.BoolToInt(stepDef.CompleteTaskOnEnter), now, now); err != nil {

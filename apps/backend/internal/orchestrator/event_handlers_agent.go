@@ -3534,7 +3534,7 @@ func (s *Service) markRecoveryResolvedForAttempt(
 		// out of the STARTING/RUNNING state funnel leaves the durable warning in
 		// place when a launch later fails or is cancelled.
 		if markerSnapshotKnown && markerSnapshot.captured {
-			s.clearTaskInterruptedMarker(ctx, session.TaskID, markerSnapshot.value)
+			s.resolveInterruptionAfterRecovery(ctx, session, markerSnapshot)
 		}
 	}
 	// A guarded boot callback may clear recovery ownership only when it carries

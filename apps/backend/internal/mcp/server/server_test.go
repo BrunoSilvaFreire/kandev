@@ -844,7 +844,7 @@ drained:
 	// as in TestServerModeTask_ToolCount and
 	// TestRegisterTools_LoggedCountMatchesRegisteredTools (list_task_sessions_test.go),
 	// which pin the per-mode registration rather than this SetProviders rebuild.
-	require.Len(t, tools, 50, "final registry should contain the complete GitLab-only task tool set")
+	require.Len(t, tools, 51, "final registry should contain the complete GitLab-only task tool set")
 	assert.Contains(t, tools, "get_task_change_requests_kandev")
 	assert.Contains(t, tools, "manage_task_change_request_kandev")
 	assert.Contains(t, tools, "update_task_change_request_automation_kandev")
@@ -1040,9 +1040,10 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	assert.Contains(t, tools, "get_task_completion_gate_kandev", "completion gate tools must be registered in task mode")
 	assert.Contains(t, tools, "set_task_completion_criteria_kandev")
 	assert.Contains(t, tools, "enroll_task_plan_increments_kandev")
+	assert.Contains(t, tools, "record_plan_minor_approval_kandev")
 	assert.Contains(t, tools, "verify_task_completion_criterion_kandev")
 	assert.Contains(t, tools, "manage_task_completion_criteria_kandev")
-	assert.Equal(t, 51, len(tools))
+	assert.Equal(t, 52, len(tools))
 }
 
 func TestServerStepCompleteTool_TaskAndOfficeOnlyAndDiscoverable(t *testing.T) {

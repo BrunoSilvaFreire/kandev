@@ -76,3 +76,19 @@ func TestSanitizeAndTruncateReason_SanitizesBeforeTruncating(t *testing.T) {
 		t.Fatalf("expected exactly 512 code points, got %d", utf8.RuneCountInString(got))
 	}
 }
+
+func TestReasonKindClassifiesOnlyTypedCodes(t *testing.T) {
+	for code, want := range map[string]string{
+		"quota_limited":        "quota",
+		"rate_limited":         "quota",
+		"provider_overloaded":  "provider_unavailable",
+		"model_unavailable":    "provider_unavailable",
+		"agent_runtime_error":  "",
+		"quota exceeded today": "",
+		"":                     "",
+	} {
+		if got := reasonKind(code); got != want {
+			t.Errorf("reasonKind(%q) = %q, want %q", code, got, want)
+		}
+	}
+}

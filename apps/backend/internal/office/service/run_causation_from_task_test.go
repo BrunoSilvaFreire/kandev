@@ -53,6 +53,9 @@ func newRunCausationFromTaskTestService(t *testing.T) (*Service, *officesqlite.R
 			office_workflow_id TEXT DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS tasks (
+			review_episode_id TEXT NOT NULL DEFAULT '',
+			review_entered_at TIMESTAMP,
+			review_entry_origin TEXT NOT NULL DEFAULT '',
 			id TEXT PRIMARY KEY,
 			workspace_id TEXT NOT NULL DEFAULT '',
 			workflow_id TEXT NOT NULL DEFAULT '',

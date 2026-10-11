@@ -126,6 +126,9 @@ export type TaskEventPayload = {
   primary_session_state?: TaskSessionState | null;
   primary_session_pending_action?: TaskPendingAction | null;
   task_pending_action?: TaskPendingAction | null;
+  interruption?: { episode_id: string; reason: string; session_id: string } | null;
+  review_episode_id?: string | null;
+  review_entered_at?: string | null;
   primary_agent_name?: string | null;
   primary_agent_profile_id?: string | null;
   // Task-level MOST-ACTIVE-WINS activity aggregate across the task's sessions;
@@ -482,6 +485,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "task.status_summary.updated": BackendMessage<
       "task.status_summary.updated",
       TaskStatusSummaryUpdatedPayload
+    >;
+    "task.transition_failure.updated": BackendMessage<
+      "task.transition_failure.updated",
+      { task_id: string; workspace_id?: string; record: unknown }
     >;
     "task.plan.created": BackendMessage<"task.plan.created", TaskPlanEventPayload>;
     "task.plan.updated": BackendMessage<"task.plan.updated", TaskPlanEventPayload>;

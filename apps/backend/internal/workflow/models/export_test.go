@@ -34,7 +34,7 @@ func TestBuildWorkflowExport(t *testing.T) {
 
 		export := BuildWorkflowExport([]*taskmodels.Workflow{wf}, stepMap, nil)
 
-		require.Equal(t, LegacyExportVersion, export.Version)
+		require.Equal(t, ExportVersion, export.Version)
 		require.Equal(t, ExportType, export.Type)
 		require.Len(t, export.Workflows, 1)
 
@@ -118,6 +118,17 @@ func TestBuildWorkflowExport(t *testing.T) {
 		assert.Equal(t, 0, *export.Workflows[0].Steps[1].SessionTarget.StepPosition)
 		require.NoError(t, export.Validate())
 	})
+}
+
+func TestBuildWorkflowExportUsesStableStepKeys(t *testing.T) {
+	wf := &taskmodels.Workflow{ID: "wf-stable", Name: "Stable"}
+	steps := []*WorkflowStep{{ID: "step-id", PortableKey: "opaque-key-1", Name: "Original", Position: 0}}
+
+	export, err := BuildWorkflowExportWithError([]*taskmodels.Workflow{wf}, map[string][]*WorkflowStep{"wf-stable": steps}, nil)
+	require.NoError(t, err)
+	require.Equal(t, 3, export.Version)
+	require.Equal(t, "opaque-key-1", export.Workflows[0].Steps[0].Key)
+	require.NoError(t, export.Validate())
 }
 
 func TestValidate(t *testing.T) {

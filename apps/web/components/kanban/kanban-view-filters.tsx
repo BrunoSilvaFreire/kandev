@@ -6,10 +6,10 @@ import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useHomeQuickFilters } from "@/hooks/use-home-quick-filters";
 import { useRepositoryGroups } from "@/hooks/use-repository-groups";
 import { QuickFilterBar, type QuickFilterAdapter } from "@/components/view-model/quick-filter-bar";
-import { ViewGroupControl } from "@/components/view-model/view-group-control";
+import { ViewGroupOrderControl } from "@/components/view-model/view-group-order-control";
+import { ViewPresetsControl } from "@/components/view-model/view-presets-control";
 import { getViewDimensionMeta } from "@/lib/view-model/dimensions";
 import { SUPPORTED_GROUPS } from "@/lib/view-model/views";
-import type { ViewGroupKey } from "@/lib/view-model/types";
 import type { KanbanFilterDimension } from "@/lib/view-model/kanban";
 import { getOpLabel } from "@/components/task/sidebar-filter/filter-dimension-registry";
 import { TASK_PRIORITY_TOKENS, TASK_PRIORITY_LABEL_KEYS } from "@/lib/tasks/task-priority";
@@ -108,14 +108,33 @@ export function KanbanViewFilters({
   return (
     <div className="flex flex-wrap items-center gap-2" data-testid="kanban-view-filters">
       <QuickFilterBar adapter={adapter} testId={`${view}-quick-filters`} />
-      <div className="hidden sm:block">
-        <ViewGroupControl
-          value={display.group}
-          groups={SUPPORTED_GROUPS[view]}
-          onChange={(next: ViewGroupKey) => display.onGroupChange(next)}
-          testId={`${view}-group-select`}
-        />
+      <div className="hidden items-center gap-2 sm:flex">
+        <KanbanGroupingAndPresets view={view} />
       </div>
     </div>
+  );
+}
+
+/**
+ * The ordered grouping picker and named presets for the Kanban or List view.
+ * Rendered inline in the desktop header and inside the phone listing menu, so
+ * both offer the same choices.
+ */
+export function KanbanGroupingAndPresets({
+  view,
+}: {
+  view: Extract<HomeViewId, "kanban" | "list">;
+}) {
+  const display = useKanbanDisplaySettings();
+  return (
+    <>
+      <ViewGroupOrderControl
+        value={display.groups}
+        groups={SUPPORTED_GROUPS[view]}
+        onChange={display.onGroupsChange}
+        testId={`${view}-group`}
+      />
+      <ViewPresetsControl presets={display.presets} testId={`${view}-presets`} />
+    </>
   );
 }

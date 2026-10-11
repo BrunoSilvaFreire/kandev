@@ -42,5 +42,20 @@
   "triageCaption": "As perguntas possíveis são apenas indícios; abra a conversa para responder.",
   "triageKindClarification": "Esclarecimento",
   "triageKindStaleReview": "Revisão pendente",
-  "triageKindPossibleQuestion": "Pergunta possível"
+  "triageKindPossibleQuestion": "Pergunta possível",
+  "triageKindInterrupted": "Interrompida",
+  "triageKindReview": "Revisão",
+  "triageKindDependency": "Em espera",
+  "triageActionAnswer": "Responder",
+  "triageActionResume": "Retomar",
+  "triageActionReview": "Rever",
+  "triageActionOpen": "Abrir",
+  "triageReasonClarification": "O agente fez uma pergunta e aguarda a sua resposta.",
+  "triageReasonBackendRestart": "O Kandev reiniciou enquanto o agente trabalhava. Retome para continuar a mesma conversa.",
+  "triageReasonExecutionLost": "O agente deixou de responder a meio do turno. Retome para continuar a mesma conversa.",
+  "triageReasonInterruptedUnknown": "O agente foi interrompido. A causa não foi registada.",
+  "triageReasonStaleReview": "Esta tarefa aguarda revisão há mais de um dia.",
+  "triageReasonReview": "Esta tarefa aguarda a sua revisão.",
+  "triageReasonDependency": "Esta tarefa aguarda a conclusão de outra tarefa.",
+  "triageReasonPossibleQuestion": "O agente pode ter feito uma pergunta na última mensagem."
 }

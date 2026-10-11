@@ -1481,7 +1481,7 @@ func TestResolveCurrentRunner_RejectsEmptyKey(t *testing.T) {
 	}
 }
 
-func TestParticipantsCascadeOnStepDelete(t *testing.T) {
+func TestParticipantsRemainOnRetiredStep(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()
 	step := newPhase2TestStep(t, repo, "Review")
@@ -1505,8 +1505,8 @@ func TestParticipantsCascadeOnStepDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list after cascade: %v", err)
 	}
-	if len(rows) != 0 {
-		t.Fatalf("expected cascade delete to remove participants, got %d", len(rows))
+	if len(rows) != 1 {
+		t.Fatalf("expected participant to remain attached to historical step, got %d", len(rows))
 	}
 }
 

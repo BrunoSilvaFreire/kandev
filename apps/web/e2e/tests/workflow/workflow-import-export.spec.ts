@@ -18,7 +18,7 @@ test.describe("Workflow import/export", () => {
     // Textarea should contain valid YAML with the workflow
     const textarea = dialog.locator("textarea");
     const yamlContent = await textarea.inputValue();
-    expect(yamlContent).toContain("version: 2");
+    expect(yamlContent).toContain("version: 3");
     expect(yamlContent).toContain("type: kandev_workflow");
     expect(yamlContent).toContain("E2E Workflow");
     expect(yamlContent).toContain("complete_task_on_enter: false");
@@ -75,6 +75,56 @@ test.describe("Workflow import/export", () => {
     expect(yamlContent).toContain("Done");
 
     await dialog.getByRole("button", { name: "Close" }).first().click();
+  });
+
+  test("updates the selected existing workflow only after reviewing the diff", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const page = new WorkflowSettingsPage(testPage);
+    const workflowName = `File Update Target ${Date.now()}`;
+    const seeded = await apiClient.seedWorkflow(seedData.workspaceId, workflowName, "kanban");
+    await page.goto(seedData.workspaceId);
+    const before = await apiClient.exportWorkflow(seeded.workflow_id);
+    const updatedName = `${workflowName} Updated`;
+    const updatedYaml = before.replace(`name: ${workflowName}`, `name: ${updatedName}`);
+    expect(updatedYaml).not.toBe(before);
+
+    const card = await page.findWorkflowCard(workflowName);
+    await card.getByRole("button", { name: "Update from file" }).click();
+    const dialog = testPage.getByRole("dialog");
+    await dialog.locator('input[type="file"]').setInputFiles({
+      name: "workflow.yaml",
+      mimeType: "text/yaml",
+      buffer: Buffer.from(updatedYaml),
+    });
+    const preview = waitForHttp(
+      testPage,
+      "POST",
+      new RegExp(
+        `/api/v1/workspaces/${seedData.workspaceId}/workflows/${seeded.workflow_id}/update/preview$`,
+      ),
+    );
+    await dialog.getByRole("button", { name: "Preview changes" }).click();
+    await preview;
+    await expect(dialog.getByText("workflow.name", { exact: false })).toBeVisible();
+    await expect(dialog.getByText(updatedName, { exact: false })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Apply update" })).toBeEnabled();
+
+    const apply = waitForHttp(
+      testPage,
+      "POST",
+      new RegExp(
+        `/api/v1/workspaces/${seedData.workspaceId}/workflows/${seeded.workflow_id}/update$`,
+      ),
+    );
+    await dialog.getByRole("button", { name: "Apply update" }).click();
+    await apply;
+    await expect(dialog).not.toBeVisible();
+    const updatedCard = await page.findWorkflowCard(updatedName, { waitForName: true });
+    await expect(updatedCard).toBeVisible();
+    expect(await apiClient.exportWorkflow(seeded.workflow_id)).toContain(updatedName);
   });
 
   test("import via paste creates workflow and shows on page", async ({ testPage, seedData }) => {

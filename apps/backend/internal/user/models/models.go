@@ -201,6 +201,9 @@ type UserSettings struct {
 	HomeQuickFilters                  map[string][]string               `json:"home_quick_filters"`
 	TaskViewFilters                   map[string][]ViewFilterClause     `json:"task_view_filters"`
 	TaskViewGroups                    map[string]string                 `json:"task_view_groups"`
+	TaskViewGroupOrder                map[string][]string               `json:"task_view_group_order"`
+	TaskViewPresets                   map[string][]TaskViewPreset       `json:"task_view_presets"`
+	TaskViewActivePreset              map[string]string                 `json:"task_view_active_preset"`
 	Revision                          int64                             `json:"revision"`
 	CreatedAt                         time.Time                         `json:"created_at"`
 	UpdatedAt                         time.Time                         `json:"updated_at"`

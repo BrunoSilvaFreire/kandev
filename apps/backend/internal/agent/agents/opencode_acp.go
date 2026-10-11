@@ -110,8 +110,16 @@ func (a *OpenCodeACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
 	return ManagedNPMRuntimeSpec{
 		Package:        opencodeACPPackage,
 		DefaultVersion: MustDefaultManagedNPMRuntimeVersion(opencodeACPPackage),
-		ACPArgs:        []string{"acp", "--print-logs", "--log-level", "ERROR"},
-		NativeBinary:   opencodeNativeBinary,
+		// `--print-logs` is the only log flag: it forwards both the CLI's and
+		// (from 2.0) the private server's stderr, which is what the stderr
+		// diagnostic parser reads. Do NOT add `--log-level`: its level names
+		// are case-sensitive and the accepted case flipped between OpenCode
+		// majors (1.x accepts DEBUG/INFO/WARN/ERROR, 2.x accepts the lowercase
+		// all/trace/debug/info/warn/warning/error/fatal/none), so any literal
+		// value aborts the other major before the ACP handshake. The default
+		// level already emits the ERROR `stream error` lines the parser needs.
+		ACPArgs:      []string{"acp", "--print-logs"},
+		NativeBinary: opencodeNativeBinary,
 	}
 }
 

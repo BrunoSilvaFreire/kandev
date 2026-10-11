@@ -14,6 +14,7 @@
   "azuredevops:pullRequestsTab": "Code-host term kept in English across localized developer tooling.",
   "chat:attachmentDeliveryPrompt": "Technical term kept in English across localized developer tooling.",
   "chat:chatTabName": "Nothing but interpolated values and punctuation; there is no prose to translate.",
+  "chat:quickChatLastActivity": "Nothing but interpolated values and punctuation; there is no prose to translate.",
   "common:commandGroupWorkspace": "Technical term kept in English across localized developer tooling.",
   "common:commandPreviewPull": "Git command name; the user types it and reads it in git's own output.",
   "common:executor": "Technical term kept in English across localized developer tooling.",

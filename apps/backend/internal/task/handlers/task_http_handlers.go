@@ -792,6 +792,12 @@ func (h *TaskHandlers) httpBulkMoveSelectedTasks(c *gin.Context, body httpBulkMo
 		body.TargetStepID,
 	)
 	if err != nil {
+		// A single-task move can name its gate; a multi-task refusal cannot.
+		subject := ""
+		if len(body.TaskIDs) == 1 {
+			subject = body.TaskIDs[0]
+		}
+		h.attachTransitionFailure(c, subject, err)
 		handleSelectedMoveError(c, h.logger, err)
 		return
 	}
@@ -1949,6 +1955,7 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 		},
 	)
 	if err != nil {
+		h.attachTransitionFailure(c, c.Param("id"), err)
 		if errors.Is(err, taskrepository.ErrTaskCompletionGateBlocked) ||
 			errors.Is(err, taskrepository.ErrTaskCompletionCriteriaConflict) ||
 			errors.Is(err, taskrepository.ErrTaskCompletionHumanConfirmationRequired) {
@@ -2478,6 +2485,8 @@ type httpQuickChatSession struct {
 	Kind           string `json:"kind"`
 	Name           string `json:"name,omitempty"`
 	AgentProfileID string `json:"agent_profile_id,omitempty"`
+	// Browse is present only for ?include=browse.
+	Browse *service.QuickChatBrowse `json:"browse,omitempty"`
 }
 
 // httpListQuickChatSessionsResponse mirrors the quick-chat slice of the boot
@@ -2505,15 +2514,26 @@ func (h *TaskHandlers) httpListQuickChatSessions(c *gin.Context) {
 		ConfigChatRestartPending:    retiringSessionID != "",
 		ConfigChatRetiringSessionID: retiringSessionID,
 	}
+	var browse map[string]service.QuickChatBrowse
+	if c.Query("include") == "browse" {
+		if browse, err = h.service.QuickChatBrowseDetails(c.Request.Context(), items); err != nil {
+			handleNotFound(c, h.logger, err, "workspace not found")
+			return
+		}
+	}
 	for _, item := range items {
-		response.Sessions = append(response.Sessions, httpQuickChatSession{
+		session := httpQuickChatSession{
 			SessionID:      item.SessionID,
 			TaskID:         item.TaskID,
 			WorkspaceID:    item.WorkspaceID,
 			Kind:           item.Kind,
 			Name:           item.Name,
 			AgentProfileID: item.AgentProfileID,
-		})
+		}
+		if detail, ok := browse[item.SessionID]; ok {
+			session.Browse = &detail
+		}
+		response.Sessions = append(response.Sessions, session)
 		sessionDTO := dto.FromTaskSession(item.Session)
 		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
 		dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)

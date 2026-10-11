@@ -10,7 +10,7 @@ import { repositoryId, type Repository, type TaskPriority } from "@/lib/types/ht
 import { TASK_PRIORITY_TOKENS } from "@/lib/tasks/task-priority";
 import type { UserSettingsState } from "@/lib/state/slices/settings/types";
 import type { KanbanSort } from "@/lib/kanban/kanban-sort";
-import type { ViewFilterClause } from "@/lib/view-model/types";
+import type { ViewFilterClause, ViewPreset } from "@/lib/view-model/types";
 
 type DisplaySettings = UserSettingsState;
 
@@ -35,6 +35,9 @@ type CommitPayload = {
   kanbanPriorityFilterTokens?: TaskPriority[];
   taskViewFilters?: Record<string, ViewFilterClause[]>;
   taskViewGroups?: Record<string, string>;
+  taskViewGroupOrder?: Record<string, string[]>;
+  taskViewPresets?: Record<string, ViewPreset[]>;
+  taskViewActivePreset?: Record<string, string>;
 };
 
 export function normalizeWorkflowIds(ids: string[]): string[] {
@@ -102,6 +105,25 @@ function viewGroupMapsUnchanged(
   return JSON.stringify(a ?? {}) === JSON.stringify(b ?? {});
 }
 
+/** Ordered groups, presets, and the active preset: next wins, else current. */
+function mergeViewPresetState(next: CommitPayload, current: DisplaySettings) {
+  return {
+    taskViewGroupOrder: next.taskViewGroupOrder ?? current.taskViewGroupOrder ?? {},
+    taskViewPresets: next.taskViewPresets ?? current.taskViewPresets ?? {},
+    taskViewActivePreset: next.taskViewActivePreset ?? current.taskViewActivePreset ?? {},
+  };
+}
+
+function viewPresetStateUnchanged(a: DisplaySettings, b: DisplaySettings): boolean {
+  const snapshot = (settings: DisplaySettings) =>
+    JSON.stringify([
+      settings.taskViewGroupOrder ?? {},
+      settings.taskViewPresets ?? {},
+      settings.taskViewActivePreset ?? {},
+    ]);
+  return snapshot(a) === snapshot(b);
+}
+
 /** @internal Exported for testing the snapshot-not-delta commit semantics. */
 export function buildNormalizedSettings(
   next: CommitPayload,
@@ -127,6 +149,7 @@ export function buildNormalizedSettings(
     ),
     taskViewFilters: next.taskViewFilters ?? current.taskViewFilters ?? {},
     taskViewGroups: next.taskViewGroups ?? current.taskViewGroups ?? {},
+    ...mergeViewPresetState(next, current),
     loaded: true,
   };
 }
@@ -154,7 +177,8 @@ export function isSettingsUnchanged(
       current.kanbanPriorityFilterTokens,
     ) &&
     viewFilterMapsUnchanged(normalized.taskViewFilters, current.taskViewFilters) &&
-    viewGroupMapsUnchanged(normalized.taskViewGroups, current.taskViewGroups)
+    viewGroupMapsUnchanged(normalized.taskViewGroups, current.taskViewGroups) &&
+    viewPresetStateUnchanged(normalized, current)
   );
 }
 
@@ -171,6 +195,9 @@ export function buildSettingsUpdatePayload(normalized: DisplaySettings): Record<
     kanban_priority_filter_tokens: normalized.kanbanPriorityFilterTokens,
     task_view_filters: normalized.taskViewFilters,
     task_view_groups: normalized.taskViewGroups,
+    task_view_group_order: normalized.taskViewGroupOrder,
+    task_view_presets: normalized.taskViewPresets,
+    task_view_active_preset: normalized.taskViewActivePreset,
   };
 }
 

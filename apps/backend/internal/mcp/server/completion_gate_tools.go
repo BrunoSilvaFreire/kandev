@@ -12,7 +12,7 @@ import (
 func (s *Server) registerCompletionGateTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_task_completion_gate_kandev",
-			mcp.WithDescription("Get the current completion gate snapshot, declared criteria, revision, blockers, and whether completion is blocked for a task."),
+			mcp.WithDescription("Get the current completion gate snapshot, declared criteria, revision, blockers, and whether completion is blocked for a task. When a move or completion signal was accepted but the transition later failed, transition_failure carries its code, reasons, and remediation until a later transition succeeds."),
 			mcp.WithString("task_id", mcp.Description("Optional task ID. Defaults to your current task when omitted.")),
 		),
 		s.wrapHandler("get_task_completion_gate_kandev", s.getTaskCompletionGateHandler()),
@@ -39,8 +39,15 @@ func (s *Server) registerCompletionGateTools() {
 		s.wrapHandler("verify_task_completion_criterion_kandev", s.verifyTaskCompletionCriterionHandler()),
 	)
 	s.mcpServer.AddTool(
+		mcp.NewToolWithRawSchema("record_plan_minor_approval_kandev",
+			"Record an audited Architect minor-revision plan approval atop a human-approved baseline. Accepts only a plan head that appends exactly one trailing '## Architect clarifications (advisory)' section with unchanged criterion IDs, descriptions, and evidence subjects; material changes require human approval. Re-enrolls the unchanged increments against the exact head.",
+			recordPlanMinorApprovalToolSchema(),
+		),
+		s.wrapHandler("record_plan_minor_approval_kandev", s.recordPlanMinorApprovalHandler()),
+	)
+	s.mcpServer.AddTool(
 		mcp.NewToolWithRawSchema("manage_task_completion_criteria_kandev",
-			"Manage task completion criteria and verification evidence. Supports operations: get, set, verify.",
+			"Manage task completion criteria and verification evidence. Supports operations: get, set, enroll, verify, minor_approval.",
 			manageTaskCompletionCriteriaToolSchema(),
 		),
 		s.wrapHandler("manage_task_completion_criteria_kandev", s.manageTaskCompletionCriteriaHandler()),
@@ -133,6 +140,47 @@ func enrollTaskPlanIncrementsToolSchema() json.RawMessage {
 }`)
 }
 
+func recordPlanMinorApprovalToolSchema() json.RawMessage {
+	return json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "Optional task ID. Defaults to your current task when omitted."
+    },
+    "expected_revision": {
+      "type": "integer",
+      "description": "The current completion-gate revision returned by get_task_completion_gate_kandev."
+    },
+    "plan_revision_id": {
+      "type": "string",
+      "description": "Optional assertion of the current plan head revision ID; a mismatch is rejected."
+    },
+    "summary": {
+      "type": "string",
+      "description": "Concise summary of the advisory clarification appended to the plan."
+    },
+    "attestation": {
+      "type": "string",
+      "description": "Architect attestation that the change is a non-normative clarification with unchanged increments."
+    },
+    "increments": {
+      "type": "array",
+      "description": "The unchanged plan increments to re-enroll (IDs and descriptions must match the enrolled criteria).",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "description": { "type": "string" }
+        },
+        "required": ["id", "description"]
+      }
+    }
+  },
+  "required": ["expected_revision", "summary", "attestation", "increments"]
+}`)
+}
+
 func taskCompletionEvidenceToolSchema() json.RawMessage {
 	return json.RawMessage(`{
   "type": "object",
@@ -184,12 +232,12 @@ func manageTaskCompletionCriteriaToolSchema() json.RawMessage {
   "properties": {
     "operation": {
       "type": "string",
-      "enum": ["get", "set", "enroll", "verify"],
-      "description": "Operation to perform: get (read snapshot), set (register criteria), enroll (bind plan increments), verify (submit evidence)."
+      "enum": ["get", "set", "enroll", "verify", "minor_approval"],
+      "description": "Operation to perform: get (read snapshot), set (register criteria), enroll (bind plan increments), verify (submit evidence), minor_approval (record an audited minor plan revision approval)."
     },
     "action": {
       "type": "string",
-      "enum": ["get", "set", "enroll", "verify"],
+      "enum": ["get", "set", "enroll", "verify", "minor_approval"],
       "description": "Alias for operation."
     },
     "task_id": {
@@ -232,6 +280,14 @@ func manageTaskCompletionCriteriaToolSchema() json.RawMessage {
     "criterion_id": {
       "type": "string",
       "description": "The criterion identifier to verify (for verify)."
+    },
+    "summary": {
+      "type": "string",
+      "description": "Concise summary of the advisory clarification (for minor_approval)."
+    },
+    "attestation": {
+      "type": "string",
+      "description": "Architect attestation that the minor revision is non-normative with unchanged increments (for minor_approval)."
     },
     "evidence": {
       "type": "object",
@@ -315,6 +371,44 @@ func (s *Server) enrollTaskPlanIncrementsHandler() server.ToolHandlerFunc {
 			"sender_session_id": s.sessionID,
 		}
 		return s.forwardToBackend(ctx, ws.ActionMCPEnrollTaskPlanIncrements, payload)
+	}
+}
+
+func (s *Server) recordPlanMinorApprovalHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := s.resolveTaskID(req)
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		args := req.GetArguments()
+		expectedRevision, ok := args["expected_revision"]
+		if !ok || expectedRevision == nil {
+			return mcp.NewToolResultError("expected_revision is required"), nil
+		}
+		summary, err := req.RequireString("summary")
+		if err != nil || summary == "" {
+			return mcp.NewToolResultError("summary is required"), nil
+		}
+		attestation, err := req.RequireString("attestation")
+		if err != nil || attestation == "" {
+			return mcp.NewToolResultError("attestation is required"), nil
+		}
+		increments, ok := args["increments"]
+		if !ok || increments == nil {
+			return mcp.NewToolResultError("increments is required"), nil
+		}
+		payload := map[string]interface{}{
+			"task_id":           taskID,
+			"expected_revision": expectedRevision,
+			"summary":           summary,
+			"attestation":       attestation,
+			"increments":        increments,
+			"sender_session_id": s.sessionID,
+		}
+		if planRevID := req.GetString("plan_revision_id", ""); planRevID != "" {
+			payload["plan_revision_id"] = planRevID
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPRecordPlanMinorApproval, payload)
 	}
 }
 

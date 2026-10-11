@@ -36,17 +36,29 @@ export type ViewGroupControlProps = {
   groups: readonly ViewGroupKey[];
   onChange: (next: ViewGroupKey) => void;
   testId?: string;
+  /** Names the picker when several sit side by side. */
+  ariaLabel?: string;
 };
 
 /**
  * The one grouping picker every Home view uses. Views pass the subset of group
  * keys they can render; the labels and descriptions come from the shared table.
  */
-export function ViewGroupControl({ value, groups, onChange, testId }: ViewGroupControlProps) {
+export function ViewGroupControl({
+  value,
+  groups,
+  onChange,
+  testId,
+  ariaLabel,
+}: ViewGroupControlProps) {
   const { t } = useTranslation();
   return (
     <Select value={value} onValueChange={(next) => onChange(next as ViewGroupKey)}>
-      <SelectTrigger className="w-full text-xs" data-testid={testId ?? "view-group-select"}>
+      <SelectTrigger
+        className="w-full text-xs max-sm:min-h-11"
+        aria-label={ariaLabel}
+        data-testid={testId ?? "view-group-select"}
+      >
         <SelectValue />
       </SelectTrigger>
       <SelectContent>

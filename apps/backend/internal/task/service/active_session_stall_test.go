@@ -368,6 +368,15 @@ func TestService_ActiveSessionSweepMarksMissingExecutorRecovery(t *testing.T) {
 	if _, ok := task.Metadata[models.MetaKeyInterruptedAt]; !ok {
 		t.Fatalf("task metadata = %#v, want interrupted marker", task.Metadata)
 	}
+	if session.InterruptionEpisodeID == "" || session.InterruptionReason != models.InterruptionReasonExecutionLost {
+		t.Fatalf("session episode = %q/%q, want an execution_lost episode",
+			session.InterruptionEpisodeID, session.InterruptionReason)
+	}
+	episodeID := session.InterruptionEpisodeID
+	fixture.svc.runActiveSessionSweep(ctx, fixture.now.Add(time.Minute))
+	if again, _ := fixture.repo.GetTaskSession(ctx, "session-1"); again.InterruptionEpisodeID != episodeID {
+		t.Fatalf("repeated sweep changed the episode: %q -> %q", episodeID, again.InterruptionEpisodeID)
+	}
 	var taskUpdated bool
 	for _, event := range fixture.eventBus.GetPublishedEvents() {
 		if event.Type == events.TaskUpdated {

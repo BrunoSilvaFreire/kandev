@@ -256,21 +256,26 @@ func (s *Service) TaskTransitionSummary(ctx context.Context, taskID string) (*mo
 	if err != nil {
 		return nil, err
 	}
-	visits, err := reader.CountStepEntriesByTask(ctx, taskID)
-	if err != nil {
-		return nil, err
-	}
-	routes, err := reader.ListTaskSessionRoutes(ctx, taskID)
-	if err != nil {
-		return nil, err
-	}
-	sessionsByStep := stepVisitSessions(routes)
-	for i := range visits {
-		sessions := sessionsByStep[visits[i].StepID]
-		if sessions == nil {
-			sessions = []models.StepVisitSession{}
+	var visits []models.StepVisitSummary
+	if visitReader, ok := s.tasks.(interface {
+		ListTaskStepVisits(context.Context, string) ([]models.StepVisitSummary, error)
+	}); ok {
+		visits, err = visitReader.ListTaskStepVisits(ctx, taskID)
+	} else {
+		visits, err = reader.CountStepEntriesByTask(ctx, taskID)
+		if err == nil {
+			var routes []*models.TaskSessionRoute
+			routes, err = reader.ListTaskSessionRoutes(ctx, taskID)
+			if err == nil {
+				sessionsByStep := stepVisitSessions(routes)
+				for i := range visits {
+					visits[i].Sessions = sessionsByStep[visits[i].StepID]
+				}
+			}
 		}
-		visits[i].Sessions = sessions
+	}
+	if err != nil {
+		return nil, err
 	}
 	if counts == nil {
 		counts = []models.StepTransitionCount{}

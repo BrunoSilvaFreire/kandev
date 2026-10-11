@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/transitionfailure"
 	"reflect"
 	"strconv"
 	"strings"
@@ -5389,6 +5390,11 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 			zap.String("task_id", taskID),
 			zap.String("target_step_id", move.WorkflowStepID),
 			zap.Error(err))
+		cause := err
+		if cause == nil || errors.Is(cause, wfmodels.ErrWorkflowStepNotFound) {
+			cause = transitionfailure.Rule(transitionfailure.RuleTargetNotFound, "pending move target step no longer exists")
+		}
+		s.recordAsyncTransitionFailure(ctx, taskID, move.MoveID, models.TransitionFailureSourceDeferredMove, sessionID, cause)
 		return
 	}
 	if targetStep.WorkflowID != move.WorkflowID {
@@ -5397,6 +5403,8 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 			zap.String("target_step_id", move.WorkflowStepID),
 			zap.String("step_workflow_id", targetStep.WorkflowID),
 			zap.String("move_workflow_id", move.WorkflowID))
+		s.recordAsyncTransitionFailure(ctx, taskID, move.MoveID, models.TransitionFailureSourceDeferredMove, sessionID,
+			transitionfailure.Rule(transitionfailure.RuleStepNotInWorkflow, "pending move target step belongs to a different workflow"))
 		if !s.messageQueue.SupportsAtomicDeferredMoveTransition() {
 			if !s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID) {
 				return
@@ -5469,8 +5477,10 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		s.logger.Error("failed to apply pending move transition",
 			zap.String("task_id", taskID),
 			zap.Error(transitionErr))
+		s.recordAsyncTransitionFailure(ctx, taskID, move.MoveID, models.TransitionFailureSourceDeferredMove, sessionID, transitionErr)
 		return
 	}
+	s.resolveTransitionFailure(ctx, taskID)
 
 	// ADR 0015 — record the audit row now that the transition is durably
 	// persisted. This is the agent-initiated move_task_kandev path (the move
@@ -8257,6 +8267,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, result.ToStepID)
 	if err != nil {
 		recordWorkflowTransitionError(ctx, err)
+		s.recordAsyncTransitionFailure(ctx, taskID, "", models.TransitionFailureSourceAutoAdvance, session.ID, err)
 		s.logger.Warn("target step not found, skipping transition",
 			zap.String("step_id", result.ToStepID),
 			zap.Error(err))
@@ -8270,6 +8281,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		attached, attachErr := s.attachEngineEntryRoute(ctx, taskID, session.ID, targetStep)
 		if attachErr != nil {
 			recordWorkflowTransitionError(ctx, attachErr)
+			s.recordAsyncTransitionFailure(ctx, taskID, "", models.TransitionFailureSourceAutoAdvance, session.ID, attachErr)
 			s.logger.Warn("failed to freeze tagged step entry profile, skipping transition",
 				zap.String("task_id", taskID),
 				zap.String("step_id", result.ToStepID),
@@ -8284,6 +8296,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	if sessionLifecycle {
 		if err := s.preflightWorkflowStepCredentials(ctx, taskID, session, targetStep); err != nil {
 			recordWorkflowTransitionError(ctx, err)
+			s.recordAsyncTransitionFailure(ctx, taskID, "", models.TransitionFailureSourceAutoAdvance, session.ID, err)
 			s.logger.Warn("target profile credential preflight failed, skipping transition",
 				zap.String("task_id", taskID),
 				zap.String("step_id", result.ToStepID),
@@ -8300,6 +8313,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	fromStep, err := s.loadWorkflowStepForLifecycle(ctx, result.FromStepID, "transition source")
 	if err != nil {
 		recordWorkflowTransitionError(ctx, err)
+		s.recordAsyncTransitionFailure(ctx, taskID, "", models.TransitionFailureSourceAutoAdvance, session.ID, err)
 		s.logger.Warn("failed to load from-step for on_exit",
 			zap.String("step_id", result.FromStepID),
 			zap.Error(err))
@@ -8323,6 +8337,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	applied, err := commit(applyCtx)
 	if err != nil {
 		recordWorkflowTransitionError(ctx, err)
+		s.recordAsyncTransitionFailure(ctx, taskID, "", models.TransitionFailureSourceAutoAdvance, session.ID, err)
 		s.logger.Error("failed to apply engine transition",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
@@ -8334,6 +8349,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		recordWorkflowTransitionError(ctx, errors.New("workflow transition commit was not applied"))
 		return false
 	}
+	s.resolveTransitionFailure(ctx, taskID)
 
 	// ADR 0015 — record the audit row before the pending signal (if any) is
 	// cleared. Only an on_turn_complete transition can have consumed a signal;

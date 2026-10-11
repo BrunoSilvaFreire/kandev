@@ -113,6 +113,9 @@ function preserveMultiSnapshotFields(
   | "foregroundActivity"
   | "interrupted"
   | "interruptedGeneration"
+  | "interruption"
+  | "reviewEpisodeId"
+  | "reviewEnteredAt"
   | "autoStartFailed"
   | "workspaceOrphaned"
   | "priority"
@@ -127,6 +130,9 @@ function preserveMultiSnapshotFields(
     taskPendingAction: preserveIfUndefined(t.taskPendingAction, fallback?.taskPendingAction),
     foregroundActivity: preserveIfUndefined(t.foregroundActivity, fallback?.foregroundActivity),
     interrupted: preserveIfUndefined(t.interrupted, fallback?.interrupted),
+    interruption: preserveIfUndefined(t.interruption, fallback?.interruption),
+    reviewEpisodeId: preserveIfUndefined(t.reviewEpisodeId, fallback?.reviewEpisodeId),
+    reviewEnteredAt: preserveIfUndefined(t.reviewEnteredAt, fallback?.reviewEnteredAt),
     interruptedGeneration: preserveIfUndefined(
       t.interruptedGeneration,
       fallback?.interruptedGeneration,
@@ -359,6 +365,9 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
               primarySessionPendingAction: existing?.primarySessionPendingAction,
               taskPendingAction: existing?.taskPendingAction,
               interrupted: existing?.interrupted,
+              interruption: existing?.interruption,
+              reviewEpisodeId: existing?.reviewEpisodeId,
+              reviewEnteredAt: existing?.reviewEnteredAt,
               interruptedGeneration: existing?.interruptedGeneration,
               autoStartFailed: existing?.autoStartFailed,
               workspaceOrphaned: existing?.workspaceOrphaned,

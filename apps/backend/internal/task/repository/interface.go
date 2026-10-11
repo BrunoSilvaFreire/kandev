@@ -287,6 +287,20 @@ type ExactTaskCompletionGateRepository interface {
 	VerifyTaskCompletionCriterionExact(ctx context.Context, change models.TaskCompletionEvidenceChange) (*models.TaskCompletionGateSnapshot, bool, error)
 }
 
+// TaskTransitionFailureRepository stores each task's current unresolved
+// asynchronous transition failure.
+type TaskTransitionFailureRepository interface {
+	SetTaskTransitionFailure(ctx context.Context, record models.TaskTransitionFailure) error
+	GetTaskTransitionFailure(ctx context.Context, taskID string) (*models.TaskTransitionFailure, error)
+	ClearTaskTransitionFailure(ctx context.Context, taskID string) (bool, error)
+}
+
+// TaskPlanMinorApprovalRepository records audited Architect minor-revision plan
+// approvals bound to the exact plan head and human baseline.
+type TaskPlanMinorApprovalRepository interface {
+	RecordPlanMinorApproval(ctx context.Context, command models.RecordPlanMinorApprovalCommand) (*models.RecordPlanMinorApprovalResult, error)
+}
+
 // TaskManagementClaimFence proves which manager generation authorized an
 // exact plugin task mutation. A zero-value fence is valid only when the task
 // has no active management claim.

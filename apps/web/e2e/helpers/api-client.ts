@@ -1430,6 +1430,11 @@ export class ApiClient {
     thread_active_view_id?: string;
     thread_view_draft?: unknown;
     saved_layouts?: unknown[];
+    task_view_filters?: Record<string, unknown[]>;
+    task_view_groups?: Record<string, string>;
+    task_view_group_order?: Record<string, string[]>;
+    task_view_presets?: Record<string, unknown[]>;
+    task_view_active_preset?: Record<string, string>;
     app_status_bar_enabled?: boolean;
     lsp_auto_start_languages?: string[];
     lsp_auto_install_languages?: string[];

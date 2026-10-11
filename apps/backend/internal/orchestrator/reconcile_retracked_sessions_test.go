@@ -158,8 +158,14 @@ func TestReconcileSessionsOnStartupAppliesFullReconciliationWhenNotRetracked(t *
 		t.Fatalf("session state = %q, want %q", session.State, models.TaskSessionStateWaitingForInput)
 	}
 
-	if state, ok := taskRepo.updatedStates["task1"]; !ok || state != v1.TaskStateReview {
-		t.Fatalf("expected task moved to REVIEW, updatedStates[task1] = %q (ok=%v)", state, ok)
+	if session.InterruptionEpisodeID == "" || session.InterruptionReason != models.InterruptionReasonBackendRestart {
+		t.Fatalf("expected session interruption episode (backend_restart), got id=%q reason=%q",
+			session.InterruptionEpisodeID, session.InterruptionReason)
+	}
+
+	// REQ-TASKS-RECOVERY-REVIEW-001: restart recovery must not synthesize Review.
+	if state, ok := taskRepo.updatedStates["task1"]; ok {
+		t.Fatalf("task state must not change on restart recovery, updatedStates[task1] = %q", state)
 	}
 
 	task, err := repo.GetTask(ctx, "task1")

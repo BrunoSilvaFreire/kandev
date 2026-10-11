@@ -108,7 +108,7 @@ export function WorkflowTransitionSummary({
   );
 }
 
-/** Per-step visit counts with the History filter and one row per destination session. */
+/** Per-step visit counts with durable visit identities and mutable session assignments. */
 function StepVisitsSection({
   steps,
   visits,
@@ -121,17 +121,25 @@ function StepVisitsSection({
   onOpenHistory?: (stepId: string) => void;
 }) {
   const { t } = useTranslation();
-  const visited = steps.filter((step) => (visits[step.id]?.count ?? 0) > 0);
+  const nameById = new Map(steps.map((step) => [step.id, step.name]));
+  const visited = Object.entries(visits)
+    .filter(([, visit]) => visit.count > 0)
+    .sort((left, right) => {
+      const leftOrdinal = left[1].visits[0]?.ordinal ?? Number.MAX_SAFE_INTEGER;
+      const rightOrdinal = right[1].visits[0]?.ordinal ?? Number.MAX_SAFE_INTEGER;
+      return leftOrdinal - rightOrdinal || left[0].localeCompare(right[0]);
+    });
   return (
     <section aria-label={t("task:workflowVisitsTitle")}>
       <h4 className="mb-1 font-medium text-muted-foreground">{t("task:workflowVisitsTitle")}</h4>
       <ul className="space-y-2" data-testid="workflow-step-visits">
-        {visited.map((step) => {
-          const visit = visits[step.id];
+        {visited.map(([stepId, visit]) => {
           return (
-            <li key={step.id} data-testid={`workflow-step-visit-${step.id}`} className="space-y-1">
+            <li key={stepId} data-testid={`workflow-step-visit-${stepId}`} className="space-y-1">
               <div className="flex items-center gap-2">
-                <span className="truncate">{step.name}</span>
+                <span className="truncate">
+                  {nameById.get(stepId) ?? visit.visits[0]?.step_name ?? stepId}
+                </span>
                 <span className="shrink-0 tabular-nums text-muted-foreground">
                   {t("task:workflowTransitionCount", { count: visit?.count ?? 0 })}
                 </span>
@@ -140,19 +148,33 @@ function StepVisitsSection({
                     variant="ghost"
                     size="sm"
                     className="ml-auto h-6 cursor-pointer px-2 text-xs [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:min-w-11"
-                    onClick={() => onOpenHistory(step.id)}
-                    data-testid={`workflow-step-visit-history-${step.id}`}
+                    onClick={() => onOpenHistory(stepId)}
+                    data-testid={`workflow-step-visit-history-${stepId}`}
                   >
                     {t("task:panelTaskHistory")}
                   </Button>
                 )}
               </div>
-              <StepVisitSessionList
-                sessions={visit?.sessions ?? []}
-                onOpenSession={onOpenSession}
-                testIdPrefix={`workflow-step-visit-session-${step.id}`}
-                className="pl-3"
-              />
+              <ul className="space-y-1 pl-3">
+                {visit.visits.map((visitInstance, visitIndex) => (
+                  <li
+                    key={visitInstance.visit_id ?? `${stepId}:${visitIndex}`}
+                    data-testid={`workflow-visit-instance-${visitInstance.visit_id ?? `${stepId}-${visitIndex}`}`}
+                  >
+                    <div className="text-muted-foreground">
+                      {t("task:workflowVisitOrdinal", { number: visitInstance.ordinal ?? 0 })}
+                      {visitInstance.provenance === "activation_baseline" && (
+                        <span className="ml-2">{t("task:workflowVisitBaseline")}</span>
+                      )}
+                    </div>
+                    <StepVisitSessionList
+                      sessions={visitInstance.sessions ?? []}
+                      onOpenSession={onOpenSession}
+                      testIdPrefix={`workflow-step-visit-session-${stepId}-${visitInstance.ordinal ?? 0}`}
+                    />
+                  </li>
+                ))}
+              </ul>
             </li>
           );
         })}

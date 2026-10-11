@@ -2559,7 +2559,7 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 				"End this turn and ask the user to resume this session for the current step. "+
 				"After satisfying that step, signal completion from the new turn. "+
 				"Do not move the task solely to bypass this error.",
-			launchStepID, task.WorkflowStepID), nil)
+			launchStepID, task.WorkflowStepID), stepChangedFailure(launchStepID, task.WorkflowStepID).Details())
 	}
 
 	boundedHandoff, handoffTruncated := boundStepCompletionSignalField(strings.TrimSpace(req.Handoff))

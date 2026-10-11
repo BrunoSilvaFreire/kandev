@@ -1,7 +1,14 @@
 "use client";
 
-import type { RefObject } from "react";
-import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from "@kandev/ui/context-menu";
+import { useEffect, useState, type RefObject } from "react";
+import {
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+} from "@kandev/ui/context-menu";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,6 +31,13 @@ import { NewSessionDialog, type HandoffPreset } from "@/components/task/new-sess
 import type { TaskSessionState } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
 import { SessionDeleteDescription } from "./session-delete-description";
+import {
+  getTaskTransitionSummary,
+  reassignTaskSessionStepVisit,
+  type StepVisit,
+} from "@/lib/api/domains/task-activity-api";
+import { useAppStore } from "@/components/state-provider";
+import { useToast } from "@/components/toast-provider";
 
 /** Lifecycle callbacks the context menu needs from the owning tab.
  * `handleClose`, `handleCloseOthers`, and `handleCloseToRight` are
@@ -126,12 +140,37 @@ export function DeleteSessionPopover({
   );
 }
 
+function SessionCloseMenuItems({ actions }: { actions: SessionTabMenuActions }) {
+  const { t } = useTranslation();
+  const { handleClose, handleCloseOthers, handleCloseToRight } = actions;
+  if (!handleClose) return null;
+  return (
+    <>
+      <ContextMenuItem className="cursor-pointer" onSelect={handleClose}>
+        {t("task:close")}
+      </ContextMenuItem>
+      {handleCloseOthers && (
+        <ContextMenuItem className="cursor-pointer" onSelect={handleCloseOthers}>
+          {t("task:closeOthers")}
+        </ContextMenuItem>
+      )}
+      {handleCloseToRight && (
+        <ContextMenuItem className="cursor-pointer" onSelect={handleCloseToRight}>
+          {t("task:closeTabsToRight")}
+        </ContextMenuItem>
+      )}
+      <ContextMenuSeparator />
+    </>
+  );
+}
+
 export function SessionContextMenuItems({
   sessionState,
   isPrimary,
   canShare,
   taskId,
   sessionId,
+  associatedStepVisitID,
   actions,
   onDelete,
   onShare,
@@ -143,6 +182,7 @@ export function SessionContextMenuItems({
   canShare: boolean;
   taskId: string | null;
   sessionId: string | undefined;
+  associatedStepVisitID?: string;
   actions: SessionTabMenuActions;
   /** Passes the Radix selection event so the owner can capture its currentTarget as an anchor. */
   onDelete: (event: Event) => void;
@@ -153,24 +193,7 @@ export function SessionContextMenuItems({
   const { t } = useTranslation();
   return (
     <ContextMenuContent>
-      {actions.handleClose && (
-        <>
-          <ContextMenuItem className="cursor-pointer" onSelect={actions.handleClose}>
-            {t("task:close")}
-          </ContextMenuItem>
-          {actions.handleCloseOthers && (
-            <ContextMenuItem className="cursor-pointer" onSelect={actions.handleCloseOthers}>
-              {t("task:closeOthers")}
-            </ContextMenuItem>
-          )}
-          {actions.handleCloseToRight && (
-            <ContextMenuItem className="cursor-pointer" onSelect={actions.handleCloseToRight}>
-              {t("task:closeTabsToRight")}
-            </ContextMenuItem>
-          )}
-          <ContextMenuSeparator />
-        </>
-      )}
+      <SessionCloseMenuItems actions={actions} />
       <ContextMenuItem className="cursor-pointer" onSelect={onStartRename}>
         {t("task:rename2")}
       </ContextMenuItem>
@@ -182,6 +205,13 @@ export function SessionContextMenuItems({
         {t("task:setAsPrimary")}
       </ContextMenuItem>
       <ContextMenuSeparator />
+      {taskId && sessionId && (
+        <SessionStepVisitMenu
+          taskId={taskId}
+          sessionId={sessionId}
+          associatedStepVisitID={associatedStepVisitID}
+        />
+      )}
       {sessionState && isStoppable(sessionState) && (
         <ContextMenuItem className="cursor-pointer" onSelect={actions.handleStop}>
           {t("task:stop")}
@@ -219,6 +249,87 @@ export function SessionContextMenuItems({
         </>
       )}
     </ContextMenuContent>
+  );
+}
+
+function SessionStepVisitMenu({
+  taskId,
+  sessionId,
+  associatedStepVisitID,
+}: {
+  taskId: string;
+  sessionId: string;
+  associatedStepVisitID?: string;
+}) {
+  const { t } = useTranslation();
+  const { toast } = useToast();
+  const session = useAppStore((state) => state.taskSessions.items[sessionId]);
+  const setTaskSession = useAppStore((state) => state.setTaskSession);
+  const [open, setOpen] = useState(false);
+  const [visits, setVisits] = useState<StepVisit[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setLoading(true);
+    getTaskTransitionSummary(taskId)
+      .then((summary) => {
+        if (!cancelled) setVisits(summary.visits);
+      })
+      .catch(() => {
+        if (!cancelled) setVisits([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, taskId]);
+
+  const assign = async (visitID: string) => {
+    try {
+      await reassignTaskSessionStepVisit(taskId, sessionId, visitID, associatedStepVisitID ?? "");
+      if (session) setTaskSession({ ...session, associated_step_visit_id: visitID || undefined });
+    } catch {
+      toast({ title: t("task:sessionVisitUpdateFailed"), variant: "error" });
+    }
+  };
+
+  const eligibleVisits = visits.filter((visit) => visit.visit_id && visit.eligible);
+  return (
+    <ContextMenuSub open={open} onOpenChange={setOpen}>
+      <ContextMenuSubTrigger className="[@media(pointer:coarse)]:min-h-11">
+        {t("task:associateWorkflowStep")}
+      </ContextMenuSubTrigger>
+      <ContextMenuSubContent className="max-h-72 w-64 overflow-y-auto">
+        <ContextMenuItem
+          className="[@media(pointer:coarse)]:min-h-11"
+          onSelect={() => void assign("")}
+        >
+          <span className="flex-1">{t("task:workflowVisitUnassigned")}</span>
+          {!associatedStepVisitID && <span>{t("kanban:current")}</span>}
+        </ContextMenuItem>
+        {loading ? (
+          <ContextMenuItem disabled>{t("common:loading")}</ContextMenuItem>
+        ) : (
+          eligibleVisits.map((visit) => (
+            <ContextMenuItem
+              key={visit.visit_id}
+              className="[@media(pointer:coarse)]:min-h-11"
+              onSelect={() => void assign(visit.visit_id!)}
+            >
+              <span className="flex-1 truncate">{visit.step_name ?? visit.step_id}</span>
+              <span className="text-xs text-muted-foreground">
+                {t("task:workflowVisitOrdinal", { number: visit.ordinal ?? 0 })}
+              </span>
+              {visit.visit_id === associatedStepVisitID && <span>{t("kanban:current")}</span>}
+            </ContextMenuItem>
+          ))
+        )}
+      </ContextMenuSubContent>
+    </ContextMenuSub>
   );
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyViewFilters } from "./filters";
-import { applyViewGroup } from "./groups";
+import { applyViewGroup, applyViewGroupPath, encodeGroupPath, normalizeGroupOrder } from "./groups";
 import {
   repositoryGroupKeyAndLabel,
   taskMatchesRepositoryGroup,
@@ -173,5 +173,83 @@ describe("repositoryGroup across every Home view (G5)", () => {
     for (const view of views) {
       expect(resolveQuickFilterDimensions(view, undefined)).toContain("repositoryGroup");
     }
+  });
+});
+
+describe("applyViewGroupPath", () => {
+  type Row = { id: string; group: string; workflow: string };
+  const rows: Row[] = [
+    { id: "1", group: "g1", workflow: "w1" },
+    { id: "2", group: "g2", workflow: "w1" },
+    { id: "3", group: "g1", workflow: "w2" },
+    { id: "4", group: "g1", workflow: "w1" },
+  ];
+  const levels = (labels: Record<string, string> = {}) => [
+    {
+      groupKey: "repositoryGroup" as const,
+      extract: (row: Row) => ({ key: row.group, label: labels[row.group] ?? row.group }),
+    },
+    {
+      groupKey: "workflow" as const,
+      extract: (row: Row) => ({ key: row.workflow, label: row.workflow }),
+    },
+  ];
+
+  it("partitions once at the outer level and nests the next level under it", () => {
+    const tree = applyViewGroupPath(rows, levels());
+    expect(tree.map((node) => node.key)).toEqual(["g1", "g2"]);
+    expect(tree[0].items.map((row) => row.id)).toEqual(["1", "3", "4"]);
+    expect(tree[0].children.map((node) => [node.key, node.items.map((row) => row.id)])).toEqual([
+      ["w1", ["1", "4"]],
+      ["w2", ["3"]],
+    ]);
+    expect(tree[1].children.map((node) => node.key)).toEqual(["w1"]);
+  });
+
+  it("identifies a node by its full key path, never its label", () => {
+    const before = applyViewGroupPath(rows, levels());
+    const renamed = applyViewGroupPath(rows, levels({ g1: "Renamed" }));
+    expect(renamed[0].label).toBe("Renamed");
+    expect(renamed[0].path).toBe(before[0].path);
+    expect(renamed[0].children[1].path).toBe(encodeGroupPath(["g1", "w2"]));
+    // The same inner key under different parents is a different node.
+    expect(before[0].children[0].path).not.toBe(before[1].children[0].path);
+  });
+
+  it("keeps order and identity stable when a filter removes items", () => {
+    const full = applyViewGroupPath(rows, levels());
+    const filtered = applyViewGroupPath(
+      rows.filter((row) => row.id !== "1"),
+      levels(),
+    );
+    expect(filtered.map((node) => node.path)).toEqual([full[1].path, full[0].path]);
+    expect(filtered[1].children.map((node) => node.path)).toEqual([
+      encodeGroupPath(["g1", "w2"]),
+      encodeGroupPath(["g1", "w1"]),
+    ]);
+  });
+
+  it("returns leaves with no children for a single level", () => {
+    const tree = applyViewGroupPath(rows, levels().slice(0, 1));
+    expect(tree.every((node) => node.children.length === 0)).toBe(true);
+  });
+});
+
+describe("normalizeGroupOrder", () => {
+  const supported = SUPPORTED_GROUPS.kanban;
+
+  it("lifts nothing into an explicit none", () => {
+    expect(normalizeGroupOrder(undefined, supported)).toEqual(["none"]);
+    expect(normalizeGroupOrder([], supported)).toEqual(["none"]);
+  });
+
+  it("drops unsupported keys and repeats without dropping valid ones", () => {
+    expect(
+      normalizeGroupOrder(["repositoryGroup", "bogus", "workflow", "repositoryGroup"], supported),
+    ).toEqual(["repositoryGroup", "workflow"]);
+  });
+
+  it("treats none as the end of the list", () => {
+    expect(normalizeGroupOrder(["state", "none", "workflow"], supported)).toEqual(["state"]);
   });
 });

@@ -491,6 +491,12 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 		// client receives the warning immediately after reconciliation writes
 		// the marker; task-merge preserves omitted fields for partial updates.
 		"interrupted": task.Metadata[models.MetaKeyInterruptedAt] != nil,
+		// Explicit (null when absent) for the same reason: a resolved episode
+		// and a Review exit must reach open clients as a clear.
+		"interruption":        task.Interruption,
+		"review_episode_id":   task.ReviewEpisodeID,
+		"review_entered_at":   task.ReviewEnteredAt,
+		"review_entry_origin": task.ReviewEntryOrigin,
 		// The human assignee, always sent, never omitted when empty, for the
 		// same reason as auto_start_failed above: the frontend pins the
 		// previous value when the key is absent, so omitting it would make

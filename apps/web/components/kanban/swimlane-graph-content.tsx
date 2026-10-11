@@ -1,5 +1,6 @@
 "use client";
 
+import { getTransitionFailure } from "@/lib/tasks/transition-failure";
 import { useCallback, useMemo, useState } from "react";
 import {
   DndContext,
@@ -212,7 +213,12 @@ export async function moveTaskAcrossSwimlaneSteps({
         .setWorkflowSnapshot(workflowId, { ...currentSnapshot, tasks: originalTasks });
     }
     const message = getTaskMoveErrorMessage(error, t("task:taskMoveErrorGeneric"), t);
-    onMoveError?.({ message, taskId, sessionId: task.primarySessionId ?? null });
+    onMoveError?.({
+      message,
+      failure: getTransitionFailure(error),
+      taskId,
+      sessionId: task.primarySessionId ?? null,
+    });
   }
 }
 

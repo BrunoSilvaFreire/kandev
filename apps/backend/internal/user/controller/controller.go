@@ -158,6 +158,11 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		KanbanSort:                        req.KanbanSort,
 		KanbanPriorityFilterTokens:        req.KanbanPriorityFilterTokens,
 		HomeQuickFilters:                  req.HomeQuickFilters,
+		TaskViewFilters:                   req.TaskViewFilters,
+		TaskViewGroups:                    req.TaskViewGroups,
+		TaskViewGroupOrder:                req.TaskViewGroupOrder,
+		TaskViewPresets:                   req.TaskViewPresets,
+		TaskViewActivePreset:              req.TaskViewActivePreset,
 	})
 	if err != nil {
 		return dto.UserSettingsResponse{}, err

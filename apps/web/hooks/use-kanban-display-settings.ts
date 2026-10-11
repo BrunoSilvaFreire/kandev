@@ -12,7 +12,10 @@ import type { KanbanSort } from "@/lib/kanban/kanban-sort";
 import { toggleKanbanPriorityFilterToken } from "@/lib/kanban/priority-filter-tokens";
 import type { TaskPriority } from "@/lib/types/http";
 import { resolveKanbanFilterClauses } from "@/lib/view-model/kanban";
-import type { ViewFilterClause, ViewGroupKey } from "@/lib/view-model/types";
+import type { ViewFilterClause, ViewGroupKey, ViewPreset } from "@/lib/view-model/types";
+import { normalizeGroupOrder } from "@/lib/view-model/groups";
+import { SUPPORTED_GROUPS } from "@/lib/view-model/views";
+import { useKanbanViewPresets } from "@/hooks/use-kanban-view-presets";
 
 type UserSettingsFields = {
   workspaceId: string | null;
@@ -24,6 +27,9 @@ type UserSettingsFields = {
   kanbanPriorityFilterTokens?: TaskPriority[];
   taskViewFilters?: Record<string, ViewFilterClause[]>;
   taskViewGroups?: Record<string, string>;
+  taskViewGroupOrder?: Record<string, string[]>;
+  taskViewPresets?: Record<string, ViewPreset[]>;
+  taskViewActivePreset?: Record<string, string>;
 };
 
 type CommitSettingsFn = (
@@ -192,7 +198,19 @@ function useKanbanViewFilterHandlers(
       taskViewFilters: { ...(userSettings.taskViewFilters ?? {}), [taskView]: filters },
     });
   }, [commitSettings, filters, needsLegacyMigration, taskView, userSettings]);
-  const group = (userSettings.taskViewGroups?.[taskView] ?? "none") as ViewGroupKey;
+  // The ordered list is authoritative; a view that only has the single-key
+  // compatibility value loads it as a one-key list.
+  const storedOrder = userSettings.taskViewGroupOrder?.[taskView];
+  const legacyGroup = userSettings.taskViewGroups?.[taskView];
+  const groups = useMemo(
+    () =>
+      normalizeGroupOrder(
+        storedOrder ?? (legacyGroup ? [legacyGroup] : []),
+        SUPPORTED_GROUPS[taskView],
+      ),
+    [legacyGroup, storedOrder, taskView],
+  );
+  const group = groups[0];
   const onFiltersChange = useCallback(
     (next: ViewFilterClause[]) => {
       commitSettings({
@@ -202,16 +220,30 @@ function useKanbanViewFilterHandlers(
     },
     [commitSettings, userSettings, taskView],
   );
-  const onGroupChange = useCallback(
-    (next: ViewGroupKey) => {
+  const onGroupsChange = useCallback(
+    (next: readonly ViewGroupKey[]) => {
+      const order = normalizeGroupOrder(next, SUPPORTED_GROUPS[taskView]);
       commitSettings({
         ...baseSettingsPayload(userSettings),
-        taskViewGroups: { ...(userSettings.taskViewGroups ?? {}), [taskView]: next },
+        taskViewGroupOrder: { ...(userSettings.taskViewGroupOrder ?? {}), [taskView]: order },
+        // The compatibility field mirrors the outermost key.
+        taskViewGroups: { ...(userSettings.taskViewGroups ?? {}), [taskView]: order[0] },
       });
     },
     [commitSettings, userSettings, taskView],
   );
-  return { filters, group, onFiltersChange, onGroupChange };
+  const onGroupChange = useCallback(
+    (next: ViewGroupKey) => onGroupsChange([next]),
+    [onGroupsChange],
+  );
+  const presets = useKanbanViewPresets({
+    taskView,
+    filters,
+    groups,
+    userSettings,
+    commit: (patch) => commitSettings({ ...baseSettingsPayload(userSettings), ...patch }),
+  });
+  return { filters, group, groups, onFiltersChange, onGroupChange, onGroupsChange, presets };
 }
 
 /**
@@ -317,11 +349,8 @@ export function useKanbanDisplaySettings() {
   const { effectiveView, onViewModeChange } = useViewModeChange();
 
   const taskView: "kanban" | "list" = effectiveView === "list" ? "list" : "kanban";
-  const { filters, group, onFiltersChange, onGroupChange } = useKanbanViewFilterHandlers(
-    userSettings,
-    commitSettings,
-    taskView,
-  );
+  const { filters, group, groups, onFiltersChange, onGroupChange, onGroupsChange, presets } =
+    useKanbanViewFilterHandlers(userSettings, commitSettings, taskView);
 
   return {
     workspaces,
@@ -343,8 +372,11 @@ export function useKanbanDisplaySettings() {
     priorityFilterTokens: userSettings.kanbanPriorityFilterTokens ?? [],
     filters,
     group,
+    groups,
+    presets,
     onFiltersChange,
     onGroupChange,
+    onGroupsChange,
     onWorkspaceChange,
     onWorkflowChange,
     onRepositoryChange,

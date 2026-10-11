@@ -48,6 +48,7 @@ func (h *TaskHandlers) httpMoveTaskPreview(c *gin.Context) {
 
 	entryOptions, err := workflowmove.NormalizeEntryOptions(body.EntryOptions, "")
 	if err != nil {
+		h.attachTransitionFailure(c, taskID, err)
 		handleSelectedMoveError(c, h.logger, err)
 		return
 	}
@@ -56,6 +57,7 @@ func (h *TaskHandlers) httpMoveTaskPreview(c *gin.Context) {
 		change = workflowmove.MoveChangePositionOnly
 	}
 	if err := workflowmove.ValidateEntryOptions(entryOptions, change); err != nil {
+		h.attachTransitionFailure(c, taskID, err)
 		handleSelectedMoveError(c, h.logger, err)
 		return
 	}
@@ -65,6 +67,7 @@ func (h *TaskHandlers) httpMoveTaskPreview(c *gin.Context) {
 			c.Request.Context(), taskID, body.WorkflowID, body.WorkflowStepID, body.WorkflowChange,
 		)
 		if err != nil {
+			h.attachTransitionFailure(c, taskID, err)
 			handleSelectedMoveError(c, h.logger, err)
 			return
 		}
@@ -79,6 +82,7 @@ func (h *TaskHandlers) httpMoveTaskPreview(c *gin.Context) {
 		CandidateWorkflowOverrides: candidateOverrides,
 	})
 	if err != nil {
+		h.attachTransitionFailure(c, taskID, err)
 		handleSelectedMoveError(c, h.logger, err)
 		return
 	}

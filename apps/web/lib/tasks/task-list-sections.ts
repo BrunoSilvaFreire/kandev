@@ -1,8 +1,10 @@
 import { primaryTaskRepository, type Task } from "@/lib/types/http";
 import type { TaskListFacetValue } from "@/lib/plugins/types";
 import { repositoryGroupKeyAndLabel } from "@/lib/view-model/repository-group";
-import { applyViewGroup } from "@/lib/view-model/groups";
-import type { ViewGroupKey } from "@/lib/view-model/types";
+import { applyViewGroup, applyViewGroupPath } from "@/lib/view-model/groups";
+import type { ViewGroupKey, ViewGroupNode } from "@/lib/view-model/types";
+import { formatTaskStateLabel } from "@/lib/ui/state-labels";
+import { TASK_PRIORITY_LABEL_KEYS } from "@/lib/tasks/task-priority";
 import type { RepositoryGroup } from "@/lib/view-model/repository-group";
 import { t } from "@/lib/i18n";
 
@@ -30,6 +32,10 @@ export type TaskListSection = {
   title: string | null;
   color?: string;
   nodes: TaskTreeNode[];
+  /** Nesting depth for a nested grouping; 0 or absent is the outer level. */
+  level?: number;
+  /** Tasks under a heading-only section whose rows live in its subsections. */
+  count?: number;
 };
 
 const UNGROUPED_FACET_SECTION_KEY = "facet:host:ungrouped";
@@ -80,6 +86,52 @@ export function buildTaskSections(
     title: group.label,
     nodes: group.items,
   }));
+}
+
+/**
+ * Sections for the shared ordered group keys. Each level becomes a heading; a
+ * heading above further levels carries no rows of its own, only the count of
+ * tasks beneath it, and the innermost level carries the rows. A section's key
+ * is its full group path.
+ */
+export function buildNestedTaskSections(
+  tasks: Task[],
+  groupOrder: readonly ViewGroupKey[],
+  {
+    workflowMap,
+    repoMap,
+    repositoryGroups = [],
+  }: {
+    workflowMap: Map<string, string>;
+    repoMap: Map<string, string>;
+    repositoryGroups?: readonly RepositoryGroup[];
+  },
+): TaskListSection[] {
+  const levels = groupOrder
+    .filter((groupKey) => groupKey !== "none")
+    .map((groupKey) => ({
+      groupKey,
+      extract: (node: TaskTreeNode) => {
+        const group = groupForTask(node.task, groupKey, workflowMap, repoMap, repositoryGroups);
+        return { key: group.key, label: group.title ?? "" };
+      },
+    }));
+  const sections: TaskListSection[] = [];
+  const walk = (nodes: ViewGroupNode<TaskTreeNode>[], level: number) => {
+    for (const node of nodes) {
+      const leaf = node.children.length === 0;
+      sections.push({
+        key: node.path,
+        title: node.label,
+        level,
+        nodes: leaf ? node.items : [],
+        count: leaf ? undefined : node.items.length,
+      });
+      walk(node.children, level + 1);
+    }
+  };
+  walk(applyViewGroupPath(buildTaskTree(tasks), levels), 0);
+  return sections;
 }
 
 function normalizeSharedGroup(group: string): ViewGroupKey {
@@ -187,6 +239,21 @@ function groupForTask(
     const title = repoMap.get(repoId);
     if (!title) return { key: "repository:none", title: t("tasks:noRepository") };
     return { key: `repository:${repoId}`, title };
+  }
+  return groupForTaskAttribute(task, groupBy);
+}
+
+/** State and priority groups, which need no lookup table. */
+function groupForTaskAttribute(task: Task, groupBy: string) {
+  if (groupBy === "state") {
+    return { key: `state:${task.state ?? "none"}`, title: formatTaskStateLabel(task.state) };
+  }
+  if (groupBy === "priority") {
+    const labelKey = task.priority ? TASK_PRIORITY_LABEL_KEYS[task.priority] : undefined;
+    return {
+      key: `priority:${task.priority ?? "none"}`,
+      title: labelKey ? t(labelKey) : t("tasks:ungrouped"),
+    };
   }
   return { key: "all", title: null };
 }

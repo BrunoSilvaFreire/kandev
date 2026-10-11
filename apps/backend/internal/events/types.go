@@ -121,6 +121,10 @@ const (
 	TaskSessionErrorChanged = "task_session.error_changed"
 )
 
+// TaskTransitionFailureUpdated carries a task's current unresolved
+// asynchronous transition failure, or a null failure once it is resolved.
+const TaskTransitionFailureUpdated = "task.transition_failure.updated"
+
 // TaskStatusSummaryUpdated is a complete replacement projection for one
 // task. Consumers should subscribe to this event instead of session streams
 // when they only need sidebar/task-switcher status.

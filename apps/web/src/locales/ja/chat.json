@@ -198,5 +198,16 @@
   "unpinQueuedMessages": "メッセージキューの固定を解除",
   "untitledQuickChat": "無題のクイックチャット",
   "useWorkspaceDefault": "ワークスペースの既定を使用…",
-  "useWorkspaceDefaultOption": "ワークスペースの既定を使用"
+  "useWorkspaceDefaultOption": "ワークスペースの既定を使用",
+  "quickChatsOrderLabel": "並び順",
+  "quickChatsOrderRecent": "最近のアクティビティ順",
+  "quickChatsOrderOldest": "古いアクティビティ順",
+  "quickChatLastActivity": "{{relative}}（{{date}}）",
+  "quickChatNoMessagesYet": "メッセージはまだありません。作成日時: {{date}}",
+  "quickChatLinkedRepository": "リンクされたリポジトリ: {{name}}",
+  "quickChatLinkedRepositoryPrefix": "リンクされたリポジトリ:",
+  "quickChatCreatedTask": "このチャットから作成されたタスク: {{title}}",
+  "quickChatCreatedTaskPrefix": "このチャットから作成されたタスク:",
+  "quickChatMoreTasks_one": "ほか {{count}} 件のタスク",
+  "quickChatMoreTasks_other": "ほか {{count}} 件のタスク"
 }

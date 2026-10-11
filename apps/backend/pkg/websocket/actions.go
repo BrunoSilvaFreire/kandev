@@ -274,6 +274,7 @@ const (
 	ActionSessionActivityChanged        = "session.activity_changed"
 	ActionSessionCancellationChanged    = "session.cancellation_changed"
 	ActionTaskStatusSummaryUpdated      = "task.status_summary.updated"
+	ActionTaskTransitionFailureUpdated  = "task.transition_failure.updated"
 	ActionSessionAgentctlStarting       = "session.agentctl_starting"
 	ActionSessionAgentctlReady          = "session.agentctl_ready"
 	ActionSessionAgentctlError          = "session.agentctl_error"
@@ -514,6 +515,7 @@ const (
 	ActionMCPGetTaskCompletionGate                 = "mcp.get_task_completion_gate"
 	ActionMCPSetTaskCompletionCriteria             = "mcp.set_task_completion_criteria"
 	ActionMCPEnrollTaskPlanIncrements              = "mcp.enroll_task_plan_increments"
+	ActionMCPRecordPlanMinorApproval               = "mcp.record_plan_minor_approval"
 	ActionMCPVerifyTaskCompletionCriterion         = "mcp.verify_task_completion_criterion"
 	ActionMCPManageTaskCompletionCriteria          = "mcp.manage_task_completion_criteria"
 

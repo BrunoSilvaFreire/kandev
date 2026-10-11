@@ -14,5 +14,7 @@
   "emptyDescription": "As tarefas falhadas aparecem aqui para triagem. Nunca são contadas no total da barra lateral.",
   "errorTitle": "Não foi possível carregar as tarefas falhadas",
   "errorDescription": "Ocorreu um erro ao carregar as tarefas que falharam neste espaço de trabalho. Isto será repetido automaticamente.",
-  "truncatedNotice": "A mostrar as primeiras tarefas falhadas. Há mais à espera."
+  "truncatedNotice": "A mostrar as primeiras tarefas falhadas. Há mais à espera.",
+  "reasonKindQuota": "Limite de utilização atingido",
+  "reasonKindProviderUnavailable": "Fornecedor indisponível"
 }

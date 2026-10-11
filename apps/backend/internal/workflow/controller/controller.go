@@ -740,3 +740,11 @@ func (c *Controller) ImportWorkflows(ctx context.Context, req ImportWorkflowsReq
 func (c *Controller) PreviewImportWorkflows(ctx context.Context, workspaceID string, data *models.WorkflowExport) (*service.ImportProfilePreview, error) {
 	return c.svc.PreviewImportWorkflows(ctx, workspaceID, data)
 }
+
+func (c *Controller) PreviewWorkflowUpdate(ctx context.Context, workspaceID, workflowID string, data *models.WorkflowExport, request service.WorkflowUpdateRequest) (*service.WorkflowUpdatePreview, error) {
+	return c.svc.PreviewWorkflowUpdate(ctx, workspaceID, workflowID, data, request)
+}
+
+func (c *Controller) ApplyWorkflowUpdate(ctx context.Context, workspaceID, workflowID, version string, data *models.WorkflowExport, request service.WorkflowUpdateRequest) error {
+	return c.svc.ApplyWorkflowUpdate(ctx, workspaceID, workflowID, version, data, request)
+}

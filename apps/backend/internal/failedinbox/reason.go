@@ -61,3 +61,16 @@ func truncateToCodePoints(s string, max int) string {
 	}
 	return s
 }
+
+// reasonKind maps a typed agent-error code onto the Failed tab's closed
+// vocabulary. Only typed codes classify; free text never does.
+func reasonKind(code string) string {
+	switch code {
+	case "quota_limited", "rate_limited":
+		return "quota"
+	case "provider_unavailable", "provider_overloaded", "network_unavailable", "model_capacity", "model_unavailable":
+		return "provider_unavailable"
+	default:
+		return ""
+	}
+}

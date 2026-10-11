@@ -26,7 +26,9 @@ const steps = [
   step("b", 1, { on_turn_complete: [{ type: "move_to_previous" }] }),
 ];
 
-describe("WorkflowTransitionSummary", () => {
+const OCCURRED_AT = "2026-09-25T10:00:00Z";
+
+describe("WorkflowTransitionSummary edges", () => {
   it("renders each possible edge once with its committed count, including zero", () => {
     render(
       <WorkflowTransitionSummary
@@ -55,7 +57,9 @@ describe("WorkflowTransitionSummary", () => {
     // a is current but not allow_manual_move, so no manual edges here.
     expect(screen.queryAllByTestId("workflow-transition-edge")).toHaveLength(0);
   });
+});
 
+describe("WorkflowTransitionSummary visits", () => {
   it("lists each visit's destination sessions and activates one on click", () => {
     const onOpenSession = vi.fn();
     render(
@@ -67,11 +71,26 @@ describe("WorkflowTransitionSummary", () => {
           visits: {
             b: {
               count: 3,
+              visits: [
+                {
+                  visit_id: "visit-b",
+                  step_id: "b",
+                  count: 1,
+                  ordinal: 2,
+                  sessions: [
+                    {
+                      session_id: "sess-9",
+                      agent_profile_id: "profile-1",
+                      occurred_at: OCCURRED_AT,
+                    },
+                  ],
+                },
+              ],
               sessions: [
                 {
                   session_id: "sess-9",
                   agent_profile_id: "profile-1",
-                  occurred_at: "2026-09-25T10:00:00Z",
+                  occurred_at: OCCURRED_AT,
                 },
               ],
             },
@@ -81,10 +100,10 @@ describe("WorkflowTransitionSummary", () => {
       />,
     );
     expect(screen.getByTestId("workflow-step-visit-b").textContent).toContain("3");
-    expect(screen.getByTestId("workflow-step-visit-session-b-list").textContent).toContain(
+    expect(screen.getByTestId("workflow-step-visit-session-b-2-list").textContent).toContain(
       "Plan session",
     );
-    fireEvent.click(screen.getByTestId("workflow-step-visit-session-b-sess-9"));
+    fireEvent.click(screen.getByTestId("workflow-step-visit-session-b-2-sess-9"));
     expect(onOpenSession).toHaveBeenCalledWith("sess-9");
   });
 
@@ -99,7 +118,16 @@ describe("WorkflowTransitionSummary", () => {
           visits: {
             b: {
               count: 1,
-              sessions: [{ session_id: "sess-9", occurred_at: "2026-09-25T10:00:00Z" }],
+              visits: [
+                {
+                  visit_id: "visit-b",
+                  step_id: "b",
+                  count: 1,
+                  ordinal: 1,
+                  sessions: [{ session_id: "sess-9", occurred_at: OCCURRED_AT }],
+                },
+              ],
+              sessions: [{ session_id: "sess-9", occurred_at: OCCURRED_AT }],
             },
           },
         }}

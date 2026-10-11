@@ -6,9 +6,19 @@ export type {
   ViewFilterValue,
   ViewGroup,
   ViewGroupKey,
+  ViewGroupNode,
+  ViewPreset,
 } from "./types";
 export { applyViewFilters, evaluateViewClause, type ViewValueAccessor } from "./filters";
-export { applyViewGroup, VIEW_GROUP_KEYS, type ViewGroupExtractor } from "./groups";
+export {
+  applyViewGroup,
+  applyViewGroupPath,
+  encodeGroupPath,
+  normalizeGroupOrder,
+  VIEW_GROUP_KEYS,
+  type ViewGroupExtractor,
+  type ViewGroupLevel,
+} from "./groups";
 export {
   SUPPORTED_DIMENSIONS,
   SUPPORTED_GROUPS,

@@ -102,6 +102,14 @@ For a keyboard move, press `Cmd/Ctrl+K`, search for **Move to**, and select a de
 
 Moves keep the normal reachability, authorization, WIP, archive, workspace, and active-session rules. A move waits for a running agent to finish, and its options survive queueing and backend restarts. Instructions require an active target session or a destination that auto-starts an agent. Pull-request draft and review status use the PR step's automation. For the agent tool contract, see [Automation and MCP](automation-and-mcp.md#task-mcp).
 
+### When a move is refused
+
+A refused move says why. The task page shows a banner with a short explanation and a **Why this happened** control that lists each failed rule and what repairs it. A completion-gate refusal names every unmet criterion and tells you whether to verify it or to request approval for a changed plan. On a board, the same reasons appear in the failure dialog. On a phone, and for moves started from a menu, the explanation stays in a notice at the bottom of the screen until you dismiss it, and the reasons open in a drawer.
+
+Kandev labels each failure as one you can fix or as a system problem. A system problem shows an incident ID to give to your administrator instead of internal error text.
+
+A move or completion signal can be accepted while an agent is still working and fail later, when the turn ends. The task page then shows **A queued move did not apply** or **The task did not advance to the next step** with the same reasons. That banner survives a reload and clears when a later move succeeds. Agents receive the same code, reasons, and remediation in the failed tool result, and can read a later failure from `get_task_completion_gate_kandev` as `transition_failure`.
+
 ## Change a task's workflow
 
 Choose **Change workflow...** from a single task's card, sidebar, task actions,

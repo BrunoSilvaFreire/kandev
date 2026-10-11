@@ -222,7 +222,28 @@ func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransition
 	if err := r.persistPendingEntryRoute(ctx, tx, in.taskID, in.toWorkflowStepID, id, occurredAt); err != nil {
 		return 0, err
 	}
+	if in.toWorkflowStepID != "" {
+		if err := r.recordStepVisit(ctx, tx, in, id, occurredAt); err != nil {
+			return 0, err
+		}
+	}
 	return id, nil
+}
+
+func (r *Repository) recordStepVisit(ctx context.Context, tx stepTransitionTx, in stepTransitionInput, transitionID int64, enteredAt time.Time) error {
+	if transitionID <= 0 {
+		return fmt.Errorf("record step visit without transition identity")
+	}
+	visitID := "transition:" + strconv.FormatInt(transitionID, 10)
+	_, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO task_step_visits (visit_id, task_id, workflow_id, step_id, entry_ordinal, entered_at, source_transition_id, provenance)
+		SELECT ?, ?, ?, ?, COALESCE(MAX(entry_ordinal), 0) + 1, ?, ?, 'transition'
+		FROM task_step_visits WHERE task_id = ?
+	`), visitID, in.taskID, in.toWorkflowID, in.toWorkflowStepID, enteredAt, transitionID, in.taskID)
+	if err != nil {
+		return fmt.Errorf("record task step visit: %w", err)
+	}
+	return nil
 }
 
 // persistPendingEntryRoute writes a caller-resolved workflow-entry profile

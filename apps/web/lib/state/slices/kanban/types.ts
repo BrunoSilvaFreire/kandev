@@ -150,6 +150,11 @@ export type KanbanState = {
     interrupted?: boolean;
     /** Monotonic client generation for explicit interruption-marker updates. */
     interruptedGeneration?: number;
+    /** Oldest unresolved session interruption episode; null when none. */
+    interruption?: { episode_id: string; reason: string; session_id: string } | null;
+    /** Active Review episode identity and authoritative entry time. */
+    reviewEpisodeId?: string | null;
+    reviewEnteredAt?: string | null;
     /** True when a workflow step's auto_start_agent on_enter action failed to
      *  launch a run for this task. */
     autoStartFailed?: boolean;

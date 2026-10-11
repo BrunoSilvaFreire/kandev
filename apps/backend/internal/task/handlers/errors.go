@@ -11,6 +11,7 @@ import (
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/task/transitionfailure"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	"github.com/kandev/kandev/internal/worktree"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -154,24 +155,45 @@ func repositorySelectionWSCode(err error) (string, bool) {
 	}
 }
 
+// transitionFailureContextKey holds the shared envelope for the move error
+// writers. Status and the pre-existing body keys are unchanged; the envelope
+// is additive under "failure".
+const transitionFailureContextKey = "task_transition_failure"
+
+func withTransitionFailure(c *gin.Context, body gin.H) gin.H {
+	if failure, ok := c.Get(transitionFailureContextKey); ok {
+		body["failure"] = failure
+	}
+	return body
+}
+
+func transitionFailureIncident(c *gin.Context) zap.Field {
+	if value, ok := c.Get(transitionFailureContextKey); ok {
+		if failure, isFailure := value.(transitionfailure.Failure); isFailure {
+			return zap.String("incident_id", failure.IncidentID)
+		}
+	}
+	return zap.Skip()
+}
+
 func handleSelectedMoveError(c *gin.Context, log *logger.Logger, err error) {
 	switch {
 	case isClientDisconnect(err):
 		abortClientDisconnect(c)
 	case errors.Is(err, taskrepository.ErrTaskCompletionGateBlocked):
-		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_gate_blocked"})
+		c.JSON(http.StatusConflict, withTransitionFailure(c, gin.H{"code": "task_completion_gate_blocked"}))
 	case errors.Is(err, taskrepository.ErrTaskCompletionCriteriaConflict):
-		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_criteria_conflict"})
+		c.JSON(http.StatusConflict, withTransitionFailure(c, gin.H{"code": "task_completion_criteria_conflict"}))
 	case errors.Is(err, taskrepository.ErrTaskCompletionHumanConfirmationRequired):
-		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_human_confirmation_required"})
+		c.JSON(http.StatusConflict, withTransitionFailure(c, gin.H{"code": "task_completion_human_confirmation_required"}))
 	case isNotFound(err):
-		c.JSON(http.StatusNotFound, gin.H{"error": "task or workflow not found"})
+		c.JSON(http.StatusNotFound, withTransitionFailure(c, gin.H{"error": "task or workflow not found"}))
 	case isMoveConflict(err):
 		body := gin.H{"error": err.Error()}
 		if code := moveConflictCode(err); code != "" {
 			body["code"] = code
 		}
-		c.JSON(http.StatusConflict, body)
+		c.JSON(http.StatusConflict, withTransitionFailure(c, body))
 	case isValidationError(err):
 		var changeErr *service.WorkflowChangeValidationError
 		if errors.As(err, &changeErr) {
@@ -179,13 +201,13 @@ func handleSelectedMoveError(c *gin.Context, log *logger.Logger, err error) {
 			if changeErr.SourceProfileID != "" {
 				body["source_profile_id"] = changeErr.SourceProfileID
 			}
-			c.JSON(http.StatusBadRequest, body)
+			c.JSON(http.StatusBadRequest, withTransitionFailure(c, body))
 			return
 		}
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, withTransitionFailure(c, gin.H{"error": err.Error()}))
 	default:
-		log.Error("task move failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "task move failed"})
+		log.Error("task move failed", zap.Error(err), transitionFailureIncident(c))
+		c.JSON(http.StatusInternalServerError, withTransitionFailure(c, gin.H{"error": "task move failed"}))
 	}
 }
 

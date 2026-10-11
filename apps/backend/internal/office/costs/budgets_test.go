@@ -210,6 +210,9 @@ func newBudgetTestRepo(t *testing.T) (*sqlite.Repository, func(string, ...interf
 		t.Fatalf("settings store init: %v", err)
 	}
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS tasks (
+		review_episode_id TEXT NOT NULL DEFAULT '',
+		review_entered_at TIMESTAMP,
+		review_entry_origin TEXT NOT NULL DEFAULT '',
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL DEFAULT '',
 		project_id TEXT DEFAULT '',

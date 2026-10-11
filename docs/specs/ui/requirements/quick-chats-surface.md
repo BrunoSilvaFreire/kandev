@@ -125,6 +125,41 @@ with a first prompt in one action.
   ACP profiles shall store the prompt for the session; passthrough profiles
   shall pass it in the start request.
 
+### REQ-UI-QUICK-CHATS-SURFACE-005: Browse order, dates, titles, and context
+
+**Intent:** The browse page shall help a user recognize and find a previous
+Quick Chat without opening it.
+
+#### Acceptance criteria
+
+- **AC-UI-QUICK-CHATS-SURFACE-005.1:** Each row's last activity shall be the
+  time of the newest message in the conversation. A chat with no message shall
+  show when it was created and shall say so. A session record rewritten by a
+  restart, recovery, or state change, and a status or setup row written when a
+  session starts or resumes, shall not move the date.
+- **AC-UI-QUICK-CHATS-SURFACE-005.2:** The list shall show the most recent
+  activity first by default and offer oldest activity first. Rows with the same
+  time shall keep a stable order, and a row with no time shall sort last in
+  either order. The tab strip order shall be unaffected.
+- **AC-UI-QUICK-CHATS-SURFACE-005.3:** Each row shall show the relative age and
+  the absolute date and time without relying on hover.
+- **AC-UI-QUICK-CHATS-SURFACE-005.4:** A row shall show the chat's name when it
+  has one, whether a person or an agent set it. Otherwise it shall show an
+  excerpt of the first user message, and only when there is no user message a
+  generic untitled label. The excerpt is presentation only: it shall never be
+  stored as the name or replace one.
+- **AC-UI-QUICK-CHATS-SURFACE-005.5:** A row shall show a repository badge only
+  for a repository attached to that Quick Chat, labelled as linked, and a task
+  badge only for a task that Quick Chat created. A badge shall never be derived
+  from the selected workspace alone, and shall never claim a repository was
+  changed.
+- **AC-UI-QUICK-CHATS-SURFACE-005.6:** A task badge shall open that task. A
+  deleted or inaccessible repository or task shall produce no badge and no
+  error. A row with more links than fit shall show a count of the remainder.
+- **AC-UI-QUICK-CHATS-SURFACE-005.7:** Order control, dates, titles, and badges
+  shall be available on phone and desktop. Phone controls shall be reachable by
+  touch.
+
 ## Out of scope
 
 - Making a Quick Chat a workflow-confined task or adding workflow steps.

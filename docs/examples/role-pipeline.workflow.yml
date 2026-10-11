@@ -36,8 +36,22 @@ workflows:
         auto_advance_requires_signal: true
         cancel_triggers_turn_complete: false
         agent_profile:
-          agent_name: OpenCode
-          model: opencode-go/deepseek-v4.1-flash
+          agent_name: Dynamic
+          dynamic:
+            preferred_tags:
+              - cheap
+              - spike
+            candidates:
+              - agent_profile:
+                  agent_name: OpenCode
+                  model: opencode-go/deepseek-v4.1-flash
+                candidate_profile_id: 84c8238d-bee0-434c-b4dc-f779ccbbf616
+                enabled: true
+              - agent_profile:
+                  agent_name: Antigravity CLI
+                  mode: default
+                candidate_profile_id: c8841829-5669-4598-91cf-238c83e5b079
+                enabled: true
         profile_session_start_policy: new
         profile_session_end_policy: complete
         complete_task_on_enter: false
@@ -67,7 +81,6 @@ workflows:
              - reject: end your turn without calling step_complete_kandev, with a short summary of why the plan stopped.
              If the answer arrives as the next message instead (the user answered after the tool call timed out), act on it exactly
              the same way.
-
           ENROLLMENT INVARIANT (applies to EVERY approved plan, first or revised, in case A): the completion
           criteria you enroll must reference the exact plan revision you just got approved. After each approval
           - including after a revise - re-run set_task_completion_criteria_kandev(plan_revision_id=<the newly
@@ -77,6 +90,28 @@ workflows:
           completion set bound to an older revision makes the plan stale and blocks the handoff to Implement.
           Before step_complete_kandev, call get_task_completion_gate_kandev and confirm there is no
           "plan_revision_stale" or "unenrolled_plan" blocker.
+
+          MINOR PLAN APPROVALS: a first plan and any revision that changes product, API, persistence, security,
+          destructive behavior, dependencies, risk, or completion criteria still require request_approval_kandev. A
+          non-normative clarification may instead use record_plan_minor_approval_kandev, which is accepted only when the
+          new plan head is the previously approved content byte-for-byte followed by exactly one trailing
+          "## Architect clarifications (advisory)" section and the increment IDs, descriptions, and evidence subjects are
+          unchanged; the call is authorized by your session's workflow step. On any minor_approval_* rejection, request
+          human approval instead.
+
+          DESIGN AND PLAN ARTIFACTS (two documents with different jobs; never repeat one in the other):
+          - The technical design is a repository-grounded contract. State the current architecture as you verified it in the code,
+            the proposed responsibility boundaries, the data, API and state changes, failure and recovery behavior, migration,
+            security and concurrency where they apply, representative shapes, the alternatives you rejected and why, and the
+            decisions still open. Scale each part to its real risk. Leave out increment tables, command checklists and delivery
+            order. Keep the repository file and the "technical-design" task document byte-identical.
+          - The plan is the delivery order. Name the ordered increments, their dependencies, the exact verification commands, the
+            stop/rollback gates and the completion criteria, and link the design by repository path and document key. Do not
+            restate contract prose from the design.
+          PREFLIGHT BEFORE THE FIRST HANDOFF: for each increment, check its owning specification, the code that reads and writes
+          the data it touches, its migration and transaction boundaries, and that its verification commands can run. Resolve what
+          you find in the design or plan and record a compact checklist in the handoff document. Do not hand over a gap you could
+          have closed, and never invent evidence.
           B) Escalation from the Implementer (instructions below start with "ESCALATION"): read the current plan, technical design, and the evidence
              given, verify it against the repository, and decide. If a technical decision changed, revise the technical design file and publish the updated content with write_task_document_kandev(document_key="technical-design", type="custom") while keeping prior design decisions traceable. Either revise the plan with update_task_plan_kandev(new_revision=true),
              keeping untouched sections and putting a note at the top: "Revision N (supersedes revision M): what changed, why, where
@@ -84,7 +119,7 @@ workflows:
              the plan unchanged and give advice only. When a human should sign off (scope or risk change, destructive step, ambiguous
              requirement), call request_approval_kandev first and handle its answer as in case A (registering revised criteria with set_task_completion_criteria_kandev if approved). Then hand back with
              move_task_kandev(task_id, transition="handoff", entry_options={"instructions": "<what changed, the plan revision
-             number, where to resume>. Full handoff: get_task_document_kandev(document_key=\"handoff-...\")."}). End your turn WITHOUT calling step_complete_kandev.
+             number, where to resume>. Full handoff: get_task_document_kandev(document_key="handoff-...")."}). End your turn WITHOUT calling step_complete_kandev.
           C) Returned from a SPIKE EXPLORATION REQUEST you issued (your session remembers it; there is no special entry
              text): read the newest spike report(s) with list_task_documents_kandev / get_task_document_kandev - the appended
              "spike-2", "spike-3", ... document holds the new findings. Verify them against the repository, then continue as in
@@ -133,9 +168,34 @@ workflows:
         auto_advance_requires_signal: true
         cancel_triggers_turn_complete: false
         agent_profile:
-          agent_name: Codex
-          model: gpt-5.6-sol
-          mode: agent
+          agent_name: Dynamic
+          dynamic:
+            preferred_tags:
+              - architect
+              - reasoning
+            candidates:
+              - agent_profile:
+                  agent_name: Codex
+                  mode: agent-full-access
+                  model: gpt-6-sol
+                candidate_profile_id: cc7523c3-f09c-4c6a-ae91-01e84c2844ed
+                enabled: true
+              - agent_profile:
+                  agent_name: Claude
+                  mode: default
+                  model: opus[1m]
+                candidate_profile_id: 96e7f399-c02e-44df-94bb-2764bafbb564
+                enabled: true
+              - agent_profile:
+                  agent_name: OpenCode
+                  model: opencode-go/deepseek-v4-pro
+                candidate_profile_id: dd6c3eca-bc05-447f-83df-a69b1fc4f3e4
+                enabled: true
+              - agent_profile:
+                  agent_name: Junie
+                  model: v1:12:jetbrains-ai:gpt-6-sol
+                candidate_profile_id: 89598008-7391-45aa-bec4-151758f26497
+                enabled: true
         profile_session_start_policy: reuse
         profile_session_end_policy: park
         complete_task_on_enter: false
@@ -164,7 +224,7 @@ workflows:
           3) Verified evidence (verification commands ran with results, test output, run ids),
           4) Decisions and rationale (what chosen and why),
           5) Open questions and blockers (the specific question or plan change needed).
-          Call move_task_kandev(task_id, transition="escalate", entry_options={"instructions": "ESCALATION: <summary>. Full handoff: get_task_document_kandev(document_key=\"handoff-...\")."}) and end your turn WITHOUT calling step_complete_kandev.
+          Call move_task_kandev(task_id, transition="escalate", entry_options={"instructions": "ESCALATION: <summary>. Full handoff: get_task_document_kandev(document_key="handoff-...")."}) and end your turn WITHOUT calling step_complete_kandev.
           If move_task_kandev or named transitions are unavailable in the deployed tool schema, report the capability error.
           After an escalation your next prompt carries the ARCHITECT HANDOFF; re-read the task plan (the latest revision is current).
 
@@ -189,9 +249,38 @@ workflows:
         auto_advance_requires_signal: true
         cancel_triggers_turn_complete: false
         agent_profile:
-          agent_name: Codex
-          model: gpt-5.6-terra
-          mode: agent
+          agent_name: Dynamic
+          dynamic:
+            preferred_tags:
+              - coding
+              - implementer
+            candidates:
+              - agent_profile:
+                  agent_name: Codex
+                  mode: agent-full-access
+                  model: gpt-6-luna
+                candidate_profile_id: dfa77c9d-aaba-4aec-96fb-571e92438627
+                enabled: true
+              - agent_profile:
+                  agent_name: OpenCode
+                  model: opencode-go/deepseek-v4.1-flash
+                candidate_profile_id: 84c8238d-bee0-434c-b4dc-f779ccbbf616
+                enabled: true
+              - agent_profile:
+                  agent_name: Antigravity CLI
+                  mode: default
+                candidate_profile_id: c8841829-5669-4598-91cf-238c83e5b079
+                enabled: true
+              - agent_profile:
+                  agent_name: Antigravity CLI
+                  model: Claude Sonnet 4.6 (Thinking)
+                candidate_profile_id: 0e22f8b6-8c2c-4175-9e73-cfaddc80d159
+                enabled: true
+              - agent_profile:
+                  agent_name: Junie
+                  model: v1:12:jetbrains-ai:gpt-6-luna
+                candidate_profile_id: f360ca64-e1b5-4fc0-a896-e52abf80265a
+                enabled: true
         profile_session_start_policy: reuse
         profile_session_end_policy: park
         complete_task_on_enter: false
@@ -214,7 +303,7 @@ workflows:
              with exactly "VERDICT: CHANGES REQUESTED", then the BLOCKER / SUGGESTION items with file:line. Do not fix the findings yourself.
           2. Write a handoff document with write_task_document_kandev(type "handoff", document_key "handoff-review-to-implement" or next free key)
              containing: 1) Objective & resume point, 2) Files and lines affected, 3) Verified evidence & test output, 4) Decisions & rationale, 5) Unresolved blockers.
-          3. Call move_task_kandev(task_id, transition="request_changes", entry_options={"instructions": "REVIEW CHANGES REQUESTED: <summary>. Full handoff: get_task_document_kandev(document_key=\"handoff-...\")."})
+          3. Call move_task_kandev(task_id, transition="request_changes", entry_options={"instructions": "REVIEW CHANGES REQUESTED: <summary>. Full handoff: get_task_document_kandev(document_key="handoff-...")."})
              without pasting the full review into the move, then end your turn.
           UNACTIONABLE BLOCKER - do NOT loop: Before requesting changes, confirm every BLOCKER is actionable by the Implementer within its current scope.
           A BLOCKER that needs a human or operator action (such as llm-sudo), a missing external credential or infrastructure, or a change to the approved plan scope
@@ -260,9 +349,24 @@ workflows:
         auto_advance_requires_signal: false
         cancel_triggers_turn_complete: false
         agent_profile:
-          agent_name: Claude
-          model: opus[1m]
-          mode: default
+          agent_name: Dynamic
+          dynamic:
+            preferred_tags:
+              - reasoning
+              - reviewer
+            candidates:
+              - agent_profile:
+                  agent_name: Claude
+                  mode: default
+                  model: opus[1m]
+                candidate_profile_id: 96e7f399-c02e-44df-94bb-2764bafbb564
+                enabled: true
+              - agent_profile:
+                  agent_name: Codex
+                  mode: agent-full-access
+                  model: gpt-6-sol
+                candidate_profile_id: cc7523c3-f09c-4c6a-ae91-01e84c2844ed
+                enabled: true
         profile_session_start_policy: reuse
         profile_session_end_policy: park
         complete_task_on_enter: false

@@ -39,6 +39,8 @@ func fullStep() *models.WorkflowStep {
 	return &models.WorkflowStep{
 		ID:                          "step-1",
 		WorkflowID:                  "workflow-1",
+		PortableKey:                 "portable-review",
+		RetiredAt:                   nil,
 		Name:                        "Review",
 		Position:                    3,
 		Color:                       "#ff00ff",
@@ -91,6 +93,8 @@ func TestPublishCarriesEveryStepField(t *testing.T) {
 	want := map[string]interface{}{
 		"id":                            step.ID,
 		"workflow_id":                   step.WorkflowID,
+		"portable_key":                  step.PortableKey,
+		"retired_at":                    step.RetiredAt,
 		"name":                          step.Name,
 		"position":                      step.Position,
 		"color":                         step.Color,

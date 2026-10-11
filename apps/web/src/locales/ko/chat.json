@@ -185,5 +185,16 @@
   "providerRecoveryDisabledBody": "자동 계속 기능이 비활성화되어 있습니다. 재개하여 다시 시도하거나 새 세션을 시작하세요.",
   "providerRecoveryUnsafeBody": "보류 중인 작업이 있거나 결과가 불확실하여 자동 계속을 중단했습니다. 재개하기 전에 작업을 확인하세요.",
   "providerRecoveryUnsupportedBody": "이 에이전트는 중단된 대화를 자동으로 복원할 수 없습니다. 재개하여 다시 시도하거나 새 세션을 시작하세요.",
-  "providerRecoveryEvidenceBody": "대화 식별 정보 또는 안전성 정보가 없어 자동 계속을 중단했습니다. 재개하기 전에 작업을 확인하세요."
+  "providerRecoveryEvidenceBody": "대화 식별 정보 또는 안전성 정보가 없어 자동 계속을 중단했습니다. 재개하기 전에 작업을 확인하세요.",
+  "quickChatsOrderLabel": "정렬",
+  "quickChatsOrderRecent": "최근 활동순",
+  "quickChatsOrderOldest": "오래된 활동순",
+  "quickChatLastActivity": "{{relative}} ({{date}})",
+  "quickChatNoMessagesYet": "아직 메시지가 없습니다. 생성: {{date}}",
+  "quickChatLinkedRepository": "연결된 저장소: {{name}}",
+  "quickChatLinkedRepositoryPrefix": "연결된 저장소:",
+  "quickChatCreatedTask": "이 채팅에서 만든 작업: {{title}}",
+  "quickChatCreatedTaskPrefix": "이 채팅에서 만든 작업:",
+  "quickChatMoreTasks_one": "외 작업 {{count}}개",
+  "quickChatMoreTasks_other": "외 작업 {{count}}개"
 }

@@ -43,7 +43,7 @@ func TestOpenCodeACPBuildCommandPrefersNativeBinary(t *testing.T) {
 		t.Fatalf("NativeBinaryName() = %q, want %q", name, "opencode")
 	}
 
-	wantNative := []string{"opencode", "acp", "--print-logs", "--log-level", "ERROR"}
+	wantNative := []string{"opencode", "acp", "--print-logs"}
 	if got := a.BuildCommand(CommandOptions{PreferNativeBinary: true}).Args(); !slices.Equal(got, wantNative) {
 		t.Fatalf("BuildCommand(PreferNativeBinary) = %#v, want %#v", got, wantNative)
 	}
@@ -61,7 +61,7 @@ func TestOpenCodeACPInferenceConfigPrefersNativeBinaryOnPath(t *testing.T) {
 	writeOpenCodeTestBinary(t, "exit 0")
 
 	a := NewOpenCodeACP()
-	want := []string{"opencode", "acp", "--print-logs", "--log-level", "ERROR"}
+	want := []string{"opencode", "acp", "--print-logs"}
 	if got := a.HostUtilityInferenceConfig().Command.Args(); !slices.Equal(got, want) {
 		t.Fatalf("HostUtilityInferenceConfig().Command = %#v, want %#v", got, want)
 	}
@@ -74,6 +74,33 @@ func TestOpenCodeACPInferenceConfigStaysExecutorSafeOnHostPath(t *testing.T) {
 	want := a.ManagedNPMRuntime().CachedACPCommand().Args()
 	if got := a.InferenceConfig().Command.Args(); !slices.Equal(got, want) {
 		t.Fatalf("InferenceConfig().Command = %#v, want executor-safe npx command %#v", got, want)
+	}
+}
+
+// TestOpenCodeACPOmitsCaseSensitiveLogLevel guards the OpenCode 2.0 startup
+// regression: 1.x and 2.x accept opposite-case level names for `--log-level`,
+// and a wrong-case value makes `opencode acp` exit before the ACP handshake
+// (surfacing as "ACP initialize handshake failed: ... file already closed").
+// The fix is to pass no `--log-level` at all, which the version-unknown native
+// binary path cannot resolve either. Any reintroduction fails here.
+func TestOpenCodeACPOmitsCaseSensitiveLogLevel(t *testing.T) {
+	a := NewOpenCodeACP()
+
+	managed := a.ManagedNPMRuntime().ACPArgs
+	if !slices.Equal(managed, []string{"acp", "--print-logs"}) {
+		t.Fatalf("managed ACP args = %#v, want --print-logs only", managed)
+	}
+	for _, args := range [][]string{
+		a.BuildCommand(CommandOptions{}).Args(),
+		a.BuildCommand(CommandOptions{PreferNativeBinary: true}).Args(),
+		a.Runtime().Cmd.Args(),
+	} {
+		if slices.Contains(args, "--log-level") {
+			t.Errorf("opencode ACP args %#v must not pin a case-sensitive --log-level", args)
+		}
+		if !slices.Contains(args, "--print-logs") {
+			t.Errorf("opencode ACP args %#v lost --print-logs", args)
+		}
 	}
 }
 

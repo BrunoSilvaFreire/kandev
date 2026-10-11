@@ -33,6 +33,11 @@ func newMockSyncOps(provider *mockWorkflowProvider) *mockSyncOps {
 }
 
 func (m *mockSyncOps) DeleteWorkflow(_ context.Context, id string) error {
+	if m.provider.db != nil {
+		if _, err := m.provider.db.Exec(`DELETE FROM workflows WHERE id = ?`, id); err != nil {
+			return err
+		}
+	}
 	for i, wf := range m.provider.workflows {
 		if wf.ID == id {
 			m.provider.workflows = append(m.provider.workflows[:i], m.provider.workflows[i+1:]...)
@@ -58,12 +63,17 @@ func (m *mockSyncOps) SetWorkflowSource(ctx context.Context, id, source, sourceP
 	}
 	wf.Source = source
 	wf.SourcePath = sourcePath
+	if m.provider.db != nil {
+		if _, err := m.provider.db.Exec(`UPDATE workflows SET source = ?, source_path = ? WHERE id = ?`, source, sourcePath, id); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 func setupSyncService(t *testing.T) (*Service, *mockWorkflowProvider, *mockSyncOps) {
-	svc, _ := setupTestService(t)
-	provider := &mockWorkflowProvider{}
+	svc, db := setupTestService(t)
+	provider := &mockWorkflowProvider{db: db}
 	svc.SetWorkflowProvider(provider)
 	ops := newMockSyncOps(provider)
 	svc.SetSyncWorkflowOps(ops)
@@ -73,8 +83,8 @@ func setupSyncService(t *testing.T) (*Service, *mockWorkflowProvider, *mockSyncO
 // setupSyncServiceWithLogger is a variant of setupSyncService for tests that
 // need to observe log output (e.g. via a zaptest observer core).
 func setupSyncServiceWithLogger(t *testing.T, log *logger.Logger) (*Service, *mockWorkflowProvider, *mockSyncOps) {
-	svc, _ := setupTestService(t, log)
-	provider := &mockWorkflowProvider{}
+	svc, db := setupTestService(t, log)
+	provider := &mockWorkflowProvider{db: db}
 	svc.SetWorkflowProvider(provider)
 	ops := newMockSyncOps(provider)
 	svc.SetSyncWorkflowOps(ops)
@@ -105,8 +115,12 @@ func exportOf(workflows ...models.WorkflowPortable) *models.WorkflowExport {
 func addSyncedWorkflow(provider *mockWorkflowProvider, id, workspaceID, name, sourcePath string) *taskmodels.Workflow {
 	provider.addWorkflow(id, workspaceID, name)
 	wf := provider.workflows[len(provider.workflows)-1]
+	wf.Description = "synced " + name
 	wf.Source = taskmodels.WorkflowSourceGitHub
 	wf.SourcePath = sourcePath
+	if _, err := provider.db.Exec(`INSERT INTO workflows (id, workspace_id, name, description, prompt, agent_profile_id, source, source_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`, wf.ID, wf.WorkspaceID, wf.Name, wf.Description, wf.Prompt, wf.AgentProfileID, wf.Source, wf.SourcePath); err != nil {
+		panic(fmt.Sprintf("seed synced workflow: %v", err))
+	}
 	return wf
 }
 
@@ -198,6 +212,40 @@ func TestApplySyncedWorkflows_UpdatesMatchedWorkflowPreservingStepIDs(t *testing
 	assert.Equal(t, "step-done", byName["Done"].ID, "matched step keeps its ID")
 	assert.Equal(t, 1, byName["Review"].Position)
 	assert.Equal(t, 2, byName["Done"].Position)
+}
+
+func TestApplySyncedWorkflows_KeyedRenamePreservesStepID(t *testing.T) {
+	svc, provider, _ := setupSyncService(t)
+	wf := addSyncedWorkflow(provider, "wf-keyed-rename", "ws-1", "Dev Flow", "flows/dev.yml")
+	createStep(t, svc, &models.WorkflowStep{ID: "step-stable", WorkflowID: wf.ID, PortableKey: "stable-key", Name: "Queued", Position: 0, IsStartStep: true})
+	definition := portableWorkflow("Dev Flow", "Ready")
+	definition.Steps[0].Key = "stable-key"
+
+	result, err := svc.ApplySyncedWorkflows(context.Background(), "ws-1", []SyncFileExport{{Path: "flows/dev.yml", Export: exportOf(definition)}})
+	require.NoError(t, err)
+	require.Empty(t, result.Warnings)
+	steps, err := svc.ListStepsByWorkflow(context.Background(), wf.ID)
+	require.NoError(t, err)
+	require.Len(t, steps, 1)
+	assert.Equal(t, "step-stable", steps[0].ID)
+	assert.Equal(t, "Ready", steps[0].Name)
+}
+
+func TestApplySyncedWorkflows_UnkeyedRenameIsRejectedAsAmbiguous(t *testing.T) {
+	svc, provider, _ := setupSyncService(t)
+	wf := addSyncedWorkflow(provider, "wf-legacy-rename", "ws-1", "Dev Flow", "flows/dev.yml")
+	createStep(t, svc, &models.WorkflowStep{ID: "step-old-name", WorkflowID: wf.ID, Name: "Queued", Position: 0, IsStartStep: true})
+
+	result, err := svc.ApplySyncedWorkflows(context.Background(), "ws-1", []SyncFileExport{{
+		Path: "flows/dev.yml", Export: exportOf(portableWorkflow("Dev Flow", "Ready")),
+	}})
+	require.NoError(t, err)
+	require.Len(t, result.Warnings, 1)
+	assert.Contains(t, result.Warnings[0], "stable key or explicit rename mapping")
+	steps, err := svc.ListStepsByWorkflow(context.Background(), wf.ID)
+	require.NoError(t, err)
+	require.Len(t, steps, 1)
+	assert.Equal(t, "Queued", steps[0].Name)
 }
 
 func TestApplySyncedWorkflows_RemovedStepWithTasksBlocksUpdate(t *testing.T) {
@@ -550,7 +598,11 @@ func TestApplySyncedWorkflows_RebindingStepAgentProfileLogsWarning(t *testing.T)
 	log, err := logger.NewFromZap(zap.New(core))
 	require.NoError(t, err)
 
-	svc, provider, _ := setupSyncServiceWithLogger(t, log)
+	svc, db := setupTestService(t, log)
+	provider := &mockWorkflowProvider{db: db}
+	svc.SetWorkflowProvider(provider)
+	ops := newMockSyncOps(provider)
+	svc.SetSyncWorkflowOps(ops)
 	ctx := context.Background()
 	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Dev Flow", "flows/dev.yml")
 	createStep(t, svc, &models.WorkflowStep{
@@ -596,6 +648,7 @@ func TestApplySyncedWorkflows_RebindWarningDoesNotFireOnFailedUpdate(t *testing.
 
 	svc, db := setupTestService(t, log)
 	provider := &mockWorkflowProvider{}
+	provider.db = db
 	svc.SetWorkflowProvider(provider)
 	ops := newMockSyncOps(provider)
 	svc.SetSyncWorkflowOps(ops)
@@ -619,7 +672,7 @@ func TestApplySyncedWorkflows_RebindWarningDoesNotFireOnFailedUpdate(t *testing.
 	result, err := svc.ApplySyncedWorkflows(ctx, "ws-1", files)
 	require.NoError(t, err)
 	require.Len(t, result.Warnings, 1, "the failed step write surfaces a warning")
-	assert.Contains(t, result.Warnings[0], "Todo")
+	assert.Contains(t, result.Warnings[0], "Dev Flow")
 	assert.Empty(t, result.Updated, "a step update that failed to persist must not be reported as applied")
 	assert.Empty(t, logs.FilterMessage("workflow sync rebinding step's agent profile").All(),
 		"a rebind Warn must never fire for a change that was not actually persisted")
@@ -679,7 +732,11 @@ func TestApplySyncedWorkflows_WorkflowRebindWarningDoesNotFireOnFailedUpdate(t *
 	log, err := logger.NewFromZap(zap.New(core))
 	require.NoError(t, err)
 
-	svc, provider, _ := setupSyncServiceWithLogger(t, log)
+	svc, db := setupTestService(t, log)
+	provider := &mockWorkflowProvider{db: db}
+	svc.SetWorkflowProvider(provider)
+	ops := newMockSyncOps(provider)
+	svc.SetSyncWorkflowOps(ops)
 	ctx := context.Background()
 	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Dev Flow", "flows/dev.yml")
 	wf.AgentProfileID = "profile-old"
@@ -690,7 +747,9 @@ func TestApplySyncedWorkflows_WorkflowRebindWarningDoesNotFireOnFailedUpdate(t *
 	files := []SyncFileExport{{Path: "flows/dev.yml", Export: exportOf(pw)}}
 	svc.SetAgentProfileFuncs(nil, func(string, string, string, string) string { return "profile-new" })
 
-	provider.forceUpdateWorkflowErr = fmt.Errorf("simulated UpdateWorkflow failure")
+	_, err = db.Exec("PRAGMA query_only = ON")
+	t.Cleanup(func() { _, _ = db.Exec("PRAGMA query_only = OFF") })
+	require.NoError(t, err)
 
 	result, err := svc.ApplySyncedWorkflows(ctx, "ws-1", files)
 	require.NoError(t, err)

@@ -854,6 +854,7 @@ task.created
 task.updated
 task.deleted
 task.state_changed
+task.transition_failure.updated
 task.plan.created
 task.plan.updated
 task.plan.deleted

@@ -41,6 +41,7 @@ import {
   type WorkflowTemplate,
 } from "@/lib/types/http";
 import { WorkflowDialogs } from "@/app/settings/workspace/workspace-workflows-dialogs";
+import { WorkflowUpdateDialog } from "@/app/settings/workspace/workflow-update-dialog";
 import { useWorkflowCreation } from "@/app/settings/workspace/use-workflow-creation";
 import { useWorkflowImport } from "@/app/settings/workspace/use-workflow-import";
 import { WorkspaceNotFoundCard } from "@/app/settings/workspace/workspace-not-found-card";
@@ -260,6 +261,7 @@ type WorkflowListProps = {
   onWorkflowSaved: (params: WorkflowSavedParams) => void;
   onDiscard: (id: string) => void;
   onReorder: (items: Workflow[]) => void;
+  onUpdateFromFile: (workflow: Workflow) => void;
 };
 
 function SortableWorkflowItem({
@@ -337,6 +339,7 @@ function WorkflowList({
   onWorkflowSaved,
   onDiscard,
   onReorder,
+  onUpdateFromFile,
 }: WorkflowListProps) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
   const savedWorkflowsById = useMemo(
@@ -388,6 +391,7 @@ function WorkflowList({
                 onDuplicateWorkflow={(steps) => onDuplicate(workflow, steps)}
                 onWorkflowSaved={onWorkflowSaved}
                 onDiscardWorkflow={() => onDiscard(workflow.id)}
+                onUpdateFromFile={() => onUpdateFromFile(workflow)}
               />
             </SortableWorkflowItem>
           ))}
@@ -406,6 +410,7 @@ export function WorkspaceWorkflowsClient({
   const { t } = useTranslation();
   const page = useWorkspaceWorkflowsPage(workspace, workflows, workflowTemplates);
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
+  const [workflowToUpdate, setWorkflowToUpdate] = useState<Workflow | null>(null);
 
   if (!workspace)
     return <WorkspaceNotFoundCard onBack={() => page.router.push("/settings/workspaces")} />;
@@ -458,9 +463,24 @@ export function WorkspaceWorkflowsClient({
           onWorkflowSaved={page.handleWorkflowSaved}
           onDiscard={page.handleDiscardWorkflow}
           onReorder={page.handleReorderWorkflows}
+          onUpdateFromFile={setWorkflowToUpdate}
         />
       </SettingsSection>
       <WorkflowDialogs page={page} />
+      {workspace && workflowToUpdate && (
+        <WorkflowUpdateDialog
+          workspace={workspace}
+          workflow={workflowToUpdate}
+          open
+          onOpenChange={(open) => {
+            if (!open) setWorkflowToUpdate(null);
+          }}
+          onUpdated={() => {
+            setWorkflowToUpdate(null);
+            page.router.refresh();
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -90,6 +90,26 @@ func (s *Service) GetTaskSession(ctx context.Context, sessionID string) (*models
 	return session, nil
 }
 
+func (s *Service) ReassignSessionStepVisit(ctx context.Context, taskID, sessionID, visitID, expectedVisitID string) error {
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return err
+	}
+	session, err := s.sessions.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session.TaskID != taskID {
+		return models.ErrTaskSessionNotFound
+	}
+	repo, ok := s.tasks.(interface {
+		ReassignSessionStepVisit(context.Context, string, string, string, string, time.Time) error
+	})
+	if !ok {
+		return ErrActivityUnsupported
+	}
+	return repo.ReassignSessionStepVisit(ctx, taskID, sessionID, visitID, expectedVisitID, time.Now().UTC())
+}
+
 // DeleteSessionAndPublishRemoval removes a session inside the repository's
 // transaction and publishes the terminal event only after that commit.
 // Internal rollback callers use this to keep the ordered stream authoritative.

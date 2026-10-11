@@ -186,15 +186,21 @@
         "archive_task_kandev",
         "create_task_kandev",
         "delete_task_kandev",
+        "enroll_task_plan_increments_kandev",
+        "get_task_completion_gate_kandev",
         "list_tasks_kandev",
+        "manage_task_completion_criteria_kandev",
         "move_task_kandev",
+        "record_plan_minor_approval_kandev",
         "remove_task_dependency_kandev",
+        "set_task_completion_criteria_kandev",
         "set_task_title_kandev",
         "step_complete_kandev",
         "stop_task_kandev",
         "update_repository_base_branch_kandev",
         "update_task_kandev",
-        "update_task_state_kandev"
+        "update_task_state_kandev",
+        "verify_task_completion_criterion_kandev"
       ]
     },
     {

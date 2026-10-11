@@ -65,6 +65,11 @@ export type TaskLike = {
   task_pending_action?: TaskPendingAction | null;
   /** True when the task's session was mid-turn when the backend died. */
   interrupted?: boolean;
+  /** Oldest unresolved session interruption episode; null/absent when none. */
+  interruption?: { episode_id: string; reason: string; session_id: string } | null;
+  /** Active Review episode identity and authoritative entry time. */
+  review_episode_id?: string | null;
+  review_entered_at?: string | null;
   /** True when a workflow step's auto_start_agent on_enter action failed to
    *  launch a run for this task. */
   auto_start_failed?: boolean;
@@ -294,6 +299,9 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     primarySessionPendingAction: pickPendingAction(source.primary_session_pending_action),
     taskPendingAction: pickPendingAction(source.task_pending_action),
     interrupted: source.interrupted,
+    interruption: source.interruption,
+    reviewEpisodeId: source.review_episode_id,
+    reviewEnteredAt: source.review_entered_at,
     autoStartFailed: source.auto_start_failed,
     workspaceOrphaned: source.workspace_orphaned,
     foregroundActivity: pickForegroundActivity(source.foreground_activity),

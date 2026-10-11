@@ -42,5 +42,20 @@
   "triageCaption": "Possible questions are advisory hints; open the conversation to reply.",
   "triageKindClarification": "Clarification",
   "triageKindStaleReview": "Stale review",
-  "triageKindPossibleQuestion": "Possible question"
+  "triageKindPossibleQuestion": "Possible question",
+  "triageKindInterrupted": "Interrupted",
+  "triageKindReview": "Review",
+  "triageKindDependency": "Waiting",
+  "triageActionAnswer": "Answer",
+  "triageActionResume": "Resume",
+  "triageActionReview": "Review",
+  "triageActionOpen": "Open",
+  "triageReasonClarification": "The agent asked a question and is waiting for your answer.",
+  "triageReasonBackendRestart": "Kandev restarted while the agent was working. Resume to continue the same conversation.",
+  "triageReasonExecutionLost": "The agent stopped responding mid-turn. Resume to continue the same conversation.",
+  "triageReasonInterruptedUnknown": "The agent was interrupted. The cause was not recorded.",
+  "triageReasonStaleReview": "This task has been waiting for review for more than a day.",
+  "triageReasonReview": "This task is waiting for your review.",
+  "triageReasonDependency": "This task is waiting on another task to finish.",
+  "triageReasonPossibleQuestion": "The agent may have asked a question in its last message."
 }

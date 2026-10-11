@@ -1,3 +1,4 @@
+import type { TransitionFailureRecord } from "@/lib/tasks/transition-failure";
 import { buildChatMotionActions, loadChatMotionState } from "./chat-motion-actions";
 import type { StateCreator } from "zustand";
 import {
@@ -161,6 +162,8 @@ export const defaultUIState: UISliceState = {
   },
   sessionFailureNotification: null,
   taskDeletedNotification: null,
+  taskTransitionFailures: {},
+  transitionFailureNotice: null,
   updateAvailableNotification: null,
   updateAvailableNotificationQueue: [],
   bottomTerminal: { isOpen: false, pendingCommand: null },
@@ -371,6 +374,15 @@ function buildNotificationActions(set: ImmerSet) {
     setTaskDeletedNotification: (n: UISlice["taskDeletedNotification"]) =>
       set((draft) => {
         draft.taskDeletedNotification = n;
+      }),
+    setTransitionFailureNotice: (failure: UISlice["transitionFailureNotice"]) =>
+      set((draft) => {
+        draft.transitionFailureNotice = failure;
+      }),
+    setTaskTransitionFailure: (taskId: string, record: TransitionFailureRecord | null) =>
+      set((draft) => {
+        if (record) draft.taskTransitionFailures[taskId] = record;
+        else delete draft.taskTransitionFailures[taskId];
       }),
     setUpdateAvailableNotification: (n: UISlice["updateAvailableNotification"]) =>
       set((draft) => {

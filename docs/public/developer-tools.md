@@ -34,6 +34,14 @@ Saves for separate providers are independent.
 
 Quick Chat is an agent conversation outside the board. Use it for repository orientation, experiments, and disposable questions that do not need workflow state, review gates, dependencies, or a delivery record.
 
+### Find a previous Quick Chat
+
+Select **Quick Chats** in the sidebar to browse the workspace's chats. The list shows the most recent conversation first; use **Order** to show the oldest first. Each row shows how long ago the conversation last changed and the date and time. That time comes from the conversation itself, so restarting Kandev or resuming a session does not make an old chat look recent. A chat nobody has written in says **No messages yet** and shows when it was created.
+
+A chat you or the agent named shows that name. An unnamed chat shows the start of your first message so you can recognize it; renaming it replaces that preview.
+
+Badges show what a chat is connected to. A folder badge is a repository attached to the chat; it means the repository was available to the agent, not that the agent changed it. A task badge is a task the agent created from that chat, and selecting it opens the task. A chat with no attached repository and no created task has no badges.
+
 ### Comment on an agent reply
 
 In Task Chat or Quick Chat, select text from a settled agent prose reply, then select the comment button that appears beside the selection. The editor works like plan comments: enter feedback and choose **Add** to keep it as pending context, or **Run** to send it immediately. Pending selections use the same inline highlight and comment badge as plans; select either one to update or delete the feedback. Pending message comments are kept for the current browser tab, appear as composer context chips, and are included in the next prompt as Markdown. If the agent is busy, **Run** queues the feedback for its next turn.

@@ -266,7 +266,7 @@ func (s *Service) ListStepsByWorkspaceID(ctx context.Context, workspaceID string
 
 // GetStep retrieves a workflow step by ID.
 func (s *Service) GetStep(ctx context.Context, stepID string) (*models.WorkflowStep, error) {
-	step, err := s.repo.GetStep(ctx, stepID)
+	step, err := s.repo.GetActiveStep(ctx, stepID)
 	if err != nil {
 		s.logger.Error("failed to get step", zap.String("step_id", stepID), zap.Error(err))
 		return nil, err
@@ -577,32 +577,17 @@ func (s *Service) UpdateStepWithStartStepUpdatesIfUnchanged(
 	return demoted, nil
 }
 
-// DeleteStep deletes a workflow step and clears any references to it from other steps.
-// Tasks currently on the step are NOT auto-reassigned: doing so through the normal
-// move path would run on_exit/on_enter (auto-start agents, session hand-offs) as a
-// side effect of an administrative delete, and any failed move would be silently
-// ignored while the step is deleted anyway (a partial, non-atomic cascade). Instead,
-// affected tasks keep their now-dangling workflow_step_id and are surfaced via the
-// Kanban/Pipeline "Needs Reassignment" fallback column for explicit manual
-// reassignment by a user (which goes through the normal, fully-validated move path).
+// DeleteStep retires a step while preserving its historical identity and references.
+// Live task, queue, session, primary-selection, and executable configuration references
+// block retirement until callers resolve them explicitly.
 func (s *Service) DeleteStep(ctx context.Context, stepID string) error {
 	// First, get the step to find its workflow ID
-	step, err := s.repo.GetStep(ctx, stepID)
+	step, err := s.repo.GetActiveStep(ctx, stepID)
 	if err != nil {
 		s.logger.Error("failed to get step for deletion", zap.String("step_id", stepID), zap.Error(err))
 		return err
 	}
 
-	// Clear any move_to_step references to this step
-	if err := s.repo.ClearStepReferences(ctx, step.WorkflowID, stepID); err != nil {
-		s.logger.Error("failed to clear step references",
-			zap.String("step_id", stepID),
-			zap.String("workflow_id", step.WorkflowID),
-			zap.Error(err))
-		return err
-	}
-
-	// Now delete the step
 	if err := s.repo.DeleteStep(ctx, stepID); err != nil {
 		s.logger.Error("failed to delete step", zap.String("step_id", stepID), zap.Error(err))
 		return err
@@ -1010,6 +995,7 @@ func (s *Service) stepFromPortableWithMatcherOptions(
 	step := &models.WorkflowStep{
 		ID:                          posToID[sp.Position],
 		WorkflowID:                  workflowID,
+		PortableKey:                 sp.Key,
 		Name:                        sp.Name,
 		Position:                    sp.Position,
 		Color:                       sp.Color,

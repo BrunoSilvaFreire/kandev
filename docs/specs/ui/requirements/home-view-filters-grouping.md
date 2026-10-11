@@ -121,6 +121,58 @@ filter menu.
   a normal filter and a Quick Filter in every view that supports a repository
   filter.
 
+### REQ-UI-HOME-VIEW-FILTERS-004: Nested grouping
+
+**Intent:** A view can group by more than one key without repeating headings.
+
+#### Acceptance criteria
+
+- **AC-UI-HOME-VIEW-FILTERS-004.1:** Kanban/Pipeline and List shall accept an
+  ordered list of group keys. The first key forms the outer groups and each
+  later key subdivides the group above it.
+- **AC-UI-HOME-VIEW-FILTERS-004.2:** A group's identity shall be the full path
+  of its typed keys from the outermost level. It shall stay stable when a
+  label changes and when filters change which tasks are visible.
+- **AC-UI-HOME-VIEW-FILTERS-004.3:** In Kanban/Pipeline, the first group key
+  shall partition tasks once across every visible workflow. Grouping by
+  repository group alone shall render each repository group once, including one
+  ungrouped group, and shall not repeat that heading per workflow.
+- **AC-UI-HOME-VIEW-FILTERS-004.4:** Grouping by repository group and then by
+  workflow shall nest each workflow under its repository group.
+- **AC-UI-HOME-VIEW-FILTERS-004.5:** An existing single group preference shall
+  load as a one-key list with no loss of the stored filters. A client that only
+  understands the single key shall still read the outermost key.
+- **AC-UI-HOME-VIEW-FILTERS-004.6:** A key may appear once in the list. An
+  unknown or unsupported key shall be dropped without dropping the valid keys.
+
+### REQ-UI-HOME-VIEW-FILTERS-005: Named presets
+
+**Intent:** A person can keep several filter and grouping setups per view and
+switch between them.
+
+#### Acceptance criteria
+
+- **AC-UI-HOME-VIEW-FILTERS-005.1:** Kanban/Pipeline and List shall let the user
+  save the current filter clauses and ordered group keys as a named preset, and
+  apply, update, rename, and delete a preset.
+- **AC-UI-HOME-VIEW-FILTERS-005.2:** Applying a preset shall take effect
+  immediately. Saving shall be an explicit action; editing filters or grouping
+  shall never silently overwrite a preset.
+- **AC-UI-HOME-VIEW-FILTERS-005.3:** The view header shall show the active
+  preset and whether the current filters or grouping differ from it.
+- **AC-UI-HOME-VIEW-FILTERS-005.4:** Presets, their order, and the active preset
+  shall persist across reloads and restarts and apply in another signed-in
+  client. Each preset shall keep a stable identity when renamed.
+- **AC-UI-HOME-VIEW-FILTERS-005.5:** Preset names shall be unique within a view,
+  ignoring case and surrounding space. A conflicting or empty name shall be
+  rejected with a visible reason and shall leave existing presets unchanged.
+- **AC-UI-HOME-VIEW-FILTERS-005.6:** A view shall keep at most 20 presets.
+  Deleting the active preset shall keep the current filters and grouping and
+  leave no preset active.
+- **AC-UI-HOME-VIEW-FILTERS-005.7:** Phone and desktop shall offer the same
+  preset and grouping choices. Phone controls shall be reachable by touch
+  without hover.
+
 ## Out of scope
 
 - A shared renderer for the views themselves.

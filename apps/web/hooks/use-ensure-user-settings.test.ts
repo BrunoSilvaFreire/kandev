@@ -132,6 +132,9 @@ function makeUnloadedSettings(): UserSettingsState {
     homeQuickFilters: {},
     taskViewFilters: {},
     taskViewGroups: {},
+    taskViewGroupOrder: {},
+    taskViewPresets: {},
+    taskViewActivePreset: {},
     loaded: false,
   };
 }

@@ -1,29 +1,15 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { IconDotsVertical, IconPlus, IconStar } from "@tabler/icons-react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { IconPlus, IconStar } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@kandev/ui/dropdown-menu";
 import { AgentLogo } from "@/components/agent-logo";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
-import {
-  useSessionActions,
-  isSessionStoppable,
-  isSessionDeletable,
-  isSessionResumable,
-} from "@/hooks/domains/session/use-session-actions";
-import { HandoffDropdownMenuSub } from "../handoff-profile-menu-items";
+import { useSessionActions } from "@/hooks/domains/session/use-session-actions";
 import { NewSessionDialog, type HandoffPreset } from "../new-session-dialog";
 import { MobilePillButton } from "./mobile-pill-button";
-import { MobilePickerSheet } from "./mobile-picker-sheet";
 import { formatTaskSessionStateLabel } from "@/lib/ui/state-labels";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { repositorySlug } from "@/lib/repository-slug";
@@ -33,6 +19,8 @@ import type { AgentProfileOption } from "@/lib/state/slices";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { MobileSessionDeleteConfirmation } from "./mobile-session-delete-confirmation";
+import { SessionActionsMenu } from "./mobile-session-actions-menu";
+import { MobilePickerSheet } from "./mobile-picker-sheet";
 
 type SessionRow = {
   id: string;
@@ -48,6 +36,7 @@ type SessionRow = {
   isPrimary: boolean;
   index: number;
   startedAt: string;
+  associatedStepVisitID?: string;
 };
 
 function buildSessionRows(
@@ -75,6 +64,7 @@ function buildSessionRows(
       isPrimary: primarySessionId ? s.id === primarySessionId : !!s.is_primary,
       index: idx + 1,
       startedAt: s.started_at,
+      associatedStepVisitID: s.associated_step_visit_id,
     };
   });
 }
@@ -143,94 +133,6 @@ function StateBadge({
   );
 }
 
-function SessionActionsMenu({
-  triggerRef,
-  taskId,
-  state,
-  isPrimary,
-  onSetPrimary,
-  onStop,
-  onResume,
-  onAskDelete,
-  onHandoffProfile,
-}: {
-  triggerRef: RefObject<HTMLButtonElement | null>;
-  taskId: string;
-  state: TaskSessionState | null;
-  isPrimary: boolean;
-  onSetPrimary: () => void;
-  onStop: () => void;
-  onResume: () => void;
-  onAskDelete: () => void;
-  onHandoffProfile: (profileId: string) => void;
-}) {
-  const { t } = useTranslation();
-  const { isMobile } = useResponsiveBreakpoint();
-  const pendingDelete = useRef(false);
-  const hasLifecycleAction =
-    !!state &&
-    (isSessionStoppable(state) || isSessionResumable(state) || isSessionDeletable(state));
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          ref={triggerRef}
-          variant="ghost"
-          size="icon-sm"
-          className="cursor-pointer h-11 w-11 md:h-7 md:w-7"
-          onClick={(e) => e.stopPropagation()}
-          aria-label={t("task:sessionActions")}
-        >
-          <IconDotsVertical className="h-4 w-4" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="end"
-        onClick={(e) => e.stopPropagation()}
-        onCloseAutoFocus={(event) => {
-          if (!pendingDelete.current) return;
-          event.preventDefault();
-          pendingDelete.current = false;
-          onAskDelete();
-        }}
-      >
-        <DropdownMenuItem
-          className="cursor-pointer"
-          onSelect={onSetPrimary}
-          disabled={isPrimary || !state}
-        >
-          {t("task:setAsPrimary")}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        {state && isSessionStoppable(state) && (
-          <DropdownMenuItem className="cursor-pointer" onSelect={onStop}>
-            {t("task:stop")}
-          </DropdownMenuItem>
-        )}
-        {state && isSessionResumable(state) && (
-          <DropdownMenuItem className="cursor-pointer" onSelect={onResume}>
-            {t("task:resume")}
-          </DropdownMenuItem>
-        )}
-        {state && isSessionDeletable(state) && (
-          <DropdownMenuItem
-            className="cursor-pointer text-destructive focus:text-destructive"
-            onSelect={() => {
-              if (isMobile) pendingDelete.current = true;
-              else onAskDelete();
-            }}
-          >
-            {t("task:delete")}
-          </DropdownMenuItem>
-        )}
-        {hasLifecycleAction && <DropdownMenuSeparator />}
-        <HandoffDropdownMenuSub taskId={taskId} onSelectProfile={onHandoffProfile} />
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 function SessionIdentity({ row }: { row: SessionRow }) {
   return (
     <div className="flex min-w-0 flex-1 flex-col">
@@ -285,6 +187,8 @@ function SessionRowTrailingActions({
         <SessionActionsMenu
           triggerRef={triggerRef}
           taskId={taskId}
+          sessionId={row.id}
+          associatedStepVisitID={row.associatedStepVisitID}
           state={row.state}
           isPrimary={row.isPrimary}
           onSetPrimary={() => void actions.setPrimary()}

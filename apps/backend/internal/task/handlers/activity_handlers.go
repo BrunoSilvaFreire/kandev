@@ -89,7 +89,8 @@ func (h *TaskHandlers) wsTaskTransitionCounts(ctx context.Context, msg *ws.Messa
 			})
 		}
 		visits = append(visits, dto.StepVisitSummaryDTO{
-			StepID: visit.StepID, Count: visit.Count, Sessions: sessions,
+			VisitID: visit.VisitID, StepID: visit.StepID, StepName: visit.StepName, Count: visit.Count, Ordinal: visit.Ordinal,
+			EnteredAt: visit.EnteredAt, Provenance: visit.Provenance, Eligible: visit.Eligible, Sessions: sessions,
 		})
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.TaskTransitionCountsResponse{Counts: out, Visits: visits})

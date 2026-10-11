@@ -13,7 +13,10 @@ const mocks = vi.hoisted(() => ({
   messagesBySession: {} as Record<string, unknown[]>,
   turnsBySession: {} as Record<string, unknown[]>,
   setActiveSession: vi.fn(),
+  setTaskSession: vi.fn(),
   removeSession: vi.fn(),
+  getTaskTransitionSummary: vi.fn(),
+  reassignTaskSessionStepVisit: vi.fn(),
 }));
 
 vi.mock("@/hooks/use-task-sessions", () => ({
@@ -25,6 +28,7 @@ vi.mock("@/components/state-provider", () => ({
     selector({
       features: { dynamicAgentRouting: false },
       tasks: { activeSessionId: mocks.activeSessionId },
+      taskSessions: { items: Object.fromEntries(mocks.sessions.map((item) => [item.id, item])) },
       agentProfiles: { items: mocks.agentProfiles },
       kanban: { tasks: [{ id: "task-1", primarySessionId: "session-a" }] },
       repositories: { itemsByWorkspaceId: mocks.repositoriesByWorkspaceId },
@@ -32,7 +36,14 @@ vi.mock("@/components/state-provider", () => ({
       turns: { bySession: mocks.turnsBySession },
       executors: { items: [] },
       setActiveSession: mocks.setActiveSession,
+      setTaskSession: mocks.setTaskSession,
     }),
+}));
+
+vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: vi.fn() }) }));
+vi.mock("@/lib/api/domains/task-activity-api", () => ({
+  getTaskTransitionSummary: mocks.getTaskTransitionSummary,
+  reassignTaskSessionStepVisit: mocks.reassignTaskSessionStepVisit,
 }));
 
 vi.mock("@/components/agent-logo", () => ({
@@ -129,7 +140,21 @@ beforeEach(() => {
   mocks.messagesBySession = {};
   mocks.turnsBySession = {};
   mocks.setActiveSession.mockReset();
+  mocks.setTaskSession.mockReset();
   mocks.removeSession.mockReset();
+  mocks.getTaskTransitionSummary.mockReset().mockResolvedValue({
+    visits: [
+      {
+        visit_id: "visit-step-a-1",
+        step_id: "step-a",
+        step_name: "Plan",
+        ordinal: 1,
+        eligible: true,
+        sessions: [],
+      },
+    ],
+  });
+  mocks.reassignTaskSessionStepVisit.mockReset().mockResolvedValue({});
 });
 
 describe("MobileSessionsPicker selection", () => {
@@ -402,6 +427,26 @@ describe("MobileSessionsPicker pending lifecycle", () => {
     expect(perm.textContent).toMatch(/permission/i);
 
     mocks.messagesBySession = {};
+  });
+});
+
+describe("MobileSessionsPicker session step visits", () => {
+  it("opens the visit choices in the touch picker sheet", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    try {
+      render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_A} fullWidth />);
+      fireEvent.click(screen.getByTestId(PILL_TESTID));
+      const row = screen.getByTestId(`mobile-session-row-${SESSION_A}`);
+      fireEvent.pointerDown(within(row).getByRole("button", { name: SESSION_ACTIONS_LABEL }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Associate with workflow step" }));
+
+      const sheet = await screen.findByTestId("mobile-session-step-visits");
+      expect(sheet.closest('[role="dialog"]')).toBeTruthy();
+      expect(within(sheet).getByRole("button", { name: /Plan.*visit 1/i })).toBeTruthy();
+      expect(within(sheet).getByRole("button", { name: /Unassigned/i })).toBeTruthy();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
+    }
   });
 });
 

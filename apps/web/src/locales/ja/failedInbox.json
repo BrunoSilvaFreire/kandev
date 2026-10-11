@@ -14,5 +14,7 @@
   "emptyDescription": "失敗タスクはトリアージ用にここへ出る。サイドバー合計には入らない。",
   "errorTitle": "失敗タスクを読み込めない",
   "errorDescription": "この workspace で失敗したタスクの読み込み中に問題発生。自動で再試行する。",
-  "truncatedNotice": "最初の失敗タスクだけ表示中。続きは待機中。"
+  "truncatedNotice": "最初の失敗タスクだけ表示中。続きは待機中。",
+  "reasonKindQuota": "利用上限に達しました",
+  "reasonKindProviderUnavailable": "プロバイダーを利用できません"
 }

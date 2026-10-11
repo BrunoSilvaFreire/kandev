@@ -489,7 +489,9 @@ const taskSessionSelectCols = `ts.id, ts.task_id, ts.queue_incarnation_id,
 	ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
 	ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
 	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id, ts.name, ts.last_read_message_id,
-	ts.cost_subcents, ts.tokens_in, ts.tokens_cached_in, ts.tokens_out, ts.workflow_step_id_at_creation`
+	ts.cost_subcents, ts.tokens_in, ts.tokens_cached_in, ts.tokens_out, ts.workflow_step_id_at_creation,
+	ts.interruption_episode_id, ts.interruption_reason, ts.interruption_observed_at, ts.interruption_turn_id,
+	(SELECT visit_id FROM task_session_step_visits a WHERE a.session_id = ts.id)`
 
 // taskSessionFromClause is the FROM clause that pairs with taskSessionSelectCols.
 // Always reference task_sessions as `ts` and executors_running as `er` in WHERE/ORDER.
@@ -1116,8 +1118,15 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		session.StartedAt, session.CompletedAt, session.UpdatedAt,
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name, session.WorkflowStepIDAtCreation)
-
-	return err
+	if err != nil {
+		return err
+	}
+	if stepTx, ok := exec.(stepTransitionTx); ok {
+		if err := r.associateSessionWithCurrentVisitTx(ctx, stepTx, session.TaskID, session.ID, session.StartedAt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // verifyTaskRunnerResolutionTx rejects a session built from a task snapshot
@@ -1351,6 +1360,8 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 	var name sql.NullString
 	var lastReadMessageID sql.NullString
 	var workflowStepAtCreation sql.NullString
+	var associatedStepVisitID sql.NullString
+	var interruptionObservedAt sql.NullTime
 
 	err := row.Scan(
 		&session.ID, &session.TaskID, &session.QueueIncarnationID,
@@ -1362,6 +1373,8 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
 		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut, &workflowStepAtCreation,
+		&session.InterruptionEpisodeID, &session.InterruptionReason, &interruptionObservedAt, &session.InterruptionTurnID,
+		&associatedStepVisitID,
 	)
 
 	if err == sql.ErrNoRows {
@@ -1388,6 +1401,12 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 	}
 	if workflowStepAtCreation.Valid {
 		session.WorkflowStepIDAtCreation = workflowStepAtCreation.String
+	}
+	if associatedStepVisitID.Valid {
+		session.AssociatedStepVisitID = associatedStepVisitID.String
+	}
+	if interruptionObservedAt.Valid {
+		session.InterruptionObservedAt = &interruptionObservedAt.Time
 	}
 	if completedAt.Valid {
 		session.CompletedAt = &completedAt.Time
@@ -4170,6 +4189,8 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 	var name sql.NullString
 	var lastReadMessageID sql.NullString
 	var workflowStepAtCreation sql.NullString
+	var associatedStepVisitID sql.NullString
+	var interruptionObservedAt sql.NullTime
 
 	err := rows.Scan(
 		&session.ID, &session.TaskID, &session.QueueIncarnationID,
@@ -4181,6 +4202,8 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
 		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut, &workflowStepAtCreation,
+		&session.InterruptionEpisodeID, &session.InterruptionReason, &interruptionObservedAt, &session.InterruptionTurnID,
+		&associatedStepVisitID,
 	)
 	if err != nil {
 		return nil, err
@@ -4203,6 +4226,12 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 	}
 	if workflowStepAtCreation.Valid {
 		session.WorkflowStepIDAtCreation = workflowStepAtCreation.String
+	}
+	if associatedStepVisitID.Valid {
+		session.AssociatedStepVisitID = associatedStepVisitID.String
+	}
+	if interruptionObservedAt.Valid {
+		session.InterruptionObservedAt = &interruptionObservedAt.Time
 	}
 	if completedAt.Valid {
 		session.CompletedAt = &completedAt.Time

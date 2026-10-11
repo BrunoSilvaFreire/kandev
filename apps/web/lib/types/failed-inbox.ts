@@ -12,6 +12,8 @@ export type FailedInboxRow = {
   // client tells an unresolved failure instant from a real one.
   failure_instant?: string;
   reason: string;
+  // Closed typed classification; absent when the failure is unclassified.
+  reason_kind?: "quota" | "provider_unavailable";
 };
 
 export type FailedInboxPage = {

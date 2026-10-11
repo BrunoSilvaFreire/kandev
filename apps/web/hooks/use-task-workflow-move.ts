@@ -1,5 +1,6 @@
 "use client";
 
+import { useReportTransitionFailure } from "@/hooks/domains/task/use-task-transition-failure";
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { bulkMoveSelectedTasks } from "@/lib/api";
@@ -8,6 +9,7 @@ import { getTaskMoveErrorMessage } from "@/components/task/task-move-error-messa
 
 export function useTaskWorkflowMove() {
   const { toast } = useToast();
+  const reportFailure = useReportTransitionFailure();
   const { t } = useTranslation("task");
 
   return useCallback(
@@ -39,6 +41,7 @@ export function useTaskWorkflowMove() {
         });
       } catch (error) {
         const fallback = t("task:taskMoveErrorGeneric");
+        reportFailure(error);
         toast({
           title: t("task:failedToMoveTask"),
           description: getTaskMoveErrorMessage(error, fallback, t),
@@ -47,6 +50,6 @@ export function useTaskWorkflowMove() {
         throw error;
       }
     },
-    [t, toast],
+    [reportFailure, t, toast],
   );
 }

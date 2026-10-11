@@ -10,6 +10,7 @@ import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import { linkToTask } from "@/lib/links";
 import {
   failedInboxOriginMarkerKey,
+  failedInboxReasonKindKey,
   hasResolvableFailedInboxReason,
 } from "@/lib/failed-inbox/row-presentation";
 import type { FailedInboxRow as FailedInboxRowData } from "@/lib/types/failed-inbox";
@@ -23,6 +24,7 @@ function taskHrefForRow(row: FailedInboxRowData): string {
 export function FailedInboxRow({ row }: { row: FailedInboxRowData }) {
   const { t } = useTranslation();
   const originMarkerKey = failedInboxOriginMarkerKey(row.origin);
+  const reasonKindKey = failedInboxReasonKindKey(row.reason_kind);
   const reasonText = hasResolvableFailedInboxReason(row.reason)
     ? row.reason
     : t("failedInbox:reasonUnknown");
@@ -52,6 +54,14 @@ export function FailedInboxRow({ row }: { row: FailedInboxRowData }) {
       <div className="flex min-w-0 flex-1 flex-col md:contents">
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium">{row.title}</span>
+          {reasonKindKey && (
+            <span
+              className="block truncate text-xs font-medium text-foreground"
+              data-testid="failed-inbox-reason-kind"
+            >
+              {t(reasonKindKey)}
+            </span>
+          )}
           <span className="block truncate text-xs text-muted-foreground">
             {!hasResolvableFailedInboxReason(row.reason) ? (
               <span data-testid="failed-inbox-reason-fallback">{reasonText}</span>

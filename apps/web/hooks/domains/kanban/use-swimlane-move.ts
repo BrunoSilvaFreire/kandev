@@ -1,3 +1,4 @@
+import { getTransitionFailure } from "@/lib/tasks/transition-failure";
 import { useCallback } from "react";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useTaskActions } from "@/hooks/use-task-actions";
@@ -93,6 +94,7 @@ export function useSwimlaneMove(
         const message = getTaskMoveErrorMessage(error, t("task:taskMoveErrorGeneric"), t);
         opts.onMoveError?.({
           message,
+          failure: getTransitionFailure(error),
           taskId: task.id,
           sessionId: task.primarySessionId ?? null,
         });

@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/task/reviewepisode"
 )
 
 // ErrTaskNotFound is returned (wrapped) by repository task lookups when the
@@ -139,9 +140,10 @@ func (r *Repository) GetTaskProjectID(ctx context.Context, taskID string) (strin
 
 // UpdateTaskState updates the state column on a task (e.g. "IN_PROGRESS", "COMPLETED").
 func (r *Repository) UpdateTaskState(ctx context.Context, taskID, state string) error {
+	episode, episodeArgs := reviewepisode.SetClause(state, "", time.Now().UTC())
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
-	`), state, taskID)
+		UPDATE tasks SET `+episode+`, state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+	`), append(episodeArgs, state, taskID)...)
 	if err != nil {
 		return err
 	}
@@ -158,11 +160,12 @@ func (r *Repository) UpdateTaskState(ctx context.Context, taskID, state string) 
 func (r *Repository) UpdateTaskStateIfWorkflowStep(
 	ctx context.Context, taskID, expectedStepID, state string,
 ) (bool, error) {
+	episode, episodeArgs := reviewepisode.SetClause(state, "", time.Now().UTC())
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks
-		SET state = ?, updated_at = CURRENT_TIMESTAMP
+		SET `+episode+`, state = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ? AND COALESCE(workflow_step_id, '') = ?
-	`), state, taskID, expectedStepID)
+	`), append(episodeArgs, state, taskID, expectedStepID)...)
 	if err != nil {
 		return false, err
 	}

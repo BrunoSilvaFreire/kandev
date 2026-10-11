@@ -554,6 +554,9 @@ func (r *Repository) readTaskCompletionGateTx(ctx context.Context, tx *sql.Tx, t
 	if snapshot.PlanRevisionID != "" {
 		var currentHeadWriteVersion string
 		err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT write_version FROM task_plans WHERE task_id = ?`), taskID).Scan(&currentHeadWriteVersion)
+		if err == nil {
+			snapshot.CurrentPlanWriteVersion = currentHeadWriteVersion
+		}
 		if err == nil && snapshot.PlanWriteVersion != "" && currentHeadWriteVersion != snapshot.PlanWriteVersion {
 			snapshot.PlanStale = true
 			snapshot.Blocked = true

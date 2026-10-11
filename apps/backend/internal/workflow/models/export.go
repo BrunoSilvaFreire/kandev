@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	LegacyExportVersion = 1
-	ExportVersion       = 2
-	ExportType          = "kandev_workflow"
+	LegacyExportVersion   = 1
+	PreviousExportVersion = 2
+	ExportVersion         = 3
+	ExportType            = "kandev_workflow"
 )
 
 // WorkflowExport is the portable format for sharing workflows.
@@ -63,6 +64,7 @@ type WorkflowPortable struct {
 
 // StepPortable is a workflow step without instance-specific fields.
 type StepPortable struct {
+	Key                   string                `json:"key" yaml:"key"`
 	Name                  string                `json:"name" yaml:"name"`
 	Position              int                   `json:"position" yaml:"position"`
 	Color                 string                `json:"color" yaml:"color"`
@@ -177,14 +179,9 @@ func BuildWorkflowExport(workflows []*taskmodels.Workflow, stepsByWorkflow map[s
 // step targets before they can produce an import-invalid document.
 func BuildWorkflowExportWithError(workflows []*taskmodels.Workflow, stepsByWorkflow map[string][]*WorkflowStep, resolveProfile AgentProfileResolver) (*WorkflowExport, error) {
 	portable := make([]WorkflowPortable, 0, len(workflows))
-	version := LegacyExportVersion
+	version := ExportVersion
 	for _, wf := range workflows {
 		steps := stepsByWorkflow[wf.ID]
-		for _, step := range steps {
-			if step != nil && (step.SessionTarget != nil || step.CompleteTaskOnEnter) {
-				version = ExportVersion
-			}
-		}
 		workflow, err := buildWorkflowPortable(wf, steps, resolveProfile)
 		if err != nil {
 			return nil, err
@@ -206,11 +203,16 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 		idToPos[s.ID] = s.Position
 	}
 	for _, s := range steps {
+		portableKey := s.PortableKey
+		if portableKey == "" {
+			portableKey = s.ID
+		}
 		sessionTarget, err := buildPortableSessionTarget(s.SessionTarget, idToPos)
 		if err != nil {
 			return WorkflowPortable{}, fmt.Errorf("workflow %q step %q: %w", wf.Name, s.Name, err)
 		}
 		sp := StepPortable{
+			Key:                         portableKey,
 			Name:                        s.Name,
 			Position:                    s.Position,
 			Color:                       s.Color,
@@ -271,8 +273,8 @@ func buildPortableSessionTarget(target *WorkflowSessionTarget, idToPos map[strin
 
 // Validate checks that the export data is well-formed.
 func (e *WorkflowExport) Validate() error {
-	if e.Version != LegacyExportVersion && e.Version != ExportVersion {
-		return fmt.Errorf("unsupported export version: %d (expected %d or %d)", e.Version, LegacyExportVersion, ExportVersion)
+	if e.Version < LegacyExportVersion || e.Version > ExportVersion {
+		return fmt.Errorf("unsupported export version: %d (expected %d through %d)", e.Version, LegacyExportVersion, ExportVersion)
 	}
 	if e.Type != ExportType {
 		return fmt.Errorf("unsupported export type: %q (expected %q)", e.Type, ExportType)
@@ -288,6 +290,7 @@ func (e *WorkflowExport) Validate() error {
 			return fmt.Errorf("workflow %d: name is required", i)
 		}
 		positions := make(map[int]bool, len(wf.Steps))
+		keys := make(map[string]bool, len(wf.Steps))
 		for j, step := range wf.Steps {
 			if step.Name == "" {
 				return fmt.Errorf("workflow %d step %d: name is required", i, j)
@@ -296,7 +299,13 @@ func (e *WorkflowExport) Validate() error {
 				return fmt.Errorf("workflow %d: duplicate step position %d", i, step.Position)
 			}
 			positions[step.Position] = true
-			if e.Version == ExportVersion && !step.completionTaskOnEnterIsExplicit() {
+			if step.Key != "" && keys[step.Key] {
+				return fmt.Errorf("workflow %d: duplicate step key %q", i, step.Key)
+			}
+			if step.Key != "" {
+				keys[step.Key] = true
+			}
+			if e.Version >= PreviousExportVersion && !step.completionTaskOnEnterIsExplicit() {
 				return fmt.Errorf("workflow %d step %d: complete_task_on_enter must be explicitly set", i, j)
 			}
 			if err := validateOnEnterActions(step); err != nil {

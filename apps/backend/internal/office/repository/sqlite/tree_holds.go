@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/office/models"
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
+	"github.com/kandev/kandev/internal/task/reviewepisode"
 )
 
 func (r *Repository) createTreeHoldTables() error {
@@ -231,8 +232,11 @@ func (r *Repository) BulkUpdateTaskState(ctx context.Context, taskIDs []string, 
 	if len(taskIDs) == 0 {
 		return nil
 	}
-	query, args := taskIDInQuery(`UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN (%s)`, taskIDs)
-	args = append([]interface{}{state}, args...)
+	// One generated episode ID per statement is safe here: the clause only
+	// allocates on entering Review, and bulk callers write terminal states.
+	episode, episodeArgs := reviewepisode.SetClause(state, "", time.Now().UTC())
+	query, args := taskIDInQuery(`UPDATE tasks SET `+episode+`, state = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN (%s)`, taskIDs)
+	args = append(append(episodeArgs, state), args...)
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
 	return err
 }

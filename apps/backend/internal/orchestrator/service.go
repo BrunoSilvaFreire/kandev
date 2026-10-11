@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"hash/fnv"
 	"io"
 	"strings"
@@ -272,6 +273,30 @@ type BackgroundWorkObserver interface {
 // selection and promotion rules.
 type FeederPullReconciler interface {
 	ReconcileFeederPulls(ctx context.Context, workflowID, feederStepID string) error
+}
+
+// transitionFailureSink is the task service's durable record of a transition
+// that failed after its move or signal was accepted.
+type transitionFailureSink interface {
+	RecordAsyncTransitionFailure(ctx context.Context, taskID, attemptID, source, sessionID string, cause error)
+	ResolveTransitionFailure(ctx context.Context, taskID string)
+}
+
+// recordAsyncTransitionFailure reports a failed deferred move or automatic
+// advancement to the task UI and later agent turns.
+func (s *Service) recordAsyncTransitionFailure(ctx context.Context, taskID, attemptID, source, sessionID string, cause error) {
+	if sink, ok := s.taskEvents.(transitionFailureSink); ok {
+		if attemptID == "" {
+			attemptID = uuid.NewString()
+		}
+		sink.RecordAsyncTransitionFailure(context.WithoutCancel(ctx), taskID, attemptID, source, sessionID, cause)
+	}
+}
+
+func (s *Service) resolveTransitionFailure(ctx context.Context, taskID string) {
+	if sink, ok := s.taskEvents.(transitionFailureSink); ok {
+		sink.ResolveTransitionFailure(context.WithoutCancel(ctx), taskID)
+	}
 }
 
 type taskQueuePromotionPublisher interface {
@@ -536,6 +561,10 @@ type sessionExecutorStore interface {
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	ListNonTerminalSessionsByAgentInstance(ctx context.Context, agentInstanceID string) ([]*models.TaskSession, error)
 	DeleteTaskSession(ctx context.Context, session *models.TaskSession) error
+	// MarkSessionInterrupted records one typed interruption episode for a
+	// session whose active execution was lost with the backend, idempotently.
+	// See REQ-TASKS-RECOVERY-REVIEW-001.
+	MarkSessionInterrupted(ctx context.Context, sessionID, reason, turnID string, observedAt time.Time) error
 	// Messages — used by resume to backfill the initial user prompt when a
 	// prior launch failed before recordInitialMessage ran.
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
@@ -3709,6 +3738,18 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 	s.reconcileActiveSessionOnStartup(ctx, running, sessionID, previousState, session, scope)
 }
 
+// markSessionInterruptedOnStartup records one typed interruption episode for a
+// session whose active execution was lost with the backend. It is idempotent:
+// repeated sweeps preserve the first episode identity and observed time.
+func (s *Service) markSessionInterruptedOnStartup(ctx context.Context, sessionID, taskID string) {
+	if err := s.repo.MarkSessionInterrupted(ctx, sessionID, models.InterruptionReasonBackendRestart, "", time.Now().UTC()); err != nil {
+		s.logger.Warn("failed to record session interruption episode",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
+}
+
 func (s *Service) reconcileActiveSessionOnStartup(
 	ctx context.Context,
 	running *models.ExecutorRunning,
@@ -3760,24 +3801,9 @@ func (s *Service) reconcileActiveSessionOnStartup(
 	// in-memory Add on the next launch, closing the divergence window we set out
 	// to fix in this refactor.
 
-	// Ensure task is in REVIEW state (not stuck IN_PROGRESS) -- skipped for a
-	// re-tracked session's task, per AC-EXECUTORS-SURVIVAL-003.5.
-	if !retracked && running.TaskID != "" {
-		task, taskErr := s.repo.GetTask(ctx, running.TaskID)
-		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress && !taskArchived(task) {
-			// UpdateTaskStateIfCurrentIn (not the unconditional UpdateTaskState)
-			// so the write is atomic against archived_at: the taskArchived guard
-			// above reads the row before this call, and ArchiveTask can commit in
-			// that window without changing task.State, so only an archive-aware
-			// conditional write closes the race.
-			if _, updateErr := s.taskRepo.UpdateTaskStateIfCurrentIn(ctx, running.TaskID, v1.TaskStateReview, []v1.TaskState{v1.TaskStateInProgress}); updateErr != nil {
-				s.logger.Warn("failed to update task to REVIEW on startup",
-					zap.String("task_id", running.TaskID),
-					zap.Error(updateErr))
-			}
-		}
-	}
-
+	// A lost active execution is recoverable work, not a review request: the
+	// task stays where it was and the session records a typed interruption
+	// episode so the inbox can explain the resumable action.
 	// Mark the task interrupted when its session was mid-turn when the backend
 	// died (STARTING/RUNNING) so task-list surfaces can show the warning
 	// indicator. WAITING_FOR_INPUT sessions were idle, not interrupted.
@@ -3789,6 +3815,7 @@ func (s *Service) reconcileActiveSessionOnStartup(
 	// archived task. The marker is cleared after the provider confirms recovery
 	// (see markRecoveryResolved).
 	if !retracked && running.TaskID != "" && (previousState == models.TaskSessionStateStarting || previousState == models.TaskSessionStateRunning) {
+		s.markSessionInterruptedOnStartup(ctx, sessionID, running.TaskID)
 		changed, setErr := s.repo.SetTaskMetadataKeyIfNotArchived(ctx, running.TaskID, models.MetaKeyInterruptedAt, time.Now().UTC().Format(time.RFC3339))
 		if setErr != nil {
 			s.logger.Warn("failed to mark task interrupted on startup",
@@ -3925,23 +3952,8 @@ func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *m
 func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, report *startupCleanupReport, scope interface{}) {
 	sessionID := session.ID
 	s.abandonOpenTurnsOnStartup(ctx, sessionID, "failed session cleanup")
-	// If session failed, ensure task is in REVIEW state (not stuck IN_PROGRESS)
-	if session.TaskID != "" {
-		task, taskErr := s.repo.GetTask(ctx, session.TaskID)
-		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress && !taskArchived(task) {
-			s.logger.Info("fixing task state: session failed but task still IN_PROGRESS",
-				zap.String("task_id", session.TaskID),
-				zap.String("session_id", sessionID))
-			// UpdateTaskStateIfCurrentIn (not the unconditional UpdateTaskState)
-			// so the write is atomic against archived_at — see the matching
-			// comment in reconcileOneSessionOnStartup above.
-			if _, updateErr := s.taskRepo.UpdateTaskStateIfCurrentIn(ctx, session.TaskID, v1.TaskStateReview, []v1.TaskState{v1.TaskStateInProgress}); updateErr != nil {
-				s.logger.Warn("failed to update task state to REVIEW",
-					zap.String("task_id", session.TaskID),
-					zap.Error(updateErr))
-			}
-		}
-	}
+	// A FAILED session keeps its typed failure and the task keeps its state:
+	// startup cleanup never enters Review and never records an interruption.
 	if canResumeRunning(running) {
 		s.logger.Info("preserving executor record for resumable failed session",
 			zap.String("session_id", sessionID),

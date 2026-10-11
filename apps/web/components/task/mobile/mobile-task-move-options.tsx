@@ -1,5 +1,6 @@
 "use client";
 
+import { useReportTransitionFailure } from "@/hooks/domains/task/use-task-transition-failure";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconArrowLeft } from "@tabler/icons-react";
@@ -132,6 +133,7 @@ function useMobileDirectTaskMove({
 }) {
   const { move, isMoving } = useWorkflowMove();
   const { toast } = useToast();
+  const reportFailure = useReportTransitionFailure();
   const { t } = useTranslation("task");
   const handleMove = useCallback(
     (taskId: string, workflowId: string, targetStepId: string) => {
@@ -146,6 +148,7 @@ function useMobileDirectTaskMove({
         if (result.disposition === "failed") {
           if (focusRequestId !== null) focus.cancelFocus(focusRequestId);
           const fallback = t("taskMoveErrorGeneric");
+          reportFailure(result.error);
           toast({
             title: t("failedToMoveTask"),
             description: getTaskMoveErrorMessage(result.error, fallback, t),
@@ -164,7 +167,7 @@ function useMobileDirectTaskMove({
         });
       });
     },
-    [focus, move, stepsByWorkflowId, t, toast],
+    [focus, move, reportFailure, stepsByWorkflowId, t, toast],
   );
 
   return { handleMove, isMoving };

@@ -361,6 +361,35 @@ pnpm e2e:docker                                # force the docker CI image (full
 pnpm e2e:clean                                 # remove build/test artifacts, incl. root-owned ones from prior docker runs
 ```
 
+#### Iteration cost and when to skip the rebuild
+
+The managed runner rebuilds the backend, the Vite bundle, and the fixture plugin on
+every run. For a spec that takes about 6 s, that fixed cost dominates. Measured on
+2026-10-11 (Ryzen 9 5900X, 24 threads, 31 GiB, Linux, Go 1.26.0, Node 24.17, one
+spec: `tests/kanban/kanban-grouping-presets.spec.ts`, `--host --shards 1`, three
+runs each, wall time for the whole command):
+
+| Case                                              | Wall time             | Of which Playwright |
+| ------------------------------------------------- | --------------------- | ------------------- |
+| Managed build, Go build cache emptied             | 106.0 s               | 5.8 s               |
+| Managed build, backend sources changed since last | 40.4 s to 55.3 s      | 7.3 s to 7.7 s      |
+| Managed build, nothing changed                    | 24.1 s to 24.2 s      | 5.9 s to 6.1 s      |
+| `--no-build`, nothing changed                     | 6.7 s to 6.8 s        | 5.8 s to 5.9 s      |
+| `--no-build`, backend sources newer than binaries | 1.0 s to 1.3 s, fails | not started         |
+
+`--no-build` saves 17.4 s (72 percent) per run when nothing outside `e2e/` changed.
+Use it while iterating on spec files, page objects, and helpers. It is not safe after a
+web source change: global setup refuses backend binaries older than backend sources
+(the last row), but nothing compares `dist/` with web sources, so a stale bundle can
+pass. Coverage is unchanged because the flag only skips build steps; CI always builds.
+
+For comparison on the same machine: a focused Go package
+(`go test -trimpath -tags fts5 -count=1 ./internal/workflow/models/`) takes 6.4 s with
+an empty build cache and 0.2 s to 0.3 s warm; `./internal/task/service/` takes 119 s
+cold and 60 s warm, almost all of it test execution, so name a `-run` pattern while
+iterating there. One Vitest file takes 5.1 s to 5.4 s and `pnpm run typecheck` 7.4 s
+to 9.2 s.
+
 Why a script instead of raw `docker run`: in docker mode it builds the CGO/`fts5` backend on the **host** and runs it in the runtime image — a host glibc that's the same or older than the image's (the usual case; the image tracks recent Ubuntu) is forward-compatible, so no build image is needed. The runner smoke-tests the binary in the image first and only falls back to the build image (`KANDEV_CI_BUILD_IMAGE`, default `…/kandev-ci:build-latest`) if your host glibc is _newer_. It also builds the Vite web assets on the host, points Playwright output at a container-local dir, and cleans up. Run `clean` if a previous bare `docker run` left root-owned files you can't delete.
 
 > **Apple Silicon:** the docker path runs the amd64 CI image. Under Docker Desktop's default QEMU emulation the amd64 Go toolchain segfaults (`SIGSEGV` in `modindex.dirHash`) during backend build. Use Colima with Rosetta instead: `colima start --vm-type=vz --vz-rosetta`. QEMU is not viable for the Go build; Rosetta is required for local amd64 E2E repro on arm64.

@@ -92,6 +92,9 @@ type UserSettingsDTO struct {
 	HomeQuickFilters                  map[string][]string                     `json:"home_quick_filters"`
 	TaskViewFilters                   map[string][]models.ViewFilterClause    `json:"task_view_filters"`
 	TaskViewGroups                    map[string]string                       `json:"task_view_groups"`
+	TaskViewGroupOrder                map[string][]string                     `json:"task_view_group_order"`
+	TaskViewPresets                   map[string][]models.TaskViewPreset      `json:"task_view_presets"`
+	TaskViewActivePreset              map[string]string                       `json:"task_view_active_preset"`
 	Revision                          int64                                   `json:"revision"`
 	UpdatedAt                         string                                  `json:"updated_at"`
 }
@@ -213,6 +216,9 @@ type UpdateUserSettingsRequest struct {
 	HomeQuickFilters                  *map[string][]string                  `json:"home_quick_filters,omitempty"`
 	TaskViewFilters                   *map[string][]models.ViewFilterClause `json:"task_view_filters,omitempty"`
 	TaskViewGroups                    *map[string]string                    `json:"task_view_groups,omitempty"`
+	TaskViewGroupOrder                *map[string][]string                  `json:"task_view_group_order,omitempty"`
+	TaskViewPresets                   *map[string][]models.TaskViewPreset   `json:"task_view_presets,omitempty"`
+	TaskViewActivePreset              *map[string]string                    `json:"task_view_active_preset,omitempty"`
 }
 
 type SystemMetricsDisplaySettingsPatch struct {
@@ -418,6 +424,9 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		HomeQuickFilters:                  models.NormalizeHomeQuickFilters(settings.HomeQuickFilters),
 		TaskViewFilters:                   models.NormalizeTaskViewFilters(settings.TaskViewFilters),
 		TaskViewGroups:                    models.NormalizeTaskViewGroups(settings.TaskViewGroups),
+		TaskViewGroupOrder:                models.NormalizeTaskViewGroupOrder(settings.TaskViewGroupOrder, settings.TaskViewGroups),
+		TaskViewPresets:                   models.NormalizeTaskViewPresets(settings.TaskViewPresets),
+		TaskViewActivePreset:              models.NormalizeTaskViewActivePreset(settings.TaskViewActivePreset, models.NormalizeTaskViewPresets(settings.TaskViewPresets)),
 		Revision:                          settings.Revision,
 		UpdatedAt:                         settings.UpdatedAt.Format(time.RFC3339),
 	}

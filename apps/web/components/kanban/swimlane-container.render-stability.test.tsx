@@ -21,14 +21,19 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => responsive,
 }));
 
-vi.mock("@/hooks/use-kanban-display-settings", () => ({
-  useKanbanDisplaySettings: () => ({
-    onToggleStepVisibility: stableCallbacks.onToggleStepVisibility,
-    onToggleAutoHideEmpty: stableCallbacks.onToggleAutoHideEmpty,
-    repositories: [],
-    group: "none",
-  }),
-}));
+vi.mock("@/hooks/use-kanban-display-settings", () => {
+  // One stable list, as the real hook memoizes it.
+  const groups = ["none"];
+  return {
+    useKanbanDisplaySettings: () => ({
+      onToggleStepVisibility: stableCallbacks.onToggleStepVisibility,
+      onToggleAutoHideEmpty: stableCallbacks.onToggleAutoHideEmpty,
+      repositories: [],
+      group: "none",
+      groups,
+    }),
+  };
+});
 
 vi.mock("@/hooks/domains/kanban/use-swimlane-collapse", () => ({
   useSwimlaneCollapse: () => ({
@@ -38,6 +43,10 @@ vi.mock("@/hooks/domains/kanban/use-swimlane-collapse", () => ({
 }));
 
 vi.mock("@/lib/api", () => ({ reorderWorkflows: vi.fn() }));
+
+vi.mock("@/hooks/domains/workspace/use-repository-sets", () => ({
+  useRepositorySets: () => ({ sets: [], isLoading: false, refresh: vi.fn() }),
+}));
 
 vi.mock("@/lib/kanban/view-registry", () => {
   const CountedView = ({

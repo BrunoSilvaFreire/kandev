@@ -7227,7 +7227,7 @@ func TestReconcileSessionsOnStartup(t *testing.T) {
 		}
 	})
 
-	t.Run("task_in_progress_moved_to_review", func(t *testing.T) {
+	t.Run("task_in_progress_stays_on_restart_and_session_episode_recorded", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		ctx := context.Background()
 		now := time.Now().UTC()
@@ -7254,20 +7254,19 @@ func TestReconcileSessionsOnStartup(t *testing.T) {
 		svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
 		svc.reconcileSessionsOnStartup(ctx)
 
-		state, ok := taskRepo.updatedStates["task1"]
-		if !ok {
-			t.Fatal("expected task state to be updated")
+		// REQ-TASKS-RECOVERY-REVIEW-001: restart recovery settles the session to
+		// recoverable waiting and records a typed interruption episode, but never
+		// manufactures a Review entry.
+		if state, ok := taskRepo.updatedStates["task1"]; ok {
+			t.Fatalf("task state must not change on restart recovery, got %q", state)
 		}
-		if state != v1.TaskStateReview {
-			t.Fatalf("expected task state %q, got %q", v1.TaskStateReview, state)
+		session, err := repo.GetTaskSession(ctx, "session1")
+		if err != nil {
+			t.Fatalf("failed to load session: %v", err)
 		}
-		// The write must go through the archive-aware UpdateTaskStateIfCurrentIn
-		// CAS, not the unconditional UpdateTaskState — see the comment on this
-		// call site in reconcileOneSessionOnStartup. Otherwise an archive that
-		// commits between the taskArchived guard read and this write could
-		// still resurrect the task to REVIEW (PR #1706 review finding).
-		if n := taskRepo.unconditionalWrites["task1"]; n != 0 {
-			t.Fatalf("expected REVIEW write to use UpdateTaskStateIfCurrentIn, got %d unconditional UpdateTaskState call(s)", n)
+		if session.InterruptionEpisodeID == "" || session.InterruptionReason != models.InterruptionReasonBackendRestart {
+			t.Fatalf("expected backend_restart interruption episode, got id=%q reason=%q",
+				session.InterruptionEpisodeID, session.InterruptionReason)
 		}
 	})
 
@@ -7343,13 +7342,9 @@ func TestReconcileSessionsOnStartup(t *testing.T) {
 		}
 	})
 
-	// TestReconcileSessionsOnStartup/failed_session_moved_to_review covers the
-	// non-archived REVIEW write in handleFailedSessionOnStartup — previously
-	// untested (only the archived-guard branch above had coverage). Confirms
-	// both the resulting state and that the write goes through the
-	// archive-aware UpdateTaskStateIfCurrentIn CAS, not the unconditional
-	// UpdateTaskState (PR #1706 review finding).
-	t.Run("failed_session_moved_to_review", func(t *testing.T) {
+	// Startup cleanup of an already FAILED session preserves the task state
+	// and the failure, including across a second startup pass.
+	t.Run("failed_session_preserves_task_state", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		ctx := context.Background()
 		now := time.Now().UTC()
@@ -7376,15 +7371,20 @@ func TestReconcileSessionsOnStartup(t *testing.T) {
 		svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
 		svc.reconcileSessionsOnStartup(ctx)
 
-		state, ok := taskRepo.updatedStates["task1"]
-		if !ok {
-			t.Fatal("expected task state to be updated")
+		svc.reconcileSessionsOnStartup(ctx)
+
+		if state, ok := taskRepo.updatedStates["task1"]; ok {
+			t.Fatalf("expected task state to be preserved, got write to %q", state)
 		}
-		if state != v1.TaskStateReview {
-			t.Fatalf("expected task state %q, got %q", v1.TaskStateReview, state)
+		session, err := repo.GetTaskSession(ctx, "session1")
+		if err != nil {
+			t.Fatalf("failed to load session: %v", err)
 		}
-		if n := taskRepo.unconditionalWrites["task1"]; n != 0 {
-			t.Fatalf("expected REVIEW write to use UpdateTaskStateIfCurrentIn, got %d unconditional UpdateTaskState call(s)", n)
+		if session.State != models.TaskSessionStateFailed {
+			t.Fatalf("expected session to stay FAILED, got %q", session.State)
+		}
+		if session.InterruptionEpisodeID != "" {
+			t.Fatalf("expected no interruption episode, got %q", session.InterruptionEpisodeID)
 		}
 	})
 
@@ -7429,6 +7429,16 @@ func TestReconcileSessionsOnStartup(t *testing.T) {
 			_, marked := task.Metadata[models.MetaKeyInterruptedAt]
 			if marked != tc.wantInterrupt {
 				t.Fatalf("interrupted_at marker present=%v, want %v", marked, tc.wantInterrupt)
+			}
+			session, err := repo.GetTaskSession(ctx, "session1")
+			if err != nil {
+				t.Fatalf("failed to load session: %v", err)
+			}
+			if got := session.InterruptionEpisodeID != ""; got != tc.wantInterrupt {
+				t.Fatalf("interruption episode present=%v, want %v", got, tc.wantInterrupt)
+			}
+			if tc.wantInterrupt && (task.Interruption == nil || task.Interruption.EpisodeID != session.InterruptionEpisodeID) {
+				t.Fatalf("task projection %+v does not carry the session episode", task.Interruption)
 			}
 		})
 	}

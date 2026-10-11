@@ -1,4 +1,9 @@
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { fetchJson } from "@/lib/api/client";
+import {
+  parseTransitionFailureRecord,
+  type TransitionFailureRecord,
+} from "@/lib/tasks/transition-failure";
 
 // i18n-exempt: diagnostic thrown to the caller, never rendered.
 const WS_CLIENT_UNAVAILABLE = "WebSocket client not available";
@@ -94,8 +99,14 @@ export type StepVisitSession = {
 };
 
 export type StepVisit = {
+  visit_id?: string;
   step_id: string;
+  step_name?: string;
   count: number;
+  ordinal?: number;
+  entered_at?: string;
+  provenance?: "transition" | "activation_baseline";
+  eligible?: boolean;
   sessions: StepVisitSession[];
 };
 
@@ -135,4 +146,32 @@ export async function getTaskTransitionSummary(taskId: string): Promise<TaskTran
   const response = await client.request("task.transition.counts", { task_id: taskId });
   const summary = response as TaskTransitionSummary;
   return { counts: summary?.counts ?? [], visits: summary?.visits ?? [] };
+}
+
+export async function reassignTaskSessionStepVisit(
+  taskId: string,
+  sessionId: string,
+  visitId: string,
+  expectedVisitId: string,
+): Promise<void> {
+  await fetchJson(
+    `/api/v1/tasks/${encodeURIComponent(taskId)}/sessions/${encodeURIComponent(sessionId)}/step-visit`,
+    {
+      init: {
+        method: "PUT",
+        body: JSON.stringify({ visit_id: visitId, expected_visit_id: expectedVisitId }),
+      },
+    },
+  );
+}
+
+/** The task's current unresolved asynchronous transition failure, or null. */
+export async function getTaskTransitionFailure(
+  taskId: string,
+): Promise<TransitionFailureRecord | null> {
+  const response = await fetchJson<{ record?: unknown }>(
+    `/api/v1/tasks/${encodeURIComponent(taskId)}/transition-failure`,
+    { cache: "no-store" },
+  );
+  return parseTransitionFailureRecord(response?.record);
 }

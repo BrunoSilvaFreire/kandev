@@ -36,6 +36,18 @@ describe("getTaskMoveErrorMessage", () => {
     );
   });
 
+  it("prefers the shared failure envelope's code over the bare body", () => {
+    const translate = (key: string) => `translated:${key}`;
+    const error = new ApiError("conflict", 409, {
+      code: "task_completion_gate_blocked",
+      failure: { code: "task_completion_gate_blocked", reasons: [] },
+    });
+
+    expect(getTaskMoveErrorMessage(error, fallback, translate)).toBe(
+      "translated:task:taskMoveErrorGateBlocked",
+    );
+  });
+
   it("uses a translated generic message for an unknown API error", () => {
     const translate = (key: string) => `translated:${key}`;
     const error = new ApiError("internal details", 500, {

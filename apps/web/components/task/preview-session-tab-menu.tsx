@@ -46,6 +46,7 @@ export function PreviewSessionTabMenu({
       canShare={shareableSessionStateClient(session.state)}
       taskId={taskId}
       sessionId={session.id}
+      associatedStepVisitID={session.associated_step_visit_id}
       actions={{ handleSetPrimary: setPrimary, handleStop: stop, handleResume: resume }}
       onDelete={(event) => onRequestDelete(session.id, event, () => remove({ feedback: "toast" }))}
       onShare={() => onShareRequested(session.id)}

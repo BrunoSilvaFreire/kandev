@@ -1,3 +1,4 @@
+import { useReportTransitionFailure } from "@/hooks/domains/task/use-task-transition-failure";
 import React, { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
@@ -27,6 +28,7 @@ const AUTO_TRANSITION_ACTIONS = ["move_to_next", "move_to_previous", "move_to_st
 
 export function useNextWorkflowStep(taskId: string | null) {
   const { toast } = useToast();
+  const reportFailure = useReportTransitionFailure();
   const { t } = useTranslation("task");
   const taskProjection = useAppStore((s) =>
     resolveLatestTaskProjection(taskId, s.kanban.tasks, s.kanbanMulti.snapshots),
@@ -107,6 +109,7 @@ export function useNextWorkflowStep(taskId: string | null) {
         // on a phone with no way to see the reason short of devtools.
         const title = t("task:failedToProceedToNextStep");
         const detail = getTaskMoveErrorDetail(err, title, t);
+        reportFailure(err);
         toast({
           title,
           ...(detail !== null && { description: detail }),
@@ -116,7 +119,7 @@ export function useNextWorkflowStep(taskId: string | null) {
         return false;
       }
     },
-    [taskId, workflowId, nextStep, activeSessionId, t, toast],
+    [taskId, workflowId, nextStep, activeSessionId, reportFailure, t, toast],
   );
 
   const proceedStepName = nextStep && !currentStepAutoTransitions ? nextStep.title : null;

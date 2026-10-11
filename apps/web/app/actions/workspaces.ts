@@ -32,6 +32,7 @@ import type {
   StepDefinition,
   WorkflowImportPreview,
   WorkflowImportProfileBinding,
+  WorkflowUpdatePreview,
 } from "@/lib/types/http";
 
 const { apiBaseUrl } = getBackendConfig();
@@ -731,6 +732,43 @@ export async function previewWorkflowImportAction(
       method: "POST",
       headers: { "Content-Type": "application/x-yaml" },
       body: yamlContent,
+    },
+  );
+}
+
+export async function previewWorkflowUpdateAction(
+  workspaceId: string,
+  workflowId: string,
+  yamlContent: string,
+  workflowIndex = 0,
+): Promise<WorkflowUpdatePreview> {
+  return fetchJson<WorkflowUpdatePreview>(
+    `${apiBaseUrl}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/workflows/${encodeURIComponent(workflowId)}/update/preview`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ yaml: yamlContent, update: { workflow_index: workflowIndex } }),
+    },
+  );
+}
+
+export async function applyWorkflowUpdateAction(
+  workspaceId: string,
+  workflowId: string,
+  yamlContent: string,
+  version: string,
+  workflowIndex = 0,
+): Promise<void> {
+  await fetchJson<{ updated: boolean }>(
+    `${apiBaseUrl}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/workflows/${encodeURIComponent(workflowId)}/update`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        yaml: yamlContent,
+        update: { workflow_index: workflowIndex },
+        version,
+      }),
     },
   );
 }

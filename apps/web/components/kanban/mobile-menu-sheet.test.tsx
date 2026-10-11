@@ -59,6 +59,12 @@ vi.mock("@/components/navigation/app-nav-sections", () => ({
     dialogs: null,
   }),
 }));
+vi.mock("./mobile-grouping-section", () => ({
+  MobileGroupingSection: ({ view }: { view: string }) => (
+    <div data-testid="mobile-grouping-section" data-view={view} />
+  ),
+}));
+
 vi.mock("./task-search-input", () => ({
   TaskSearchInput: () => null,
 }));

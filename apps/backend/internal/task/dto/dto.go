@@ -240,6 +240,16 @@ type TaskDTO struct {
 	// died and has not been resumed since. Derived from the interrupted_at
 	// metadata key at DTO conversion time (see FromTaskWithSessionInfo).
 	Interrupted bool `json:"interrupted,omitempty"`
+	// Interruption is the oldest unresolved session interruption episode: its
+	// stable identity, closed reason, and owning session. Absent when the
+	// warning is an unattributed legacy marker or there is no interruption.
+	Interruption *models.TaskInterruption `json:"interruption,omitempty"`
+	// ReviewEpisodeID/ReviewEnteredAt/ReviewEntryOrigin expose the task's active
+	// Review episode so inbox age is measured from authoritative entry time,
+	// never updated_at. Empty/absent outside Review.
+	ReviewEpisodeID   string     `json:"review_episode_id,omitempty"`
+	ReviewEnteredAt   *time.Time `json:"review_entered_at,omitempty"`
+	ReviewEntryOrigin string     `json:"review_entry_origin,omitempty"`
 	// AutoStartFailed reports that a workflow step's auto_start_agent on_enter
 	// action failed to launch a run for this task. Derived from the
 	// auto_start_failed metadata key at DTO conversion time (see
@@ -407,10 +417,11 @@ type TaskSessionDTO struct {
 	CompletedAt          *time.Time               `json:"completed_at,omitempty"`
 	UpdatedAt            time.Time                `json:"updated_at"`
 	// Workflow fields
-	IsPrimary         bool                `json:"is_primary"`
-	IsPassthrough     bool                `json:"is_passthrough"`
-	ReviewStatus      models.ReviewStatus `json:"review_status,omitempty"`
-	TaskEnvironmentID string              `json:"task_environment_id,omitempty"`
+	IsPrimary             bool                `json:"is_primary"`
+	IsPassthrough         bool                `json:"is_passthrough"`
+	ReviewStatus          models.ReviewStatus `json:"review_status,omitempty"`
+	TaskEnvironmentID     string              `json:"task_environment_id,omitempty"`
+	AssociatedStepVisitID string              `json:"associated_step_visit_id,omitempty"`
 	// ForegroundActivity mirrors the in-memory fine-grained busy substate so a
 	// fresh page-load / second tab sees live background work without waiting for
 	// a WS flip (ADR-0049). Generating is emitted only for RUNNING sessions;
@@ -496,17 +507,18 @@ type TaskSessionSummaryDTO struct {
 	// Worktrees lists all session worktrees (one per repo on multi-repo tasks);
 	// the flattened Worktree* fields above carry only the first for backward
 	// compatibility. Entries use the stable session-worktree wire shape.
-	Worktrees         []map[string]interface{} `json:"worktrees,omitempty"`
-	State             models.TaskSessionState  `json:"state"`
-	ErrorMessage      string                   `json:"error_message,omitempty"`
-	Metadata          map[string]interface{}   `json:"metadata,omitempty"`
-	StartedAt         time.Time                `json:"started_at"`
-	CompletedAt       *time.Time               `json:"completed_at,omitempty"`
-	UpdatedAt         time.Time                `json:"updated_at"`
-	IsPrimary         bool                     `json:"is_primary"`
-	IsPassthrough     bool                     `json:"is_passthrough"`
-	ReviewStatus      models.ReviewStatus      `json:"review_status,omitempty"`
-	TaskEnvironmentID string                   `json:"task_environment_id,omitempty"`
+	Worktrees             []map[string]interface{} `json:"worktrees,omitempty"`
+	State                 models.TaskSessionState  `json:"state"`
+	ErrorMessage          string                   `json:"error_message,omitempty"`
+	Metadata              map[string]interface{}   `json:"metadata,omitempty"`
+	StartedAt             time.Time                `json:"started_at"`
+	CompletedAt           *time.Time               `json:"completed_at,omitempty"`
+	UpdatedAt             time.Time                `json:"updated_at"`
+	IsPrimary             bool                     `json:"is_primary"`
+	IsPassthrough         bool                     `json:"is_passthrough"`
+	ReviewStatus          models.ReviewStatus      `json:"review_status,omitempty"`
+	TaskEnvironmentID     string                   `json:"task_environment_id,omitempty"`
+	AssociatedStepVisitID string                   `json:"associated_step_visit_id,omitempty"`
 	// ForegroundActivity mirrors the in-memory fine-grained busy substate
 	// (ADR-0049); see TaskSessionDTO.
 	ForegroundActivity v1.ForegroundActivity `json:"foreground_activity,omitempty"`
@@ -1055,6 +1067,10 @@ func FromTaskWithSessionInfo(
 		UpdatedAt:                   task.UpdatedAt,
 		Metadata:                    models.PublicTaskMetadata(task.Metadata),
 		Interrupted:                 task.Metadata[models.MetaKeyInterruptedAt] != nil,
+		Interruption:                task.Interruption,
+		ReviewEpisodeID:             task.ReviewEpisodeID,
+		ReviewEnteredAt:             task.ReviewEnteredAt,
+		ReviewEntryOrigin:           task.ReviewEntryOrigin,
 		AutoStartFailed:             task.Metadata[models.MetaKeyAutoStartFailed] != nil,
 		WorkspaceOrphaned:           models.WorkspaceOrphaned(task.Metadata),
 		// RunnerEditable/RunnerIneligibleReason default fail-closed: a caller
@@ -1108,6 +1124,7 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 		IsPassthrough:          session.IsPassthrough,
 		ReviewStatus:           session.ReviewStatus,
 		TaskEnvironmentID:      session.TaskEnvironmentID,
+		AssociatedStepVisitID:  session.AssociatedStepVisitID,
 		LastReadMessageID:      session.LastReadMessageID,
 		PossibleQuestion:       models.SessionPossibleQuestion(session.Metadata),
 		PossibleQuestionTurnID: models.SessionPossibleQuestionTurnID(session.Metadata),
@@ -1156,6 +1173,7 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		IsPassthrough:          session.IsPassthrough,
 		ReviewStatus:           session.ReviewStatus,
 		TaskEnvironmentID:      session.TaskEnvironmentID,
+		AssociatedStepVisitID:  session.AssociatedStepVisitID,
 		LastReadMessageID:      session.LastReadMessageID,
 		CostSubcents:           session.CostSubcents,
 		TokensIn:               session.TokensIn,

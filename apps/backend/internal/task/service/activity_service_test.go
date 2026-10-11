@@ -143,13 +143,26 @@ func TestTaskTransitionCounts(t *testing.T) {
 	seedActivityTask(t, repo)
 	ctx := context.Background()
 	for i, pair := range [][2]string{{"step-a", "step-b"}, {"step-a", "step-b"}, {"step-b", "step-a"}} {
-		if _, err := repo.DB().ExecContext(ctx, `
+		result, err := repo.DB().ExecContext(ctx, `
 			INSERT INTO task_step_transitions
 				(task_id, session_id, from_workflow_id, from_workflow_step_id, to_workflow_id, to_workflow_step_id,
 				 trigger, actor_kind, actor_id, trigger_detail, contract_version, occurred_at)
 			VALUES ('task-a', NULL, 'wf-a', ?, 'wf-a', ?, 'turn_complete', 'system', '', NULL, 1, ?)`,
-			pair[0], pair[1], activityBase.Add(time.Duration(i)*time.Second)); err != nil {
+			pair[0], pair[1], activityBase.Add(time.Duration(i)*time.Second))
+		if err != nil {
 			t.Fatalf("insert: %v", err)
+		}
+		transitionID, err := result.LastInsertId()
+		if err != nil {
+			t.Fatalf("read transition ID: %v", err)
+		}
+		if _, err := repo.DB().ExecContext(ctx, `
+			INSERT INTO task_step_visits
+				(visit_id, task_id, workflow_id, step_id, entry_ordinal, entered_at, source_transition_id, provenance)
+			VALUES (?, 'task-a', 'wf-a', ?, ?, ?, ?, 'transition')`,
+			fmt.Sprintf("transition:%d", transitionID), pair[1], i+1,
+			activityBase.Add(time.Duration(i)*time.Second), transitionID); err != nil {
+			t.Fatalf("insert projected visit: %v", err)
 		}
 	}
 	counts, err := svc.TaskTransitionSummary(ctx, "task-a")
@@ -165,7 +178,7 @@ func TestTaskTransitionCounts(t *testing.T) {
 	}
 	visits := map[string]int{}
 	for _, visit := range counts.Visits {
-		visits[visit.StepID] = visit.Count
+		visits[visit.StepID] += visit.Count
 	}
 	if visits["step-b"] != 2 || visits["step-a"] != 1 {
 		t.Fatalf("visits = %#v, want step-b 2, step-a 1", visits)

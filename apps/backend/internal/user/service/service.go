@@ -121,6 +121,9 @@ type UpdateUserSettingsRequest struct {
 	HomeQuickFilters                  *map[string][]string
 	TaskViewFilters                   *map[string][]models.ViewFilterClause
 	TaskViewGroups                    *map[string]string
+	TaskViewGroupOrder                *map[string][]string
+	TaskViewPresets                   *map[string][]models.TaskViewPreset
+	TaskViewActivePreset              *map[string]string
 }
 
 type SystemMetricsDisplaySettingsPatch struct {
@@ -537,7 +540,7 @@ func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *Up
 			return err
 		}
 	}
-	return nil
+	return applyTaskViewPresetSettings(settings, req)
 }
 
 const (
@@ -588,9 +591,43 @@ func applyTaskViewFilters(
 	return nil
 }
 
-// applyTaskViewGroups keeps only known task views and known group keys.
+// applyTaskViewGroups keeps only known task views and known group keys. A
+// client that only writes the single key replaces that view's ordered list
+// with the one key, so the two fields never disagree on the outermost level.
 func applyTaskViewGroups(settings *models.UserSettings, value map[string]string) error {
 	settings.TaskViewGroups = models.NormalizeTaskViewGroups(value)
+	settings.TaskViewGroupOrder = models.NormalizeTaskViewGroupOrder(nil, settings.TaskViewGroups)
+	return nil
+}
+
+// applyTaskViewPresetSettings applies the ordered group keys, named presets,
+// and active preset. Ordered keys are authoritative when sent and are
+// projected onto the single-key compatibility field.
+func applyTaskViewPresetSettings(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.TaskViewGroupOrder != nil {
+		if len(*req.TaskViewGroupOrder) > maxTaskViewFilterViews {
+			return fmt.Errorf("task_view_group_order: max %d views allowed", maxTaskViewFilterViews)
+		}
+		settings.TaskViewGroupOrder = models.NormalizeTaskViewGroupOrder(*req.TaskViewGroupOrder, nil)
+		settings.TaskViewGroups = models.LegacyTaskViewGroups(settings.TaskViewGroupOrder)
+	}
+	if req.TaskViewPresets != nil {
+		if len(*req.TaskViewPresets) > maxTaskViewFilterViews {
+			return fmt.Errorf("task_view_presets: max %d views allowed", maxTaskViewFilterViews)
+		}
+		for _, presets := range *req.TaskViewPresets {
+			if len(presets) > models.MaxTaskViewPresets {
+				return fmt.Errorf("task_view_presets: max %d presets per view allowed", models.MaxTaskViewPresets)
+			}
+		}
+		settings.TaskViewPresets = models.NormalizeTaskViewPresets(*req.TaskViewPresets)
+	}
+	if req.TaskViewActivePreset != nil {
+		settings.TaskViewActivePreset = *req.TaskViewActivePreset
+	}
+	if req.TaskViewPresets != nil || req.TaskViewActivePreset != nil {
+		settings.TaskViewActivePreset = models.NormalizeTaskViewActivePreset(settings.TaskViewActivePreset, settings.TaskViewPresets)
+	}
 	return nil
 }
 
@@ -1307,6 +1344,11 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"kanban_sort":                              settings.KanbanSort,
 		"kanban_priority_filter_tokens":            settings.KanbanPriorityFilterTokens,
 		"home_quick_filters":                       models.NormalizeHomeQuickFilters(settings.HomeQuickFilters),
+		"task_view_filters":                        models.NormalizeTaskViewFilters(settings.TaskViewFilters),
+		"task_view_groups":                         models.NormalizeTaskViewGroups(settings.TaskViewGroups),
+		"task_view_group_order":                    models.NormalizeTaskViewGroupOrder(settings.TaskViewGroupOrder, settings.TaskViewGroups),
+		"task_view_presets":                        models.NormalizeTaskViewPresets(settings.TaskViewPresets),
+		"task_view_active_preset":                  settings.TaskViewActivePreset,
 		"revision":                                 settings.Revision,
 		"updated_at":                               settings.UpdatedAt.Format(time.RFC3339),
 	}

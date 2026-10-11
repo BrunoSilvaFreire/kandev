@@ -165,6 +165,18 @@ export function mergeTaskUpdate(
     taskField: "interrupted",
   });
   preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "interruption",
+    taskField: "interruption",
+  });
+  preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "review_episode_id",
+    taskField: "reviewEpisodeId",
+  });
+  preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "review_entered_at",
+    taskField: "reviewEnteredAt",
+  });
+  preserveOmittedField(existing, merged, payload, nextTask, {
     payloadKey: "auto_start_failed",
     taskField: "autoStartFailed",
   });

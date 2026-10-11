@@ -1,3 +1,4 @@
+import { parseTransitionFailureRecord } from "@/lib/tasks/transition-failure";
 import { sidebarTaskPageCache } from "@/lib/sidebar/sidebar-task-page-cache";
 import type { StoreApi } from "zustand";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
@@ -417,6 +418,15 @@ function handleTaskUpsert(
   logTaskMerge(action, beforeState, store.getState(), message.payload);
 }
 
+function applyTransitionFailure(
+  store: StoreApi<AppState>,
+  payload: { task_id: string; record: unknown },
+) {
+  store
+    .getState()
+    .setTaskTransitionFailure(payload.task_id, parseTransitionFailureRecord(payload.record));
+}
+
 export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "task.created": (message) => {
@@ -513,6 +523,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
     "task.state_changed": (message) => {
       handleTaskUpsert("task.state_changed", store, message);
     },
+    "task.transition_failure.updated": (message) => applyTransitionFailure(store, message.payload),
     "task.status_summary.updated": (message) => {
       store.setState((state) =>
         updateTaskStatusSummaryInBothKanbans(

@@ -75,6 +75,9 @@ type failedInboxRow struct {
 	Origin         string  `json:"origin"`
 	FailureInstant *string `json:"failure_instant,omitempty"`
 	Reason         string  `json:"reason"`
+	// ReasonKind is the closed typed classification of the failure: "quota",
+	// "provider_unavailable", or omitted when the failure is unclassified.
+	ReasonKind string `json:"reason_kind,omitempty"`
 }
 
 // failedInboxListResponse is GET /api/v1/failed-inbox's response envelope.
@@ -129,6 +132,7 @@ func toFailedInboxRow(row taskmodels.FailedInboxTaskRow) failedInboxRow {
 		WorkspaceID: row.WorkspaceID,
 		Origin:      row.Origin,
 		Reason:      SanitizeAndTruncateReason(row.Reason),
+		ReasonKind:  reasonKind(row.ReasonCode),
 	}
 	if row.FailureInstant != nil {
 		instant := row.FailureInstant.UTC().Format(time.RFC3339)

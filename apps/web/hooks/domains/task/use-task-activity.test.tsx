@@ -41,6 +41,13 @@ describe("useTaskTransitionSummary", () => {
     expect(result.current.visits.b).toEqual({
       count: 2,
       sessions: [{ session_id: "sess-1", occurred_at: "2026-09-25T10:00:00Z" }],
+      visits: [
+        {
+          step_id: "b",
+          count: 2,
+          sessions: [{ session_id: "sess-1", occurred_at: "2026-09-25T10:00:00Z" }],
+        },
+      ],
     });
   });
 

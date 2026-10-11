@@ -198,5 +198,16 @@
   "unpinQueuedMessages": "Unpin message queue",
   "untitledQuickChat": "Untitled Quick Chat",
   "useWorkspaceDefault": "Use workspace default...",
-  "useWorkspaceDefaultOption": "Use workspace default"
+  "useWorkspaceDefaultOption": "Use workspace default",
+  "quickChatsOrderLabel": "Order",
+  "quickChatsOrderRecent": "Recent activity first",
+  "quickChatsOrderOldest": "Oldest activity first",
+  "quickChatLastActivity": "{{relative}} ({{date}})",
+  "quickChatNoMessagesYet": "No messages yet. Created {{date}}",
+  "quickChatLinkedRepository": "Linked repository: {{name}}",
+  "quickChatLinkedRepositoryPrefix": "Linked repository:",
+  "quickChatCreatedTask": "Task created from this chat: {{title}}",
+  "quickChatCreatedTaskPrefix": "Task created from this chat:",
+  "quickChatMoreTasks_one": "and {{count}} more task",
+  "quickChatMoreTasks_other": "and {{count}} more tasks"
 }

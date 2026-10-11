@@ -15,6 +15,9 @@ type FailedInboxTaskRow struct {
 	Origin         string
 	FailureInstant *time.Time
 	Reason         string
+	// ReasonCode is the session's typed agent-error code when one was
+	// recorded; empty for an unclassified failure.
+	ReasonCode string
 }
 
 // ListFailedInboxOptions bounds a single failed-inbox read

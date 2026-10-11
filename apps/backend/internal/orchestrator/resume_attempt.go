@@ -42,6 +42,9 @@ type resumeAttempt struct {
 	interruptedMarkerMu       sync.RWMutex
 	interruptedMarker         string
 	interruptedMarkerCaptured bool
+	// interruptionEpisodeID is the session episode observed with the marker;
+	// the callback resolves only this episode.
+	interruptionEpisodeID string
 	// recoveryErrorStamp identifies the active session failure this resume was
 	// admitted to recover. A later boot callback cannot retire a newer failure.
 	recoveryErrorStamp string
@@ -88,11 +91,13 @@ type resumeAttemptTombstone struct {
 	accepted                  bool
 	interruptedMarker         string
 	interruptedMarkerCaptured bool
+	interruptionEpisodeID     string
 }
 
 type interruptedMarkerSnapshot struct {
-	value    string
-	captured bool
+	value     string
+	captured  bool
+	episodeID string
 }
 
 func newResumeAttemptRegistry() *resumeAttemptRegistry {
@@ -284,6 +289,7 @@ func (r *resumeAttemptRegistry) retainLocked(attempt *resumeAttempt) {
 				entries[index].recoveryErrorStamp = attempt.recoveryErrorStamp
 				entries[index].interruptedMarker = attempt.interruptedMarkerValue()
 				entries[index].interruptedMarkerCaptured = attempt.interruptedMarkerSnapshotCaptured()
+				entries[index].interruptionEpisodeID = attempt.interruptionEpisode()
 				break
 			}
 		}
@@ -300,6 +306,7 @@ func (r *resumeAttemptRegistry) retainLocked(attempt *resumeAttempt) {
 		accepted:                  attempt.accepted,
 		interruptedMarker:         attempt.interruptedMarkerValue(),
 		interruptedMarkerCaptured: attempt.interruptedMarkerSnapshotCaptured(),
+		interruptionEpisodeID:     attempt.interruptionEpisode(),
 	})
 	if len(entries) > maxResumeAttemptTombstones {
 		entries = entries[len(entries)-maxResumeAttemptTombstones:]
@@ -516,6 +523,21 @@ func (attempt *resumeAttempt) setInterruptedMarkerSnapshot(marker string, captur
 	attempt.interruptedMarkerMu.Unlock()
 }
 
+func (attempt *resumeAttempt) setInterruptionEpisode(episodeID string) {
+	attempt.interruptedMarkerMu.Lock()
+	attempt.interruptionEpisodeID = episodeID
+	attempt.interruptedMarkerMu.Unlock()
+}
+
+func (attempt *resumeAttempt) interruptionEpisode() string {
+	if attempt == nil {
+		return ""
+	}
+	attempt.interruptedMarkerMu.RLock()
+	defer attempt.interruptedMarkerMu.RUnlock()
+	return attempt.interruptionEpisodeID
+}
+
 func (attempt *resumeAttempt) interruptedMarkerValue() string {
 	if attempt == nil {
 		return ""
@@ -664,6 +686,11 @@ func (s *Service) captureInterruptedMarkerForResumeAttempt(ctx context.Context, 
 	if err != nil || task == nil {
 		return
 	}
+	if store, ok := s.repo.(interruptionEpisodeStore); ok {
+		if episodeID, episodeErr := store.GetSessionInterruptionEpisode(ctx, attempt.sessionID); episodeErr == nil {
+			attempt.setInterruptionEpisode(episodeID)
+		}
+	}
 	if task.Metadata == nil {
 		attempt.setInterruptedMarkerSnapshot("", true)
 		return
@@ -690,14 +717,16 @@ func (s *Service) interruptedMarkerSnapshotForResumeAttempt(
 	defer registry.mu.Unlock()
 	if attempt := registry.attempts[sessionID]; attempt != nil && attempt.id == id {
 		return interruptedMarkerSnapshot{
-			value:    attempt.interruptedMarkerValue(),
-			captured: attempt.interruptedMarkerSnapshotCaptured(),
+			value:     attempt.interruptedMarkerValue(),
+			captured:  attempt.interruptedMarkerSnapshotCaptured(),
+			episodeID: attempt.interruptionEpisode(),
 		}, true
 	}
 	if tombstone, ok := registry.tombstoneLocked(sessionID, id); ok {
 		return interruptedMarkerSnapshot{
-			value:    tombstone.interruptedMarker,
-			captured: tombstone.interruptedMarkerCaptured,
+			value:     tombstone.interruptedMarker,
+			captured:  tombstone.interruptedMarkerCaptured,
+			episodeID: tombstone.interruptionEpisodeID,
 		}, true
 	}
 	return interruptedMarkerSnapshot{}, false

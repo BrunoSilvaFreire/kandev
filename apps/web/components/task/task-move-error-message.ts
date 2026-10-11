@@ -6,16 +6,9 @@
  * helper keeps that from dragging component modules into unrelated bundles.
  */
 import { ApiError } from "@/lib/api/client";
+import { getTransitionFailure, transitionFailureHeadlineKey } from "@/lib/tasks/transition-failure";
 
 type Translate = (key: string) => string;
-
-const MOVE_ERROR_TRANSLATIONS: Record<string, string> = {
-  task_move_active_session: "task:taskMoveErrorActiveSession",
-  task_move_archived: "task:taskMoveErrorArchived",
-  task_move_different_workspace: "task:taskMoveErrorDifferentWorkspace",
-  task_move_workflow_step: "task:taskMoveErrorWorkflowStep",
-  task_move_wip_limit: "task:taskMoveErrorWipLimit",
-};
 
 const GENERIC_MOVE_ERROR_TRANSLATION = "task:taskMoveErrorGeneric";
 const GENERIC_REORDER_ERROR_TRANSLATION = "task:taskReorderErrorGeneric";
@@ -32,8 +25,11 @@ export function getTaskMoveErrorMessage(
   translate?: Translate,
 ): string {
   if (translate && error instanceof ApiError) {
-    const code = getTaskMoveErrorCode(error);
-    return translate((code && MOVE_ERROR_TRANSLATIONS[code]) || GENERIC_MOVE_ERROR_TRANSLATION);
+    // The shared envelope's code wins; the bare body code covers older servers.
+    const code = getTransitionFailure(error)?.code ?? getTaskMoveErrorCode(error);
+    return translate(
+      (code && transitionFailureHeadlineKey(code)) || GENERIC_MOVE_ERROR_TRANSLATION,
+    );
   }
   if (error instanceof Error && error.message.trim()) return error.message;
   if (typeof error === "string" && error.trim()) return error;

@@ -63,6 +63,7 @@ type WorkflowCardProps = {
     finalizeIdentity: boolean;
   }) => void;
   onDiscardWorkflow: () => void;
+  onUpdateFromFile: () => void;
 };
 
 function useWorkflowSteps(
@@ -488,6 +489,7 @@ export function WorkflowCard(props: WorkflowCardProps) {
               s.readOnly
             }
             readOnly={s.readOnly}
+            onUpdateFromFile={props.onUpdateFromFile}
             exportDisabled={workflow.id.startsWith(TEMP_WORKFLOW_PREFIX)}
             duplicateDisabled={duplicate.duplicateDisabled}
             duplicateDisabledReason={duplicate.duplicateDisabledReason}

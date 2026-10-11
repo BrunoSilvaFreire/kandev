@@ -37,7 +37,8 @@ func setupTestService(t *testing.T, logOverride ...*logger.Logger) (*Service, *s
 	_, err = sqlxDB.Exec(`CREATE TABLE IF NOT EXISTS workflows (
 		id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT '',
 		workflow_template_id TEXT DEFAULT '', name TEXT NOT NULL,
-		description TEXT DEFAULT '', created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
+		description TEXT DEFAULT '', prompt TEXT DEFAULT '', agent_profile_id TEXT,
+		source TEXT DEFAULT '', source_path TEXT DEFAULT '', created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
 	)`)
 	require.NoError(t, err)
 
@@ -67,6 +68,7 @@ type mockWorkflowProvider struct {
 	workflows        []*taskmodels.Workflow
 	getWorkflowCalls int
 	deleted          []string
+	db               *sqlx.DB
 	// forceUpdateWorkflowErr, when set, makes UpdateWorkflow fail without
 	// mutating state - used to test that a rebind Warn never fires for a
 	// change that was not actually persisted.
@@ -107,6 +109,11 @@ func (m *mockWorkflowProvider) CreateWorkflow(_ context.Context, workspaceID, na
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
+	if m.db != nil {
+		if _, err := m.db.Exec(`INSERT INTO workflows (id, workspace_id, name, description, source, source_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, wf.ID, wf.WorkspaceID, wf.Name, wf.Description, wf.Source, wf.SourcePath, wf.CreatedAt, wf.UpdatedAt); err != nil {
+			return nil, err
+		}
+	}
 	m.workflows = append(m.workflows, wf)
 	return wf, nil
 }
@@ -117,6 +124,11 @@ func (m *mockWorkflowProvider) UpdateWorkflow(_ context.Context, workflow *taskm
 	}
 	for i, wf := range m.workflows {
 		if wf.ID == workflow.ID {
+			if m.db != nil {
+				if _, err := m.db.Exec(`UPDATE workflows SET name = ?, description = ?, prompt = ?, agent_profile_id = ?, source = ?, source_path = ?, updated_at = ? WHERE id = ?`, workflow.Name, workflow.Description, workflow.Prompt, workflow.AgentProfileID, workflow.Source, workflow.SourcePath, workflow.UpdatedAt, workflow.ID); err != nil {
+					return err
+				}
+			}
 			m.workflows[i] = workflow
 			return nil
 		}
@@ -609,7 +621,7 @@ func TestExportWorkflow(t *testing.T) {
 
 		export, err := svc.ExportWorkflow(ctx, "wf-1")
 		require.NoError(t, err)
-		assert.Equal(t, models.LegacyExportVersion, export.Version)
+		assert.Equal(t, models.ExportVersion, export.Version)
 		assert.Equal(t, models.ExportType, export.Type)
 		require.Len(t, export.Workflows, 1)
 		assert.Equal(t, "My Pipeline", export.Workflows[0].Name)
@@ -1106,18 +1118,21 @@ func TestDeleteStep_WIPLimitedAutoStartTargetIsUnaffected(t *testing.T) {
 	}
 }
 
-func TestDeleteStep_ClearsStepReferences(t *testing.T) {
+func TestDeleteStep_RejectsExecutableStepReferences(t *testing.T) {
 	svc, db := setupTestService(t)
 	ctx := context.Background()
 	insertWorkflow(t, db, "wf-4", "Test")
 
 	createStep(t, svc, &models.WorkflowStep{ID: "s1", WorkflowID: "wf-4", Name: "S1", Position: 0})
-	createStep(t, svc, &models.WorkflowStep{ID: "s2", WorkflowID: "wf-4", Name: "S2", Position: 1})
+	createStep(t, svc, &models.WorkflowStep{ID: "s2", WorkflowID: "wf-4", Name: "S2", Position: 1, Events: models.StepEvents{
+		OnTurnComplete: []models.OnTurnCompleteAction{{Type: models.OnTurnCompleteMoveToStep, Config: map[string]interface{}{"step_id": "s1"}}},
+	}})
 
-	require.NoError(t, svc.DeleteStep(ctx, "s1"))
+	require.ErrorIs(t, svc.DeleteStep(ctx, "s1"), models.ErrWorkflowStepReferenced)
 
 	steps, err := svc.repo.ListStepsByWorkflow(ctx, "wf-4")
 	require.NoError(t, err)
-	require.Len(t, steps, 1)
-	assert.Equal(t, "s2", steps[0].ID)
+	require.Len(t, steps, 2)
+	assert.Equal(t, "s1", steps[0].ID)
+	assert.Equal(t, "s2", steps[1].ID)
 }

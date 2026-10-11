@@ -1,5 +1,6 @@
 "use client";
 
+import { getTransitionFailure } from "@/lib/tasks/transition-failure";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DragStartEvent, DragEndEvent } from "@dnd-kit/core";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -11,6 +12,8 @@ import { getTaskMoveErrorMessage } from "@/components/task/task-move-error-messa
 
 export type MoveTaskError = {
   message: string;
+  /** The shared failure envelope, when the server explained the refusal. */
+  failure?: import("@/lib/tasks/transition-failure").TransitionFailure | null;
   taskId: string;
   sessionId: string | null;
 };
@@ -88,6 +91,7 @@ export function useDragAndDrop({ visibleTasks, onMoveError }: DragAndDropOptions
         const message = getTaskMoveErrorMessage(error, t("task:taskMoveErrorGeneric"), t);
         onMoveErrorRef.current?.({
           message,
+          failure: getTransitionFailure(error),
           taskId: task.id,
           sessionId: task.primarySessionId ?? null,
         });

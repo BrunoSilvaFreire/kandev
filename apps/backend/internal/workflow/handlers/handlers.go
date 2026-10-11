@@ -77,6 +77,8 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.GET("/workspaces/:id/workflows/export", h.httpExportWorkflows)
 	api.POST("/workspaces/:id/workflows/import/preview", h.httpPreviewImportWorkflows)
 	api.POST("/workspaces/:id/workflows/import", h.httpImportWorkflows)
+	api.POST("/workspaces/:id/workflows/:workflow_id/update/preview", h.httpPreviewWorkflowUpdate)
+	api.POST("/workspaces/:id/workflows/:workflow_id/update", h.httpApplyWorkflowUpdate)
 
 	// History routes
 	api.GET("/sessions/:id/workflow/history", h.httpListHistoryBySession)
@@ -460,6 +462,78 @@ func (h *Handlers) httpPreviewImportWorkflows(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+type workflowUpdateEnvelope struct {
+	YAML    string                        `json:"yaml"`
+	Request service.WorkflowUpdateRequest `json:"update"`
+	Version string                        `json:"version,omitempty"`
+}
+
+func readWorkflowUpdateEnvelope(c *gin.Context) (workflowUpdateEnvelope, error) {
+	body, tooLarge, err := readImportBody(c)
+	if err != nil {
+		return workflowUpdateEnvelope{}, err
+	}
+	if tooLarge {
+		return workflowUpdateEnvelope{}, fmt.Errorf("workflow update request exceeds the 1 MiB limit")
+	}
+	var envelope workflowUpdateEnvelope
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return workflowUpdateEnvelope{}, fmt.Errorf("invalid update request: %w", err)
+	}
+	if strings.TrimSpace(envelope.YAML) == "" {
+		return workflowUpdateEnvelope{}, fmt.Errorf("the workflow YAML is required")
+	}
+	return envelope, nil
+}
+
+func (h *Handlers) httpPreviewWorkflowUpdate(c *gin.Context) {
+	envelope, err := readWorkflowUpdateEnvelope(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	var data models.WorkflowExport
+	if err := yaml.Unmarshal([]byte(envelope.YAML), &data); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid YAML: " + err.Error()})
+		return
+	}
+	preview, err := h.controller.PreviewWorkflowUpdate(c.Request.Context(), c.Param("id"), c.Param("workflow_id"), &data, envelope.Request)
+	if err != nil {
+		h.writeImportError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, preview)
+}
+
+func (h *Handlers) httpApplyWorkflowUpdate(c *gin.Context) {
+	envelope, err := readWorkflowUpdateEnvelope(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	var data models.WorkflowExport
+	if err := yaml.Unmarshal([]byte(envelope.YAML), &data); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid YAML: " + err.Error()})
+		return
+	}
+	if envelope.Version == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "the preview version is required"})
+		return
+	}
+	if err := h.controller.ApplyWorkflowUpdate(c.Request.Context(), c.Param("id"), c.Param("workflow_id"), envelope.Version, &data, envelope.Request); err != nil {
+		if writeNotVisible(c, err, "Workflow not found") {
+			return
+		}
+		if errors.Is(err, repoerrors.ErrTaskVersionConflict) {
+			c.JSON(http.StatusConflict, gin.H{"code": "workflow_update_stale_preview", "error": "The workflow changed after preview. Preview the file again before applying it."})
+			return
+		}
+		h.writeImportError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"updated": true})
+}
+
 const maxImportSize = 1 << 20
 
 func readImportBody(c *gin.Context) ([]byte, bool, error) {
@@ -480,6 +554,10 @@ func importMediaType(c *gin.Context) string {
 
 func (h *Handlers) writeImportError(c *gin.Context, err error) {
 	if writeNotVisible(c, err, "Workspace not found") {
+		return
+	}
+	if errors.Is(err, repoerrors.ErrTaskVersionConflict) {
+		c.JSON(http.StatusConflict, gin.H{"code": "workflow_update_stale_preview", "error": "The workflow changed after preview. Preview the file again before applying it."})
 		return
 	}
 	var resolutionErr *service.ImportProfileResolutionError

@@ -83,14 +83,30 @@ type StepVisitSession struct {
 	OccurredAt     time.Time `json:"occurred_at"`
 }
 
+type TaskStepVisit struct {
+	ID         string     `json:"id"`
+	TaskID     string     `json:"task_id"`
+	WorkflowID string     `json:"workflow_id"`
+	StepID     string     `json:"step_id"`
+	Ordinal    int64      `json:"ordinal"`
+	EnteredAt  *time.Time `json:"entered_at,omitempty"`
+	Provenance string     `json:"provenance"`
+}
+
 // StepVisitSummary is the task-local visit (entry) count for one destination
 // step plus its ordered, session-deduplicated destination sessions. Sessions
 // come only from the route ledger; the transition's initiating session is
 // never a destination.
 type StepVisitSummary struct {
-	StepID   string             `json:"step_id"`
-	Count    int                `json:"count"`
-	Sessions []StepVisitSession `json:"sessions"`
+	VisitID    string             `json:"visit_id,omitempty"`
+	StepID     string             `json:"step_id"`
+	StepName   string             `json:"step_name,omitempty"`
+	Count      int                `json:"count"`
+	Ordinal    int64              `json:"ordinal,omitempty"`
+	EnteredAt  *time.Time         `json:"entered_at,omitempty"`
+	Provenance string             `json:"provenance,omitempty"`
+	Eligible   bool               `json:"eligible"`
+	Sessions   []StepVisitSession `json:"sessions"`
 }
 
 // TaskTransitionSummary is the bounded header payload: committed directed-pair

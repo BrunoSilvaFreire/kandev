@@ -11,11 +11,11 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
 import {
-  EnsureSessionErrorBanner,
   getSessionRecoveryRetry,
   SessionRecoveryFeedback,
 } from "@/components/task/ensure-session-error";
-import { TaskMoveErrorBanner } from "@/components/task/task-move-error-banner";
+import { TaskPageEntryFeedback } from "@/components/task/task-page-entry-feedback";
+import { useTaskTransitionFailure } from "@/hooks/domains/task/use-task-transition-failure";
 import type { Layout } from "react-resizable-panels";
 import { TaskArchivedProvider } from "./task-archived-context";
 import { TaskCommands } from "@/components/task-commands";
@@ -289,29 +289,6 @@ function TaskPageRecoveryFeedback({
   );
 }
 
-function TaskPageEntryFeedback({
-  taskMoveError,
-  ensureSession,
-  workspaceId,
-}: {
-  taskMoveError: unknown;
-  ensureSession: UseEnsureTaskSessionResult;
-  workspaceId: string | null;
-}) {
-  return (
-    <>
-      {taskMoveError !== null && <TaskMoveErrorBanner error={taskMoveError} />}
-      {ensureSession.status === "error" && (
-        <EnsureSessionErrorBanner
-          error={ensureSession.error}
-          onRetry={ensureSession.retry}
-          workspaceId={workspaceId}
-        />
-      )}
-    </>
-  );
-}
-
 function TaskPageLayoutFeedback({
   layoutProps,
   isMobile,
@@ -542,6 +519,7 @@ export function TaskPageInner(props: TaskPageInnerProps) {
   useEffect(() => {
     setTaskMoveError(null);
   }, [task?.id]);
+  const transitionFailure = useTaskTransitionFailure(task?.id ?? null);
   const {
     taskProps,
     debugEntries,
@@ -550,7 +528,7 @@ export function TaskPageInner(props: TaskPageInnerProps) {
     bootstrapRecoveryError,
     automaticRecoveryOwnedByChat,
     hasPageLevelMobileFeedback,
-  } = useTaskPageDerivedProps(props, taskMoveError);
+  } = useTaskPageDerivedProps(props, taskMoveError ?? transitionFailure);
   if (!task) return null;
 
   return (
@@ -591,6 +569,7 @@ export function TaskPageInner(props: TaskPageInnerProps) {
             />
             <TaskPageEntryFeedback
               taskMoveError={taskMoveError}
+              transitionFailure={transitionFailure}
               ensureSession={ensureSession}
               workspaceId={task.workspace_id ?? null}
             />

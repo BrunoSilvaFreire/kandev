@@ -22,7 +22,7 @@ func TestManagedNPMRuntimeContracts(t *testing.T) {
 	}{
 		{"claude", NewClaudeACP(), "@agentclientprotocol/claude-agent-acp", nil},
 		{"codex", NewCodexACP(), "@agentclientprotocol/codex-acp", nil},
-		{"opencode", NewOpenCodeACP(), "opencode-ai", []string{"acp", "--print-logs", "--log-level", "ERROR"}},
+		{"opencode", NewOpenCodeACP(), "opencode-ai", []string{"acp", "--print-logs"}},
 		{"copilot", NewCopilotACP(), "@github/copilot", []string{"--acp"}},
 		{"gemini", NewGemini(), "@google/gemini-cli", []string{"--acp"}},
 		{"pi", NewPiACP(), "pi-acp", nil},
@@ -180,14 +180,14 @@ func TestManagedNPMRuntimeNativeBinaryPreference(t *testing.T) {
 	ab := ManagedNPMRuntimeSpec{
 		Package:        "opencode-ai",
 		DefaultVersion: "1.2.3",
-		ACPArgs:        []string{"acp", "--print-logs", "--log-level", "ERROR"},
+		ACPArgs:        []string{"acp", "--print-logs"},
 		NativeBinary:   nativeBin,
 	}
 	t.Setenv("PATH", t.TempDir())
 	if ab.NativeBinaryOnPath() {
 		t.Fatal("NativeBinaryOnPath() = true with empty PATH dir, want false")
 	}
-	wantNpx := []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "opencode-ai@1.2.3", "acp", "--print-logs", "--log-level", "ERROR"}
+	wantNpx := []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "opencode-ai@1.2.3", "acp", "--print-logs"}
 	if got := ab.RefreshCommand().Args(); !slices.Equal(got, wantNpx) {
 		t.Fatalf("RefreshCommand (absent binary) = %#v, want %#v", got, wantNpx)
 	}
@@ -204,7 +204,7 @@ func TestManagedNPMRuntimeNativeBinaryPreference(t *testing.T) {
 	if !ab.NativeBinaryOnPath() {
 		t.Fatal("NativeBinaryOnPath() = false with binary on PATH, want true")
 	}
-	wantNative := []string{"opencode", "acp", "--print-logs", "--log-level", "ERROR"}
+	wantNative := []string{"opencode", "acp", "--print-logs"}
 	if got := ab.NativeCommand().Args(); !slices.Equal(got, wantNative) {
 		t.Fatalf("NativeCommand() = %#v, want %#v", got, wantNative)
 	}

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -36,10 +37,18 @@ func seedTransitionSteps(t *testing.T, wfRepo interface {
 }
 
 func TestHandleMoveTask_TransitionDefersToResolvedTarget(t *testing.T) {
-	svc, repo, wfCtrl, wfRepo := newTestTaskServiceWithWorkflow(t)
+	svc, repo, wfCtrl, wfRepo, db := newTestTaskServiceWithWorkflowDB(t)
 	ctx := context.Background()
 	seedRunningTask(t, repo, "ws-tr1", "wf-tr1", "task-tr1", "sess-tr1", "arch")
 	seedTransitionSteps(t, wfRepo, "wf-tr1")
+	seedApprovedPlanRevisionForTask(t, ctx, db, "task-tr1", "rev-tr1")
+	setMsg := makeWSMessage(t, ws.ActionMCPSetTaskCompletionCriteria, map[string]interface{}{
+		"task_id": "task-tr1", "expected_revision": 0, "plan_revision_id": "rev-tr1",
+		"criteria": []taskmodels.TaskCompletionCriterion{{ID: "inc-1", Description: "Complete increment 1"}},
+	})
+	setResp, err := (&Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}).handleSetTaskCompletionCriteria(ctx, setMsg)
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeResponse, setResp.Type)
 
 	queue := &pendingMoveRecordingQueuer{}
 	h := &Handlers{taskSvc: svc, workflowCtrl: wfCtrl, messageQueue: queue, logger: testLogger(t).WithFields()}

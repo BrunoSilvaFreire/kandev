@@ -37,6 +37,9 @@ func newIntegrationService(t *testing.T) *pause.Service {
 	// ListLiveRoutineTaskIDsForWorkspace's join resolve cleanly instead of
 	// failing the sweep on a table that simply isn't part of this fixture.
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS tasks (
+		review_episode_id TEXT NOT NULL DEFAULT '',
+		review_entered_at TIMESTAMP,
+		review_entry_origin TEXT NOT NULL DEFAULT '',
 		id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT 'TODO'
 	)`); err != nil {
 		t.Fatalf("create tasks table: %v", err)

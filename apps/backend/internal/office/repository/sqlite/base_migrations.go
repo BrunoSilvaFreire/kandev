@@ -879,6 +879,9 @@ func (r *Repository) runTaskPriorityRecreate() error {
 		{"assignee_user_id", `ALTER TABLE tasks ADD COLUMN assignee_user_id TEXT NOT NULL DEFAULT ''`},
 		{"assignment_generation", `ALTER TABLE tasks ADD COLUMN assignment_generation INTEGER NOT NULL DEFAULT 0`},
 		{"workflow_agent_overrides", `ALTER TABLE tasks ADD COLUMN workflow_agent_overrides TEXT`},
+		{"review_episode_id", `ALTER TABLE tasks ADD COLUMN review_episode_id TEXT NOT NULL DEFAULT ''`},
+		{"review_entered_at", `ALTER TABLE tasks ADD COLUMN review_entered_at TIMESTAMP`},
+		{"review_entry_origin", `ALTER TABLE tasks ADD COLUMN review_entry_origin TEXT NOT NULL DEFAULT ''`},
 	}
 	for _, column := range legacyColumns {
 		if _, err := conn.ExecContext(ctx, column.stmt); err != nil && !db.IsDuplicateColumnError(err) {
@@ -943,7 +946,10 @@ func taskPriorityMigrationStatements() []string {
 			external_id TEXT COLLATE BINARY,
 			external_id_settled_at TIMESTAMP,
 			assignee_user_id TEXT NOT NULL DEFAULT '',
-			assignment_generation INTEGER NOT NULL DEFAULT 0
+			assignment_generation INTEGER NOT NULL DEFAULT 0,
+			review_episode_id TEXT NOT NULL DEFAULT '',
+			review_entered_at TIMESTAMP,
+			review_entry_origin TEXT NOT NULL DEFAULT ''
 		)`,
 		// archived_by_cascade_id and external_id/external_id_settled_at are
 		// added to the task schema by task/repository/sqlite/base.go
@@ -963,7 +969,8 @@ func taskPriorityMigrationStatements() []string {
 			origin, project_id,
 			labels, identifier,
 			checkout_agent_id, checkout_at, checkout_run_id,
-			external_id, external_id_settled_at, assignee_user_id, assignment_generation
+			external_id, external_id_settled_at, assignee_user_id, assignment_generation,
+			review_episode_id, review_entered_at, review_entry_origin
 		) SELECT
 			id, COALESCE(workspace_id,''), COALESCE(workflow_id,''),
 			COALESCE(workflow_step_id,''), workflow_agent_overrides, title, COALESCE(description,''),
@@ -978,7 +985,8 @@ func taskPriorityMigrationStatements() []string {
 			COALESCE(labels,'[]'), identifier,
 			checkout_agent_id, checkout_at, checkout_run_id,
 			external_id, external_id_settled_at,
-			COALESCE(assignee_user_id,''), COALESCE(assignment_generation,0)
+			COALESCE(assignee_user_id,''), COALESCE(assignment_generation,0),
+			COALESCE(review_episode_id,''), review_entered_at, COALESCE(review_entry_origin,'')
 		FROM tasks`,
 		`DROP TABLE tasks`,
 		`ALTER TABLE tasks_priority_new RENAME TO tasks`,

@@ -103,6 +103,7 @@ function preserveLiveMarkerFields(
   // is in flight. Preserve the newer live value instead of rolling it back.
   if (merged.interrupted === undefined || hasNewerLiveInterrupted(existing, fetchStart)) {
     merged.interrupted = existing.interrupted;
+    merged.interruption = existing.interruption;
   }
   if (existing.interruptedGeneration !== undefined) {
     merged.interruptedGeneration = existing.interruptedGeneration;

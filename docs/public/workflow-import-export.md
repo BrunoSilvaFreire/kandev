@@ -5,7 +5,7 @@ description: "Move Kanban workflows between workspaces with Kandev's portable YA
 
 # Workflow Import / Export
 
-Kandev's versioned portable format moves Kanban workflow definitions between workspaces or installations. It carries prompts, step behavior, portable agent-profile descriptors, WIP rules, supported events, and explicit task-completion policies. It deliberately omits database IDs and workspace ownership. New exports use version 2; version 1 documents remain accepted and receive compatibility defaults at import.
+Kandev's versioned portable format moves Kanban workflow definitions between workspaces or installations. It carries prompts, step behavior, portable agent-profile descriptors, WIP rules, supported events, and explicit task-completion policies. It deliberately omits database IDs and workspace ownership. New exports use version 3 and include stable portable step keys; versions 1 and 2 remain readable.
 
 Use this for snapshots and one-time copies. Use [Workflow Sync](workflow-sync.md) when a GitHub repository should remain the source of truth.
 
@@ -23,10 +23,11 @@ Open **Settings → Workspaces → select a workspace → Workflows**.
 - **Export All** opens a YAML dialog for the saved Kanban workflows visible on that settings page. Unsaved drafts and Office-style workflows are excluded. Choose **Copy** to put the text on the clipboard.
 - A workflow card's **Export** button exports only that workflow.
 - **Import** accepts a `.yml` or `.yaml` file, or pasted YAML. It previews the workflows that will be created and skipped. Exact direct step-profile matches are selected automatically; each unmatched direct step has a profile picker.
+- **Update from file** on an existing workflow card previews a selected definition from a local YAML file before applying it. Review added, changed, removed, and blocked items, then confirm or cancel. The workflow keeps its identity. Git-synced workflows remain read-only until released from sync.
 - The browser import does not create workflows until every affected step has a valid profile selection. If no eligible profile exists, use **Retry** after creating or enabling a profile in **Settings > Agents**. Canceling the picker leaves the workspace unchanged.
 - The result reports created and skipped workflow names.
 
-Export does not download a file or change the workflow. Import creates new workflows; it never overwrites a same-named workflow. Delete an unwanted imported workflow through the normal workflow settings flow.
+Export does not download a file or change the workflow. Import creates new workflows; it never overwrites a same-named workflow. Update applies to the selected workflow ID, not a name match. Unkeyed renamed steps require an explicit mapping; referenced steps cannot be removed until their live references are resolved. Historical step records are retained. Delete an unwanted imported workflow through the normal workflow settings flow.
 
 > **Network security:** With authentication disabled, these HTTP routes are open. Experimental authentication requires a session or personal access token, but does not replace TLS. Keep the backend on loopback or behind an authenticated, origin-protected TLS proxy before exposing them to a network.
 
@@ -44,6 +45,8 @@ All routes are on the Kandev backend under `/api/v1`.
 | `GET` | `/workspaces/:id/workflows/export?ids=id1,id2` | Export only the listed workflow IDs. Whitespace and empty comma elements are ignored. |
 | `POST` | `/workspaces/:id/workflows/import/preview` | Validate a portable YAML request and return skipped names, eligible global profiles, and direct step-profile matches. It does not write. |
 | `POST` | `/workspaces/:id/workflows/import` | Parse a portable YAML request and return `{"created": [...], "skipped": [...]}`. |
+| `POST` | `/workspaces/:id/workflows/:workflow_id/update/preview` | Preview an existing workflow update using `{ "yaml": "...", "update": { "workflow_index": 0, "rename_mappings": {} } }`. Read-only. |
+| `POST` | `/workspaces/:id/workflows/:workflow_id/update` | Apply the reviewed update with the same request plus the returned `version` token. A stale token returns a conflict and requires a new preview. |
 
 The workspace export route treats an absent `ids` parameter as “all”; `ids=` is an explicit empty selection and returns an envelope with no workflows. Such an envelope cannot be imported because validation requires at least one workflow. The UI supplies IDs for its Kanban-only selection. A direct “all” HTTP export can include workflow styles the portable converter cannot completely represent, so prefer the UI for user-managed Kanban workflows.
 
@@ -74,7 +77,7 @@ candidate revision returned by the preview route.
 
 ```json
 {
-  "yaml": "version: 2\ntype: kandev_workflow\nworkflows: [...]\n",
+  "yaml": "version: 3\ntype: kandev_workflow\nworkflows: [...]\n",
   "step_profile_bindings": [
     {
       "workflow_index": 0,
@@ -98,7 +101,7 @@ If Kandev is behind a reverse proxy, use its externally protected base URL rathe
 Every document uses this envelope:
 
 ```yaml
-version: 2
+version: 3
 type: kandev_workflow
 workflows:
   - name: My Workflow
@@ -107,7 +110,7 @@ workflows:
 
 | Field | Type | Validation |
 |-------|------|------------|
-| `version` | integer | Must be `1` or `2`. New exports use `2`; version 1 is accepted for compatibility. |
+| `version` | integer | Must be `1`, `2`, or `3`. New exports use `3`; older versions remain accepted for compatibility. |
 | `type` | string | Must be exactly `kandev_workflow`. |
 | `workflows` | list | Must contain at least one item. |
 
@@ -172,6 +175,7 @@ IDs, workspace ID, ordering among workflows, source/sync ownership, style, visib
 | Field | Type | Exact behavior |
 |-------|------|----------------|
 | `name` | string | Always exported; exact empty string is rejected. |
+| `key` | string | Stable opaque identity emitted by version 3 exports. Unique within a workflow; keep it unchanged when renaming a step. |
 | `position` | integer | Always exported and must be unique inside its workflow. It is an ordering key and reference anchor; built-ins use contiguous zero-based values, but validation does not require that. |
 | `color` | string | Always exported. Kandev normally stores a background utility class such as `bg-blue-500`; portable validation does not allow-list colors. |
 | `prompt` | string | Omitted when empty. `{{task_prompt}}` is the editor-supported task-description placeholder. |
@@ -193,7 +197,8 @@ IDs, workspace ID, ordering among workflows, source/sync ownership, style, visib
 
 Version 1 is the legacy format. It remains valid for workflows without an
 explicit session target. Version 2 adds `session_target` and explicit
-completion booleans. An initial target has only `kind: initial`. A source-step
+completion booleans. Version 3 adds a stable `key` to each step for updates
+that retain step identity across renames. An initial target has only `kind: initial`. A source-step
 target has `kind: step` and an earlier `step_position`. The source step must
 select a profile directly and must not target another session.
 
@@ -201,7 +206,7 @@ If a source step is missing, later than its target, or invalid after a sync
 edit, import and sync report a validation error. Kandev does not silently pick
 another conversation.
 
-`stage_type`, Office participants, recorded decisions, task data, and step history are not portable. Imported steps receive new UUIDs and the default internal stage type.
+`stage_type`, Office participants, recorded decisions, task data, and step history are not portable. New imports receive new database IDs. Updating an existing workflow matches steps by portable key, or by unique unchanged name for legacy files; ambiguous legacy renames require an explicit mapping.
 
 ## Portable events
 
@@ -364,7 +369,7 @@ After import, assign a workflow default or affected step agent profile if the de
 
 ## Troubleshooting
 
-- **`unsupported export version/type`:** use `version: 2` and `type: kandev_workflow` for new documents. Version 1 remains accepted for compatibility.
+- **`unsupported export version/type`:** use `version: 3` and `type: kandev_workflow` for new documents. Versions 1 and 2 remain accepted for compatibility.
 - **Duplicate step position:** give every step in that workflow a unique integer and update every position reference.
 - **Missing `step_position`:** portable `move_to_step` never accepts a database or template `step_id`.
 - **Pull reference error:** ensure the target position exists, is not the same step, and does not participate in a cycle.

@@ -18,7 +18,7 @@ import type {
   StartupPage,
 } from "@/lib/types/http";
 import type { SidebarLayoutApi } from "@/lib/types/http-user-settings";
-import type { ViewFilterClause } from "@/lib/view-model/types";
+import type { ViewFilterClause, ViewPreset } from "@/lib/view-model/types";
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
 import type { ThreadView, ThreadViewDraft } from "@/lib/state/slices/ui/thread-view-types";
 import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
@@ -507,6 +507,12 @@ export type UserSettingsState = {
   taskViewFilters: Record<string, ViewFilterClause[]>;
   /** Active shared grouping key for Kanban/List, keyed by Home view. */
   taskViewGroups: Record<string, string>;
+  /** Ordered grouping keys for Kanban/List; the first key is the outer level. */
+  taskViewGroupOrder: Record<string, string[]>;
+  /** Named filter and grouping presets for Kanban/List, keyed by Home view. */
+  taskViewPresets: Record<string, ViewPreset[]>;
+  /** The preset last applied or saved in each Home view. */
+  taskViewActivePreset: Record<string, string>;
   loaded: boolean;
 };
 

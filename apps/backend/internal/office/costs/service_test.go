@@ -57,6 +57,9 @@ func newTestCostService(t *testing.T) (*costs.CostService, func(string, ...inter
 	// Create the tasks table (needed for JOIN in some repo queries).
 	// Must include description and identifier so FTS5 triggers don't fail on INSERT.
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS tasks (
+		review_episode_id TEXT NOT NULL DEFAULT '',
+		review_entered_at TIMESTAMP,
+		review_entry_origin TEXT NOT NULL DEFAULT '',
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL DEFAULT '',
 		project_id TEXT DEFAULT '',

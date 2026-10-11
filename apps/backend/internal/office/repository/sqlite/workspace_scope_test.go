@@ -18,6 +18,9 @@ func newScopeTestRepo(t *testing.T) *sqlite.Repository {
 	repo := newTestRepo(t)
 	if _, err := repo.ExecRaw(context.Background(), `
 		CREATE TABLE IF NOT EXISTS tasks (
+			review_episode_id TEXT NOT NULL DEFAULT '',
+			review_entered_at TIMESTAMP,
+			review_entry_origin TEXT NOT NULL DEFAULT '',
 			id TEXT PRIMARY KEY,
 			workspace_id TEXT NOT NULL DEFAULT '',
 			title TEXT NOT NULL DEFAULT ''

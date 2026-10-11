@@ -42,5 +42,20 @@
   "triageCaption": "可能性のある質問は参考情報です。会話を開いて返信してください。",
   "triageKindClarification": "確認事項",
   "triageKindStaleReview": "滞留したレビュー",
-  "triageKindPossibleQuestion": "質問の可能性"
+  "triageKindPossibleQuestion": "質問の可能性",
+  "triageKindInterrupted": "中断",
+  "triageKindReview": "レビュー",
+  "triageKindDependency": "待機中",
+  "triageActionAnswer": "回答する",
+  "triageActionResume": "再開する",
+  "triageActionReview": "レビューする",
+  "triageActionOpen": "開く",
+  "triageReasonClarification": "エージェントが質問し、あなたの回答を待っています。",
+  "triageReasonBackendRestart": "エージェントの作業中に Kandev が再起動しました。再開すると同じ会話を続けられます。",
+  "triageReasonExecutionLost": "エージェントがターンの途中で応答しなくなりました。再開すると同じ会話を続けられます。",
+  "triageReasonInterruptedUnknown": "エージェントが中断されました。原因は記録されていません。",
+  "triageReasonStaleReview": "このタスクは 1 日以上レビュー待ちです。",
+  "triageReasonReview": "このタスクはあなたのレビューを待っています。",
+  "triageReasonDependency": "このタスクは別のタスクの完了を待っています。",
+  "triageReasonPossibleQuestion": "エージェントが直前のメッセージで質問した可能性があります。"
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/kandev/kandev/internal/db/dialect"
+	workflowschema "github.com/kandev/kandev/internal/workflow/schema"
 )
 
 // initSchema creates the database tables if they don't exist and applies
@@ -50,6 +51,8 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.ensureDefaultWorkspace,
 		r.ensureDefaultExecutorsAndEnvironments,
 		func() error { return r.runMigrations(ctx) },
+		r.initStepVisitsSchema,
+		func() error { return workflowschema.EnsureStepIdentity(r.db, r.migrate) },
 		r.hideBuiltinWorkflows,
 		r.healBuiltinWorkflowStepFlags,
 		r.healBuiltinWorkflowStepParticipantSeats,
@@ -571,6 +574,9 @@ func (r *Repository) initTaskSchema() error {
 		metadata TEXT DEFAULT '{}',
 		autopilot_enabled INTEGER NOT NULL DEFAULT 0,
 		archived_at TIMESTAMP,
+		review_episode_id TEXT NOT NULL DEFAULT '',
+		review_entered_at TIMESTAMP,
+		review_entry_origin TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
@@ -1263,6 +1269,10 @@ const sessionWorktreeSchemaDDL = `
 		route_reason TEXT NOT NULL DEFAULT '',
 		downstream_acp_session_id TEXT NOT NULL DEFAULT '',
 		workflow_step_id_at_creation TEXT DEFAULT '',
+		interruption_episode_id TEXT NOT NULL DEFAULT '',
+		interruption_reason TEXT NOT NULL DEFAULT '',
+		interruption_observed_at TIMESTAMP,
+		interruption_turn_id TEXT NOT NULL DEFAULT '',
 		executor_id TEXT DEFAULT '',
 		executor_profile_id TEXT DEFAULT '',
 		environment_id TEXT DEFAULT '',

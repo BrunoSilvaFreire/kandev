@@ -2,6 +2,11 @@
 
 import { IconMessageCircle } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { useMemo } from "react";
+import { useAppStore } from "@/components/state-provider";
+import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
+import type { QuickChatBrowseOrder } from "@/lib/quick-chat/browse";
 import { useTranslation } from "react-i18next";
 import { PageShell } from "@/components/page-shell";
 import { QuickChatDeleteDialog } from "@/components/quick-chat/quick-chat-delete-dialog";
@@ -18,6 +23,12 @@ export function QuickChatsPageClient() {
   const { t } = useTranslation();
   const router = useRouter();
   const browse = useQuickChatsBrowse();
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const { repositories } = useRepositories(workspaceId, true);
+  const repositoryNames = useMemo(
+    () => new Map(repositories.map((repository) => [repository.id, repository.name])),
+    [repositories],
+  );
 
   return (
     <PageShell
@@ -52,11 +63,39 @@ export function QuickChatsPageClient() {
           </div>
         )}
         {browse.status === "ready" && browse.items.length > 0 && (
-          <ul className="divide-y rounded-lg border">
+          <div className="mb-3 flex items-center justify-end gap-2">
+            <span className="text-xs text-muted-foreground" id="quick-chats-order-label">
+              {t("chat:quickChatsOrderLabel")}
+            </span>
+            <Select
+              value={browse.order}
+              onValueChange={(value) => browse.setOrder(value as QuickChatBrowseOrder)}
+            >
+              <SelectTrigger
+                className="w-52 text-xs max-sm:min-h-11"
+                aria-labelledby="quick-chats-order-label"
+                data-testid="quick-chats-order"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="recent" className="text-xs max-sm:min-h-11">
+                  {t("chat:quickChatsOrderRecent")}
+                </SelectItem>
+                <SelectItem value="oldest" className="text-xs max-sm:min-h-11">
+                  {t("chat:quickChatsOrderOldest")}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+        {browse.status === "ready" && browse.items.length > 0 && (
+          <ul className="divide-y rounded-lg border" data-testid="quick-chats-list">
             {browse.items.map((item) => (
               <QuickChatBrowseRow
                 key={item.sessionId}
                 item={item}
+                repositoryNames={repositoryNames}
                 onOpen={() => router.push(`/quick-chats/${item.taskId}`)}
                 onOpenInPanel={() => browse.handleOpenInPanel(item)}
                 onRename={() => browse.setSessionToRename(item)}

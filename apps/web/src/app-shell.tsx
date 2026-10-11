@@ -1,3 +1,4 @@
+import { TransitionFailureNotice } from "@/components/task/task-move-error-banner";
 import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -74,6 +75,7 @@ export function AppShell({ children }: AppShellProps) {
               <PluginModalHost />
               <SessionFailureToastBridge />
               <TaskDeletedToastBridge />
+              <TransitionFailureNotice />
               <UpdateAvailableToastBridge />
               <SidebarViewsSyncBridge />
               <LogBufferBridge />

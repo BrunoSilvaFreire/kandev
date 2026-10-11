@@ -23,6 +23,89 @@ func TestGetMissingWorkflowStepReturnsTypedNotFound(t *testing.T) {
 	}
 }
 
+func TestPortableStepIdentityMigrationBackfillsOpaqueKeys(t *testing.T) {
+	repo, database := setupTestRepoWithDB(t)
+	ctx := context.Background()
+	for _, step := range []*models.WorkflowStep{
+		{ID: "portable-a", WorkflowID: "wf-test", Name: "A", Position: 0},
+		{ID: "portable-b", WorkflowID: "wf-test", Name: "B", Position: 1},
+	} {
+		if err := repo.CreateStep(ctx, step); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var first, second string
+	if err := database.QueryRowContext(ctx, `SELECT portable_key FROM workflow_steps WHERE id = ?`, "portable-a").Scan(&first); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRowContext(ctx, `SELECT portable_key FROM workflow_steps WHERE id = ?`, "portable-b").Scan(&second); err != nil {
+		t.Fatal(err)
+	}
+	if first == "" || second == "" || first == second {
+		t.Fatalf("portable keys must be nonempty and unique: %q, %q", first, second)
+	}
+}
+
+func TestDeleteStepRetainsHistoricalStepAndParticipants(t *testing.T) {
+	repo, database := setupTestRepoWithDB(t)
+	ctx := context.Background()
+	step := &models.WorkflowStep{ID: "retained", WorkflowID: "wf-test", Name: "Historical", Position: 0}
+	if err := repo.CreateStep(ctx, step); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpsertStepParticipant(ctx, &models.WorkflowStepParticipant{
+		StepID: step.ID, Role: models.ParticipantRoleReviewer, AgentProfileID: "reviewer",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteStep(ctx, step.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.GetStep(ctx, step.ID)
+	if err != nil || got.RetiredAt == nil || got.Name != step.Name {
+		t.Fatalf("historical step = %#v, error = %v", got, err)
+	}
+	if _, err := repo.GetActiveStep(ctx, step.ID); !errors.Is(err, models.ErrWorkflowStepNotFound) {
+		t.Fatalf("GetActiveStep error = %v, want retired-step not found", err)
+	}
+	active, err := repo.ListStepsByWorkflow(ctx, step.WorkflowID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, current := range active {
+		if current.ID == step.ID {
+			t.Fatal("retired step appeared in active workflow listing")
+		}
+	}
+	var participantCount int
+	if err := database.Get(&participantCount, `SELECT COUNT(*) FROM workflow_step_participants WHERE step_id = ?`, step.ID); err != nil || participantCount != 1 {
+		t.Fatalf("participant count = %d, error = %v", participantCount, err)
+	}
+}
+
+func TestListAllStepEventsJSONExcludesRetiredSteps(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	active := &models.WorkflowStep{ID: "active-event-step", WorkflowID: "wf-test", Name: "Active", Position: 0}
+	retired := &models.WorkflowStep{ID: "retired-event-step", WorkflowID: "wf-test", Name: "Retired", Position: 1}
+	for _, step := range []*models.WorkflowStep{active, retired} {
+		step.Events = models.StepEvents{OnHeartbeat: []models.GenericAction{{Type: models.GenericActionMoveToNext}}}
+		if err := repo.CreateStep(ctx, step); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repo.DeleteStep(ctx, retired.ID); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := repo.ListAllStepEventsJSON(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].StepID != active.ID {
+		t.Fatalf("event steps = %#v, want only active step %q", rows, active.ID)
+	}
+}
+
 func setupTestRepo(t *testing.T) *Repository {
 	repo, _ := setupTestRepoWithDB(t)
 	return repo
@@ -47,7 +130,8 @@ func setupTestRepoWithDB(t *testing.T) (*Repository, *sqlx.DB) {
 	_, err = sqlxDB.Exec(`CREATE TABLE IF NOT EXISTS workflows (
 		id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT '',
 		workflow_template_id TEXT DEFAULT '', name TEXT NOT NULL,
-		description TEXT DEFAULT '', created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
+		description TEXT DEFAULT '', prompt TEXT DEFAULT '', agent_profile_id TEXT,
+		source TEXT DEFAULT '', source_path TEXT DEFAULT '', created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
 	)`)
 	if err != nil {
 		t.Fatalf("failed to create workflows table: %v", err)
@@ -230,7 +314,7 @@ func TestGetStepAndListStepsByWorkflow_IncludeOrderRevision(t *testing.T) {
 	}
 }
 
-func TestDeleteStep_ClearsQueuedTaskDestinationAndDeferredLaunch(t *testing.T) {
+func TestDeleteStepRejectsQueuedTaskDestinationWithoutMutatingIt(t *testing.T) {
 	repo, db := setupTestRepoWithDB(t)
 	ctx := context.Background()
 	if _, err := db.Exec(`CREATE TABLE tasks (
@@ -246,8 +330,8 @@ func TestDeleteStep_ClearsQueuedTaskDestinationAndDeferredLaunch(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO tasks (id, queued_for_step_id, wip_admitted, metadata) VALUES ('queued', ?, 0, ?)`, step.ID, `{"deferred_launch":{"agent_profile_id":"agent"}}`); err != nil {
 		t.Fatalf("insert queued task: %v", err)
 	}
-	if err := repo.DeleteStep(ctx, step.ID); err != nil {
-		t.Fatalf("delete step: %v", err)
+	if err := repo.DeleteStep(ctx, step.ID); !errors.Is(err, models.ErrWorkflowStepReferenced) {
+		t.Fatalf("delete step error = %v, want referenced-step error", err)
 	}
 	var queuedFor string
 	var admitted bool
@@ -255,9 +339,97 @@ func TestDeleteStep_ClearsQueuedTaskDestinationAndDeferredLaunch(t *testing.T) {
 	if err := db.QueryRow(`SELECT queued_for_step_id, wip_admitted, metadata FROM tasks WHERE id = 'queued'`).Scan(&queuedFor, &admitted, &metadata); err != nil {
 		t.Fatalf("reload queued task: %v", err)
 	}
-	if queuedFor != "" || !admitted || metadata != `{}` {
-		t.Fatalf("cleanup result: queue=%q admitted=%t metadata=%q", queuedFor, admitted, metadata)
+	if queuedFor != step.ID || admitted || metadata != `{"deferred_launch":{"agent_profile_id":"agent"}}` {
+		t.Fatalf("blocked delete mutated queue: queue=%q admitted=%t metadata=%q", queuedFor, admitted, metadata)
 	}
+}
+
+func TestDeleteStepRejectsCurrentTaskAndActiveSessionReferences(t *testing.T) {
+	t.Run("current task", func(t *testing.T) {
+		repo, database := setupTestRepoWithDB(t)
+		ctx := context.Background()
+		step := &models.WorkflowStep{ID: "placed", WorkflowID: "wf-test", Name: "Placed", Position: 0}
+		if err := repo.CreateStep(ctx, step); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, workflow_step_id TEXT, queued_for_step_id TEXT)`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Exec(`INSERT INTO tasks (id, workflow_step_id) VALUES ('task-placed', ?)`, step.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.DeleteStep(ctx, step.ID); !errors.Is(err, models.ErrWorkflowStepReferenced) {
+			t.Fatalf("delete step error = %v, want referenced-step error", err)
+		}
+		got, err := repo.GetStep(ctx, step.ID)
+		if err != nil || got.RetiredAt != nil {
+			t.Fatalf("step after rejected deletion = %#v, error = %v", got, err)
+		}
+	})
+
+	t.Run("active session", func(t *testing.T) {
+		repo, database := setupTestRepoWithDB(t)
+		ctx := context.Background()
+		step := &models.WorkflowStep{ID: "session-origin", WorkflowID: "wf-test", Name: "Origin", Position: 0}
+		if err := repo.CreateStep(ctx, step); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Exec(`ALTER TABLE task_sessions ADD COLUMN workflow_step_id_at_creation TEXT`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Exec(`ALTER TABLE task_sessions ADD COLUMN state TEXT`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Exec(`INSERT INTO task_sessions (id, workflow_step_id_at_creation, state) VALUES ('active-session', ?, 'RUNNING')`, step.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.DeleteStep(ctx, step.ID); !errors.Is(err, models.ErrWorkflowStepReferenced) {
+			t.Fatalf("delete step error = %v, want referenced-step error", err)
+		}
+	})
+
+	t.Run("designated step primary", func(t *testing.T) {
+		repo, database := setupTestRepoWithDB(t)
+		ctx := context.Background()
+		step := &models.WorkflowStep{ID: "primary-step", WorkflowID: "wf-test", Name: "Primary", Position: 0}
+		if err := repo.CreateStep(ctx, step); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, metadata TEXT)`); err != nil {
+			t.Fatal(err)
+		}
+		metadata := `{"step_primary_sessions":{"primary-step":"session-1"}}`
+		if _, err := database.Exec(`INSERT INTO tasks (id, metadata) VALUES ('task-primary', ?)`, metadata); err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.DeleteStep(ctx, step.ID); !errors.Is(err, models.ErrWorkflowStepReferenced) {
+			t.Fatalf("delete step error = %v, want referenced-step error", err)
+		}
+	})
+
+	t.Run("active routed session", func(t *testing.T) {
+		repo, database := setupTestRepoWithDB(t)
+		ctx := context.Background()
+		step := &models.WorkflowStep{ID: "routed-step", WorkflowID: "wf-test", Name: "Routed", Position: 0}
+		if err := repo.CreateStep(ctx, step); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Exec(`ALTER TABLE task_sessions ADD COLUMN state TEXT`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Exec(`CREATE TABLE task_session_routes (destination_workflow_step_id TEXT, destination_session_id TEXT)`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Exec(`INSERT INTO task_sessions (id, state) VALUES ('routed-session', 'RUNNING')`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Exec(`INSERT INTO task_session_routes (destination_workflow_step_id, destination_session_id) VALUES (?, 'routed-session')`, step.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.DeleteStep(ctx, step.ID); !errors.Is(err, models.ErrWorkflowStepReferenced) {
+			t.Fatalf("delete step error = %v, want referenced-step error", err)
+		}
+	})
 }
 
 func TestWorkflowStepWIPFields_CreateUpdateAndGet(t *testing.T) {

@@ -8,36 +8,28 @@ import {
   useEffect,
   useMemo,
 } from "react";
-import {
-  DndContext,
-  closestCenter,
-  type DragEndEvent,
-  PointerSensor,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
-import {
-  SortableContext,
-  verticalListSortingStrategy,
-  arrayMove,
-  useSortable,
-} from "@dnd-kit/sortable";
+import { DndContext, closestCenter } from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useAppStore } from "@/components/state-provider";
 import { useSwimlaneCollapse } from "@/hooks/domains/kanban/use-swimlane-collapse";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import {
-  buildTaskVcsSearchIndex,
-  getTaskPRsByTaskIdForCurrentWorkspace,
-} from "@/lib/kanban/task-search-index";
 import { selectVisibleWorkflows } from "@/lib/kanban/workflow-swimlanes";
-import { reorderWorkflows } from "@/lib/api";
 import { SwimlaneSection } from "./swimlane-section";
 import { ColumnsMenu } from "./columns-menu";
-import { deriveAutoHiddenStepIds } from "@/lib/kanban/auto-hide-empty-columns";
-import { sortWorkflowStepsByPosition } from "@/lib/kanban/workflow-step-order";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
-import { useWorkflowGroupLanes } from "@/hooks/domains/kanban/use-workflow-group-lanes";
+import {
+  useWorkflowGroupLanes,
+  type KanbanGroupScope,
+} from "@/hooks/domains/kanban/use-workflow-group-lanes";
+import type { ViewGroupKey, ViewGroupNode } from "@/lib/view-model/types";
+import {
+  useBoardGrouping,
+  useVcsSearchIndex,
+  useVisibleWorkflowSteps,
+  useWorkflowReorder,
+} from "./swimlane-container-hooks";
+import { KanbanGlobalGroupHeader } from "./kanban-global-group-header";
 import { WorkflowGroupLanes } from "./workflow-group-lanes";
 import {
   getEffectiveView,
@@ -49,7 +41,6 @@ import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import { t } from "@/lib/i18n";
 import {
-  useStableStringSet,
   useStableWorkflowList,
   useSwimlaneRenderData,
   useWorkflowSwimlaneData,
@@ -112,9 +103,6 @@ function renderEmptyState(emptyMessage: string) {
 
 const EMPTY_SELECTED_REPOSITORY_IDS: string[] = [];
 const EMPTY_WORKFLOW_STEPS: WorkflowSnapshotData["steps"] = [];
-const WORKFLOW_POINTER_SENSOR_OPTIONS = { activationConstraint: { distance: 8 } };
-/** Stable identity so a workspace with no GitLab MRs does not re-trigger downstream memos. */
-const EMPTY_TASK_MRS_BY_TASK_ID: Record<string, never[]> = {};
 
 type WorkflowItemProps = {
   wf: { id: string; name: string };
@@ -146,6 +134,10 @@ type WorkflowItemProps = {
   mobileWorkflowNavigation?: MobileWorkflowNavigation;
   onToggleStepVisibility: (workflowId: string, stepId: string) => void;
   onToggleAutoHideEmpty: (workflowId: string) => void;
+  /** Group keys that subdivide this workflow's board into lanes. */
+  laneKeys: readonly ViewGroupKey[];
+  /** The outer group this board is rendered under, when grouping is global. */
+  scope?: KanbanGroupScope;
 };
 
 const SortableWorkflowItem = memo(function SortableWorkflowItem({
@@ -156,8 +148,10 @@ const SortableWorkflowItem = memo(function SortableWorkflowItem({
   toggleCollapse,
   ...rest
 }: WorkflowItemProps) {
+  // Under an outer group the same workflow renders once per group, so its
+  // sortable identity includes the group.
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: wf.id,
+    id: rest.scope ? `${rest.scope.key}:${wf.id}` : wf.id,
     disabled: !isSortable,
   });
   const style = {
@@ -208,30 +202,26 @@ const WorkflowItemContent = memo(function WorkflowItemContent({
   fillHeight,
   onToggleStepVisibility,
   onToggleAutoHideEmpty,
+  laneKeys,
+  scope,
   ...viewProps
 }: WorkflowItemContentProps) {
-  const { snapshot, tasks, occupancyTasks, hiddenStepIds, hiddenSet, autoHideEmpty } =
-    useWorkflowSwimlaneData(
-      wf.id,
-      repoFilter,
-      searchQuery,
-      matchesPluginTaskFilters,
-      vcsSearchTextByTaskId,
-    );
-  const lanes = useWorkflowGroupLanes(wf, tasks);
+  const data = useWorkflowSwimlaneData(
+    wf.id,
+    repoFilter,
+    searchQuery,
+    matchesPluginTaskFilters,
+    vcsSearchTextByTaskId,
+  );
+  const { snapshot, occupancyTasks, hiddenStepIds, hiddenSet, autoHideEmpty } = data;
+  const { tasks, lanes } = useWorkflowGroupLanes(wf, data.tasks, laneKeys, scope);
   const snapshotSteps = snapshot?.steps ?? EMPTY_WORKFLOW_STEPS;
-  const derivedAutoHiddenSet = useMemo(
-    () => deriveAutoHiddenStepIds(snapshotSteps, occupancyTasks, autoHideEmpty, hiddenStepIds),
-    [autoHideEmpty, hiddenStepIds, occupancyTasks, snapshotSteps],
-  );
-  const autoHiddenSet = useStableStringSet(derivedAutoHiddenSet);
-  const moveTargetSteps = useMemo(
-    () => sortWorkflowStepsByPosition(snapshotSteps).filter((step) => !hiddenSet.has(step.id)),
-    [hiddenSet, snapshotSteps],
-  );
-  const steps = useMemo(
-    () => moveTargetSteps.filter((step) => !autoHiddenSet.has(step.id)),
-    [moveTargetSteps, autoHiddenSet],
+  const { moveTargetSteps, steps } = useVisibleWorkflowSteps(
+    snapshotSteps,
+    occupancyTasks,
+    autoHideEmpty,
+    hiddenStepIds,
+    hiddenSet,
   );
   const content = (
     <ViewComponent
@@ -244,6 +234,8 @@ const WorkflowItemContent = memo(function WorkflowItemContent({
   );
 
   if (!snapshot) return null;
+  // A workflow with no task in this outer group is not part of the group.
+  if (scope && tasks.length === 0) return null;
 
   const columnsMenu = (
     <ColumnsMenu
@@ -298,59 +290,6 @@ const WorkflowItemContent = memo(function WorkflowItemContent({
   );
 });
 
-function useWorkflowReorder(
-  orderedWorkflows: { id: string; name: string }[],
-  workflowFilter: string | null,
-) {
-  const reorderWorkflowItems = useAppStore((state) => state.reorderWorkflowItems);
-  const workflows = useAppStore((state) => state.workflows.items);
-  const workspaceId = workflows[0]?.workspaceId;
-  const sensors = useSensors(useSensor(PointerSensor, WORKFLOW_POINTER_SENSOR_OPTIONS));
-  const canSort = !workflowFilter && orderedWorkflows.length > 1;
-
-  const handleDragEnd = useCallback(
-    (event: DragEndEvent) => {
-      const { active, over } = event;
-      if (!over || active.id === over.id) return;
-      const oldIndex = orderedWorkflows.findIndex((wf) => wf.id === active.id);
-      const newIndex = orderedWorkflows.findIndex((wf) => wf.id === over.id);
-      if (oldIndex === -1 || newIndex === -1) return;
-      const reordered = arrayMove(orderedWorkflows, oldIndex, newIndex);
-      reorderWorkflowItems(reordered.map((wf) => wf.id));
-      if (workspaceId) {
-        reorderWorkflows(
-          workspaceId,
-          reordered.map((wf) => wf.id),
-        ).catch(() => {});
-      }
-    },
-    [orderedWorkflows, reorderWorkflowItems, workspaceId],
-  );
-
-  return { sensors, canSort, handleDragEnd };
-}
-
-/** One lowercase `#<number>` haystack per task, built from its linked PRs/MRs in the active workspace. */
-function useVcsSearchIndex() {
-  const taskPRsByTaskId = useAppStore((state) =>
-    getTaskPRsByTaskIdForCurrentWorkspace(
-      state.taskPRs,
-      state.workspaces.activeId,
-      state.workspaceContextGeneration,
-    ),
-  );
-  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
-  const taskMRsByTaskId = useAppStore(
-    (state) =>
-      (activeWorkspaceId && state.taskMRs.byWorkspaceId[activeWorkspaceId]) ||
-      EMPTY_TASK_MRS_BY_TASK_ID,
-  );
-  return useMemo(
-    () => buildTaskVcsSearchIndex(taskPRsByTaskId, taskMRsByTaskId),
-    [taskMRsByTaskId, taskPRsByTaskId],
-  );
-}
-
 function getRenderedWorkflows(
   isMobileKanban: boolean,
   focusedWorkflowId: string | null,
@@ -393,6 +332,8 @@ type WorkflowItemsProps = {
   toggleCollapse: (workflowId: string) => void;
   containerProps: SwimlaneContainerProps;
   mobileWorkflowNavigation?: MobileWorkflowNavigation;
+  laneKeys: readonly ViewGroupKey[];
+  scope?: KanbanGroupScope;
 };
 
 function WorkflowItems({
@@ -413,6 +354,8 @@ function WorkflowItems({
   toggleCollapse,
   containerProps,
   mobileWorkflowNavigation,
+  laneKeys,
+  scope,
 }: WorkflowItemsProps) {
   return workflows.map((workflow, index) => {
     const collapsed = isCollapsed(workflow.id);
@@ -420,6 +363,8 @@ function WorkflowItems({
       <SortableWorkflowItem
         key={isMobileKanban ? "mobile-active-workflow" : workflow.id}
         wf={workflow}
+        laneKeys={laneKeys}
+        scope={scope}
         repoFilter={repoFilter}
         searchQuery={searchQuery}
         vcsSearchTextByTaskId={vcsSearchTextByTaskId}
@@ -451,6 +396,44 @@ function WorkflowItems({
       />
     );
   });
+}
+
+type GroupedWorkflowItemsProps = Omit<WorkflowItemsProps, "scope"> & {
+  outerKey: ViewGroupKey | null;
+  outerGroups: ViewGroupNode<Task>[];
+  compactWhenGrouped: boolean;
+};
+
+/**
+ * Renders the workflow boards, under one section per outer group when the
+ * grouping is global. Inside a group each workflow keeps its header, appears
+ * only if it has tasks there, and is not reorderable.
+ */
+function GroupedWorkflowItems({
+  outerKey,
+  outerGroups,
+  compactWhenGrouped,
+  ...items
+}: GroupedWorkflowItemsProps) {
+  if (!outerKey) return <WorkflowItems {...items} />;
+  return outerGroups.map((group) => (
+    <section
+      key={group.path}
+      className="space-y-3"
+      data-testid="kanban-global-group"
+      data-group-key={group.key}
+    >
+      <KanbanGlobalGroupHeader label={group.label} count={group.items.length} />
+      <WorkflowItems
+        {...items}
+        hideHeaders={false}
+        fillHeight={false}
+        compactHeight={compactWhenGrouped}
+        canSortWorkflows={false}
+        scope={{ groupKey: outerKey, key: group.key }}
+      />
+    </section>
+  ));
 }
 
 /**
@@ -536,7 +519,7 @@ export function SwimlaneContainer(containerProps: SwimlaneContainerProps) {
     selectedRepositoryIds = EMPTY_SELECTED_REPOSITORY_IDS,
   } = containerProps;
   const { isMobile } = useResponsiveBreakpoint();
-  const { onToggleStepVisibility, onToggleAutoHideEmpty } = useKanbanDisplaySettings();
+  const { groups, onToggleStepVisibility, onToggleAutoHideEmpty } = useKanbanDisplaySettings();
   const { isCollapsed, toggleCollapse } = useSwimlaneCollapse();
   const vcsSearchTextByTaskId = useVcsSearchIndex();
   const {
@@ -573,6 +556,13 @@ export function SwimlaneContainer(containerProps: SwimlaneContainerProps) {
       onWorkflowChange: containerProps.onWorkflowChange,
     });
 
+  const { outerKey, laneKeys, outerGroups } = useBoardGrouping({
+    groups,
+    isMobileKanban,
+    renderedWorkflows,
+    getFilteredTasks,
+  });
+
   const emptyMessage = getEmptyMessage({
     isLoading,
     snapshots,
@@ -589,7 +579,6 @@ export function SwimlaneContainer(containerProps: SwimlaneContainerProps) {
     orderedWorkflows.length,
   );
   const containerClass = getContainerClass(isMobileKanban, isMobile);
-
   return (
     <DndContext
       sensors={workflowSensors}
@@ -598,7 +587,11 @@ export function SwimlaneContainer(containerProps: SwimlaneContainerProps) {
     >
       <SortableContext items={sortableWorkflowIds} strategy={verticalListSortingStrategy}>
         <div className={containerClass} data-testid="swimlane-container">
-          <WorkflowItems
+          <GroupedWorkflowItems
+            outerKey={outerKey}
+            outerGroups={outerGroups}
+            laneKeys={laneKeys}
+            compactWhenGrouped={view.id === "kanban" && !isMobile}
             workflows={renderedWorkflows}
             repoFilter={repoFilter}
             searchQuery={searchQuery ?? ""}

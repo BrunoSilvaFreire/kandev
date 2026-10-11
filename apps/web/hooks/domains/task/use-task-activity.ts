@@ -6,6 +6,7 @@ import {
   getTaskTransitionSummary,
   listTaskActivity,
   type StepVisitSession,
+  type StepVisit,
   type TaskActivityEvent,
   type TaskStepTransition,
 } from "@/lib/api/domains/task-activity-api";
@@ -16,6 +17,7 @@ export type StepVisitState = {
   count: number;
   /** Persisted destination sessions ordered oldest to newest, deduped. */
   sessions: StepVisitSession[];
+  visits: StepVisit[];
 };
 
 export type TransitionSummaryState = {
@@ -58,10 +60,11 @@ export function useTaskTransitionSummary(
           counts[`${entry.from_step_id}->${entry.to_step_id}`] = entry.count;
         const visits: TransitionSummaryState["visits"] = {};
         for (const visit of summary.visits) {
-          visits[visit.step_id] = {
-            count: visit.count,
-            sessions: visit.sessions ?? [],
-          };
+          const current = visits[visit.step_id] ?? { count: 0, sessions: [], visits: [] };
+          current.count += visit.count;
+          current.sessions = current.sessions.concat(visit.sessions ?? []);
+          current.visits.push(visit);
+          visits[visit.step_id] = current;
         }
         setState({ counts, visits, status: "success" });
       })

@@ -67,6 +67,8 @@ func payload(step *models.WorkflowStep) map[string]interface{} {
 	return map[string]interface{}{
 		"id":                            step.ID,
 		"workflow_id":                   step.WorkflowID,
+		"portable_key":                  step.PortableKey,
+		"retired_at":                    step.RetiredAt,
 		"name":                          step.Name,
 		"position":                      step.Position,
 		"color":                         step.Color,

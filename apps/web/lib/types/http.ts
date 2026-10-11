@@ -460,6 +460,11 @@ export type Task = ActiveSubagentCountFields & {
   /** True when the task's session was mid-turn when the backend died and has
    *  not been resumed since (startup reconciliation marker). */
   interrupted?: boolean;
+  /** Oldest unresolved session interruption episode; null/absent when none. */
+  interruption?: { episode_id: string; reason: string; session_id: string } | null;
+  /** Active Review episode identity and authoritative entry time. */
+  review_episode_id?: string | null;
+  review_entered_at?: string | null;
   /** True when a workflow step's auto_start_agent on_enter action failed to
    *  launch a run for this task. */
   auto_start_failed?: boolean;
@@ -680,6 +685,8 @@ export type TaskSession = ActiveSubagentCountFields & {
   workspace_path?: string;
   worktrees?: TaskSessionWorktree[];
   task_environment_id?: string;
+  /** Mutable task-scoped visit association; creation and route provenance remain immutable. */
+  associated_step_visit_id?: string;
   state: TaskSessionState;
   /** Backend-owned runtime cancellation projection; API responses include it explicitly. */
   cancellation_pending?: boolean;
@@ -1163,6 +1170,21 @@ export type StepPortable = {
 };
 
 export type ImportWorkflowsResult = { created: string[]; skipped: string[] };
+
+export type WorkflowUpdateChange = {
+  kind: string;
+  path: string;
+  before?: unknown;
+  after?: unknown;
+};
+
+export type WorkflowUpdatePreview = {
+  workflow_id: string;
+  version: string;
+  changes: WorkflowUpdateChange[];
+  errors: string[];
+  can_apply: boolean;
+};
 
 export type WorkflowImportProfileCandidate = {
   id: string;

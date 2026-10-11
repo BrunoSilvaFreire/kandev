@@ -24,6 +24,7 @@ import { useMobileMenuSheetState } from "@/hooks/use-mobile-menu-sheet-state";
 import { MobileDisplayOptions } from "./mobile-display-options";
 import type { MobileDisplayOptionsProps } from "./mobile-display-options";
 export type { MobileDisplayOptionsProps, MobileColumnsSection } from "./mobile-display-options";
+import { MobileGroupingSection } from "./mobile-grouping-section";
 import {
   mobileControlClass,
   mobileControlIconClass,
@@ -273,6 +274,9 @@ function MobileMenuContent({
         showPipeline={showPipeline}
       />
       <MobileDisplayOptions open={open} {...displayOptions} />
+      {viewValue !== "threads" && (
+        <MobileGroupingSection view={viewValue === "list" ? "list" : "kanban"} />
+      )}
       {listingControls && (
         <MobileListingOptionsContext.Provider value={{ close: () => onOpenChange(false) }}>
           {listingControls}

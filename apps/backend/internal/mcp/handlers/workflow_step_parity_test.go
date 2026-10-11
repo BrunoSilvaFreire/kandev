@@ -172,7 +172,7 @@ func TestWorkflowStepCreateEventParityAcrossSurfaces(t *testing.T) {
 	require.Equal(t, eventtypes.WorkflowStepCreated, httpEvent.subject)
 	require.Equal(t, "mcp-handlers", mcpEvent.source)
 	require.Equal(t, "workflow-handlers", httpEvent.source)
-	assertStepPayloadsEquivalent(t, mcpEvent.step, httpEvent.step, "id", "position", "created_at", "updated_at")
+	assertStepPayloadsEquivalent(t, mcpEvent.step, httpEvent.step, "id", "position", "created_at", "updated_at", "portable_key")
 }
 
 func TestWorkflowStepUpdateEventParityAcrossSurfaces(t *testing.T) {
@@ -243,5 +243,5 @@ func TestWorkflowStepDeleteEventParityAcrossSurfaces(t *testing.T) {
 	mcpEvent, httpEvent := (*recorded)[0], (*recorded)[1]
 	require.Equal(t, eventtypes.WorkflowStepDeleted, mcpEvent.subject)
 	require.Equal(t, eventtypes.WorkflowStepDeleted, httpEvent.subject)
-	assertStepPayloadsEquivalent(t, mcpEvent.step, httpEvent.step, "id", "position", "created_at", "updated_at")
+	assertStepPayloadsEquivalent(t, mcpEvent.step, httpEvent.step, "id", "position", "created_at", "updated_at", "portable_key")
 }

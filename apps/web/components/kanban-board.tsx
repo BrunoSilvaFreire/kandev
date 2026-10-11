@@ -1,5 +1,6 @@
 "use client";
 
+import { TransitionFailureDetails } from "@/components/task/transition-failure-details";
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { Button } from "@kandev/ui/button";
@@ -606,9 +607,10 @@ function ApprovalWarningDialog({
         <AlertDialogHeader>
           <AlertDialogTitle className="flex items-center gap-2">
             <IconAlertTriangle className="h-5 w-5 text-amber-500" />
-            {t("kanban:approvalRequired")}
+            {t("task:failedToMoveTask")}
           </AlertDialogTitle>
           <AlertDialogDescription>{moveError?.message}</AlertDialogDescription>
+          {moveError?.failure && <TransitionFailureDetails failure={moveError.failure} />}
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>{t("kanban:dismiss")}</AlertDialogCancel>

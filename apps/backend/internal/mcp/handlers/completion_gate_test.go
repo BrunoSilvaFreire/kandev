@@ -70,6 +70,35 @@ func seedApprovedPlanRevisionForTask(t *testing.T, ctx context.Context, db *sqlx
 	require.NoError(t, err)
 }
 
+func TestHandleRecordPlanMinorApprovalValidationAndBaseline(t *testing.T) {
+	svc, repo, wfCtrl, _, _ := newTestTaskServiceWithWorkflowDB(t)
+	ctx := context.Background()
+	seedRunningTask(t, repo, "ws-minor-h", "wf-minor-h", "task-minor-h", "sess-minor-h", "step-arch")
+
+	h := &Handlers{taskSvc: svc, workflowCtrl: wfCtrl, logger: testLogger(t).WithFields()}
+
+	// Missing summary/attestation is a validation error.
+	missingSummary := makeWSMessage(t, ws.ActionMCPRecordPlanMinorApproval, map[string]interface{}{
+		"task_id": "task-minor-h", "expected_revision": 0, "attestation": "attest",
+		"increments":        []map[string]interface{}{{"id": "I1", "description": "Increment 1"}},
+		"sender_session_id": "sess-minor-h",
+	})
+	resp, err := h.handleRecordPlanMinorApproval(ctx, missingSummary)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+
+	// No human baseline exists, so the mapping must surface the stable code.
+	noBaseline := makeWSMessage(t, ws.ActionMCPRecordPlanMinorApproval, map[string]interface{}{
+		"task_id": "task-minor-h", "expected_revision": 0, "summary": "clarify", "attestation": "attest",
+		"increments":        []map[string]interface{}{{"id": "I1", "description": "Increment 1"}},
+		"sender_session_id": "sess-minor-h",
+	})
+	resp, err = h.handleRecordPlanMinorApproval(ctx, noBaseline)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeConflict)
+	assert.Contains(t, string(resp.Payload), "minor_approval_no_human_baseline")
+}
+
 func TestHandleSetTaskCompletionCriteria(t *testing.T) {
 	svc, repo, wfCtrl, _, db := newTestTaskServiceWithWorkflowDB(t)
 	ctx := context.Background()
@@ -324,6 +353,19 @@ func TestHandleMoveTask_ImmediateTerminalBlockedByGate(t *testing.T) {
 	assert.NotEmpty(t, details["blockers"])
 	assert.NotEmpty(t, details["unverified_criteria"])
 	assert.NotEmpty(t, details["available_transitions"])
+	// The shared transition-failure envelope rides the same details.
+	reasons, ok := details["reasons"].([]interface{})
+	require.True(t, ok, "reasons must list every unmet criterion")
+	require.NotEmpty(t, reasons)
+	firstReason := reasons[0].(map[string]interface{})
+	assert.NotEmpty(t, firstReason["rule"])
+	assert.NotEmpty(t, firstReason["criterion_id"])
+	assert.NotEmpty(t, firstReason["action"])
+	assert.Equal(t, "user", details["actionability"])
+	assert.NotEmpty(t, details["remediation"])
+	gate, ok := details["gate"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, details["gate_revision"], gate["gate_revision"])
 
 	// 3. Now verify the criterion
 	verifyMsg := makeWSMessage(t, ws.ActionMCPVerifyTaskCompletionCriterion, map[string]interface{}{
@@ -411,4 +453,71 @@ func TestHandleMoveTask_DeferredTerminalBlockedByGate(t *testing.T) {
 
 	// Crucial: preflight must prevent queueing a pending move
 	assert.Empty(t, queue.pendingMoves, "blocked completion gate must not enqueue a pending move")
+}
+
+func TestHandleMoveTask_DeferredArchitectHandoffEnrollmentPreflight(t *testing.T) {
+	tests := []struct {
+		name        string
+		planState   string
+		wantBlocked bool
+	}{
+		{name: "current enrollment allows unverified criteria", planState: "current"},
+		{name: "unenrolled plan is blocked", planState: "none", wantBlocked: true},
+		{name: "stale enrollment is blocked", planState: "stale", wantBlocked: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, repo, wfCtrl, wfRepo, db := newTestTaskServiceWithWorkflowDB(t)
+			ctx := context.Background()
+			now := time.Now().UTC()
+			const taskID = "task-deferred-handoff"
+			const workflowID = "wf-deferred-handoff"
+			require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-deferred-handoff", Name: "ws-deferred-handoff", CreatedAt: now, UpdatedAt: now}))
+			require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: workflowID, WorkspaceID: "ws-deferred-handoff", Name: workflowID, CreatedAt: now, UpdatedAt: now}))
+			require.NoError(t, wfRepo.CreateStep(ctx, &workflowmodels.WorkflowStep{
+				ID: "step-architect", WorkflowID: workflowID, Name: "Architect", Position: 0, CreatedAt: now, UpdatedAt: now,
+				Events: workflowmodels.StepEvents{Transitions: []workflowmodels.StepTransition{{Name: "handoff", Direction: workflowmodels.TransitionDirectionForward, ToStepID: "step-implement"}}},
+			}))
+			require.NoError(t, wfRepo.CreateStep(ctx, &workflowmodels.WorkflowStep{
+				ID: "step-implement", WorkflowID: workflowID, Name: "Implement", Position: 1, CreatedAt: now, UpdatedAt: now,
+			}))
+			require.NoError(t, repo.CreateTask(ctx, &models.Task{
+				ID: taskID, WorkspaceID: "ws-deferred-handoff", WorkflowID: workflowID, WorkflowStepID: "step-architect",
+				Title: "Deferred role handoff", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now,
+			}))
+			require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+				ID: "sess-deferred-handoff", TaskID: taskID, State: models.TaskSessionStateRunning,
+				IsPrimary: true, StartedAt: now, UpdatedAt: now,
+			}))
+
+			if tt.planState != "none" {
+				seedApprovedPlanRevisionForTask(t, ctx, db, taskID, "rev-deferred-handoff")
+				setMsg := makeWSMessage(t, ws.ActionMCPSetTaskCompletionCriteria, map[string]interface{}{
+					"task_id": taskID, "expected_revision": 0, "plan_revision_id": "rev-deferred-handoff",
+					"criteria": []models.TaskCompletionCriterion{{ID: "inc-1", Description: "Complete increment 1"}},
+				})
+				setResp, err := (&Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}).handleSetTaskCompletionCriteria(ctx, setMsg)
+				require.NoError(t, err)
+				assert.Equal(t, ws.MessageTypeResponse, setResp.Type)
+			}
+			if tt.planState == "stale" {
+				_, err := db.ExecContext(ctx, `UPDATE task_plans SET write_version = ? WHERE task_id = ?`, "newer-write", taskID)
+				require.NoError(t, err)
+			}
+
+			queue := &pendingMoveRecordingQueuer{}
+			h := &Handlers{taskSvc: svc, workflowCtrl: wfCtrl, messageQueue: queue, logger: testLogger(t).WithFields()}
+			moveMsg := makeWSMessage(t, ws.ActionMCPMoveTask, map[string]interface{}{"task_id": taskID, "transition": "handoff"})
+			resp, err := h.handleMoveTask(ctx, moveMsg)
+			require.NoError(t, err)
+			if tt.wantBlocked {
+				assertWSError(t, resp, ws.ErrorCodeTaskCompletionGateBlocked)
+				assert.Empty(t, queue.pendingMoves)
+				return
+			}
+			assert.NotEqual(t, ws.MessageTypeError, resp.Type)
+			require.Len(t, queue.pendingMoves, 1)
+			assert.Equal(t, "step-implement", queue.pendingMoves[0].WorkflowStepID)
+		})
+	}
 }

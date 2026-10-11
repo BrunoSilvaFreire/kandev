@@ -70,13 +70,13 @@ func (h *TaskHandlers) handleCompletionGateError(c *gin.Context, err error) {
 		if readErr == nil {
 			body["gate"] = snapshot
 		}
-		c.JSON(http.StatusConflict, body)
+		c.JSON(http.StatusConflict, withTransitionFailure(c, body))
 	case errors.Is(err, repository.ErrTaskCompletionCriteriaConflict):
-		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_criteria_conflict"})
+		c.JSON(http.StatusConflict, withTransitionFailure(c, gin.H{"code": "task_completion_criteria_conflict"}))
 	case errors.Is(err, repository.ErrTaskCompletionEvidenceChanged):
 		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_evidence_changed"})
 	case errors.Is(err, repository.ErrTaskCompletionHumanConfirmationRequired):
-		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_human_confirmation_required"})
+		c.JSON(http.StatusConflict, withTransitionFailure(c, gin.H{"code": "task_completion_human_confirmation_required"}))
 	case errors.Is(err, repository.ErrTaskVersionConflict):
 		c.JSON(http.StatusConflict, gin.H{"code": "task_version_conflict"})
 	case errors.Is(err, repository.ErrTaskNotFound), service.IsForbidden(err):
@@ -87,4 +87,24 @@ func (h *TaskHandlers) handleCompletionGateError(c *gin.Context, err error) {
 		h.logger.Error("task completion gate request failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "task completion gate request failed"})
 	}
+}
+
+// attachTransitionFailure classifies a declined move once so every move error
+// writer on this request serializes the same envelope.
+func (h *TaskHandlers) attachTransitionFailure(c *gin.Context, taskID string, err error) {
+	if err == nil || isClientDisconnect(err) {
+		return
+	}
+	c.Set(transitionFailureContextKey, h.service.ClassifyTransitionFailure(c.Request.Context(), taskID, err))
+}
+
+// httpGetTaskTransitionFailure returns the task's current unresolved
+// asynchronous transition failure; "record" is null when there is none.
+func (h *TaskHandlers) httpGetTaskTransitionFailure(c *gin.Context) {
+	record, err := h.service.GetTransitionFailure(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		handleNotFound(c, h.logger, err, "task not found")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"record": record})
 }

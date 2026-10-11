@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/task/transitionfailure"
+
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
@@ -886,6 +888,9 @@ func (s *Service) MoveTaskWithOptions(
 		zap.String("workflow_step_id", workflowStepID),
 		zap.Int("position", position))
 
+	if resultTransitioned {
+		s.ResolveTransitionFailure(ctx, task.ID)
+	}
 	result := &MoveTaskResult{
 		Task:                  task,
 		AlreadyApplied:        opts.AlreadyApplied != nil && *opts.AlreadyApplied,
@@ -1562,7 +1567,7 @@ func (s *Service) syncTaskStateForQueuePromotion(ctx context.Context, task *mode
 
 func (s *Service) validateTaskMove(ctx context.Context, task *models.Task, workflowID, workflowStepID string, opts MoveTaskOptions) (*wfmodels.WorkflowStep, error) {
 	if task.ArchivedAt != nil {
-		return nil, fmt.Errorf("archived tasks cannot be moved")
+		return nil, transitionfailure.Rule(transitionfailure.RuleArchived, "archived tasks cannot be moved")
 	}
 	if err := s.validateMoveSessions(ctx, task.ID, opts); err != nil {
 		return nil, err
@@ -1572,7 +1577,7 @@ func (s *Service) validateTaskMove(ctx context.Context, task *models.Task, workf
 		return nil, fmt.Errorf("failed to get target workflow: %w", err)
 	}
 	if targetWorkflow.WorkspaceID != task.WorkspaceID {
-		return nil, fmt.Errorf("target workflow is in a different workspace")
+		return nil, transitionfailure.Rule(transitionfailure.RuleDifferentWorkspace, "target workflow is in a different workspace")
 	}
 	if s.workflowStepGetter == nil {
 		return nil, nil
@@ -1582,7 +1587,7 @@ func (s *Service) validateTaskMove(ctx context.Context, task *models.Task, workf
 		return nil, fmt.Errorf("failed to get target workflow step: %w", err)
 	}
 	if targetStep.WorkflowID != workflowID {
-		return nil, fmt.Errorf("target workflow step does not belong to target workflow")
+		return nil, transitionfailure.Rule(transitionfailure.RuleStepNotInWorkflow, "target workflow step does not belong to target workflow")
 	}
 	return targetStep, nil
 }
@@ -1597,7 +1602,8 @@ func (s *Service) validateMoveSessions(ctx context.Context, taskID string, opts 
 			if opts.AllowActivePrimarySession && session.IsPrimary {
 				continue
 			}
-			return fmt.Errorf("task has an active session (%s)", session.State)
+			return transitionfailure.RuleObserved(transitionfailure.RuleActiveSession,
+				fmt.Sprintf("task has an active session (%s)", session.State), "session "+string(session.State))
 		}
 	}
 	return nil

@@ -56,6 +56,10 @@ function useSessionTabState(sessionId: string | undefined) {
     if (!sessionId) return null;
     return state.taskSessions.items[sessionId]?.name ?? null;
   });
+  const associatedStepVisitID = useAppStore((state) => {
+    if (!sessionId) return undefined;
+    return state.taskSessions.items[sessionId]?.associated_step_visit_id;
+  });
   const tabTitle = useAppStore((state) => {
     if (!sessionId) return null;
     return selectSessionTabTitle(state, sessionId);
@@ -94,6 +98,7 @@ function useSessionTabState(sessionId: string | undefined) {
     taskId,
     tabTitle,
     sessionName,
+    associatedStepVisitID,
     agentName,
     sessionNumber,
     sessionCount,
@@ -419,6 +424,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
     taskId,
     tabTitle,
     sessionName,
+    associatedStepVisitID,
     agentName,
     sessionNumber,
     sessionCount,
@@ -491,6 +497,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
           canShare={canShare}
           taskId={taskId}
           sessionId={sessionId}
+          associatedStepVisitID={associatedStepVisitID}
           actions={actions}
           onDelete={handleMenuDelete}
           onShare={() => dialogs.setShareOpen(true)}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { selectNeedsYouInboxBundles } from "@/lib/state/slices/needs-you-inbox/selectors";
 import {
@@ -11,6 +11,7 @@ import {
   subscribeAcknowledgedTriage,
 } from "@/lib/inbox-triage/acknowledged-store";
 import {
+  NUDGE_KINDS,
   buildInboxTriage,
   selectUnacknowledgedTriageIds,
   type InboxTriageItem,
@@ -23,6 +24,26 @@ const EMPTY_TASKS: never[] = [];
 const EMPTY_SNAPSHOTS: Record<string, { tasks?: unknown[] }> = {};
 const EMPTY_BUNDLES: never[] = [];
 
+/** How often a visible tab re-evaluates Review age without a store event. */
+export const TRIAGE_CLOCK_MS = 60_000;
+
+/** Coarse clock that ticks only while the tab is visible. */
+function useTriageClock(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const tick = () => {
+      if (!document.hidden) setNow(Date.now());
+    };
+    const timer = window.setInterval(tick, TRIAGE_CLOCK_MS);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, []);
+  return now;
+}
+
 /** Structural view of the kanban task projection the lane reads. */
 type KanbanTriageTask = {
   id: string;
@@ -30,6 +51,11 @@ type KanbanTriageTask = {
   state?: string;
   primarySessionId?: string | null;
   interrupted?: boolean | null;
+  interruption?: TriageTaskInput["interruption"];
+  reviewEpisodeId?: string | null;
+  reviewEnteredAt?: string | null;
+  blocked?: boolean | null;
+  metadata?: Record<string, unknown> | null;
   updatedAt?: string | null;
   statusSummary?: {
     possible_question?: boolean;
@@ -38,6 +64,7 @@ type KanbanTriageTask = {
 };
 
 function toTriageTask(task: KanbanTriageTask): TriageTaskInput {
+  const interruptedAt = task.metadata?.interrupted_at;
   return {
     id: task.id,
     title: task.title,
@@ -45,7 +72,13 @@ function toTriageTask(task: KanbanTriageTask): TriageTaskInput {
     primary_session_id: task.primarySessionId ?? null,
     possible_question: task.statusSummary?.possible_question ?? false,
     possible_question_turn_id: task.statusSummary?.possible_question_turn_id ?? null,
-    interrupted: task.interrupted ?? false,
+    // Unset stays unset: only an explicit false retires a cached episode.
+    interrupted: task.interrupted,
+    interrupted_at: typeof interruptedAt === "string" ? interruptedAt : null,
+    interruption: task.interruption ?? null,
+    review_episode_id: task.reviewEpisodeId ?? null,
+    review_entered_at: task.reviewEnteredAt ?? null,
+    blocked: task.blocked ?? false,
     updated_at: task.updatedAt ?? null,
   };
 }
@@ -55,18 +88,18 @@ export function useInboxTriageItems(): InboxTriageItem[] {
   const kanbanTasks = useAppStore((s) => s.kanban?.tasks ?? EMPTY_TASKS);
   const snapshots = useAppStore((s) => s.kanbanMulti?.snapshots ?? EMPTY_SNAPSHOTS);
   const bundles = useAppStore(selectNeedsYouInboxBundles);
+  const now = useTriageClock();
   return useMemo(() => {
     const tasks: KanbanTriageTask[] = [...(kanbanTasks as KanbanTriageTask[])];
     for (const snapshot of Object.values(snapshots)) {
       tasks.push(...((snapshot.tasks ?? []) as KanbanTriageTask[]));
     }
-    // TODO: Date.now() is captured only when store inputs change, so a Review task crossing STALE_REVIEW_MS stays hidden until the next store update; add a coarse timer.
     return buildInboxTriage(
       tasks.map(toTriageTask),
       (bundles ?? EMPTY_BUNDLES) as readonly TriageBundleInput[],
-      Date.now(),
+      now,
     );
-  }, [kanbanTasks, snapshots, bundles]);
+  }, [kanbanTasks, snapshots, bundles, now]);
 }
 
 export type InboxTriageNudge = {
@@ -75,7 +108,8 @@ export type InboxTriageNudge = {
   newCount: number;
   /**
    * Unacknowledged identities the clarification-backed inbox does not already
-   * count: stale reviews and possible questions. Navigation badges add this to
+   * count: interrupted work, stale reviews, and possible questions.
+   * Navigation badges add this to
    * the clarification count so a lane-only item is visible off the inbox page.
    */
   additionalCount: number;
@@ -115,7 +149,10 @@ export function useInboxTriageNudge(): InboxTriageNudge {
   );
   const additionalCount = useMemo(
     () =>
-      items.filter((item) => item.kind !== "clarification" && !acknowledged.has(item.id)).length,
+      items.filter(
+        (item) =>
+          item.kind !== "clarification" && NUDGE_KINDS.has(item.kind) && !acknowledged.has(item.id),
+      ).length,
     [items, acknowledged],
   );
 

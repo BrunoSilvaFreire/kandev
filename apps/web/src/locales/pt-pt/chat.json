@@ -198,5 +198,16 @@
   "unpinQueuedMessages": "Desafixar fila de mensagens",
   "untitledQuickChat": "Chat rápido sem título",
   "useWorkspaceDefault": "Usar a pré-definição da área de trabalho...",
-  "useWorkspaceDefaultOption": "Usar a pré-definição da área de trabalho"
+  "useWorkspaceDefaultOption": "Usar a pré-definição da área de trabalho",
+  "quickChatsOrderLabel": "Ordem",
+  "quickChatsOrderRecent": "Atividade recente primeiro",
+  "quickChatsOrderOldest": "Atividade mais antiga primeiro",
+  "quickChatLastActivity": "{{relative}} ({{date}})",
+  "quickChatNoMessagesYet": "Ainda sem mensagens. Criada a {{date}}",
+  "quickChatLinkedRepository": "Repositório associado: {{name}}",
+  "quickChatLinkedRepositoryPrefix": "Repositório associado:",
+  "quickChatCreatedTask": "Tarefa criada a partir desta conversa: {{title}}",
+  "quickChatCreatedTaskPrefix": "Tarefa criada a partir desta conversa:",
+  "quickChatMoreTasks_one": "e mais {{count}} tarefa",
+  "quickChatMoreTasks_other": "e mais {{count}} tarefas"
 }

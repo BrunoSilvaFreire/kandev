@@ -23,6 +23,7 @@ const renderActions = (
     duplicateDisabled: false,
     duplicateLoading: false,
     readOnly: false,
+    onUpdateFromFile: vi.fn(),
   };
 
   return render(

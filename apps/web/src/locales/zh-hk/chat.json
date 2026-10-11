@@ -198,5 +198,16 @@
   "unpinQueuedMessages": "取消固定訊息佇列",
   "untitledQuickChat": "未命名快速聊天",
   "useWorkspaceDefault": "使用工作區預設值…",
-  "useWorkspaceDefaultOption": "使用工作區預設值"
+  "useWorkspaceDefaultOption": "使用工作區預設值",
+  "quickChatsOrderLabel": "排序",
+  "quickChatsOrderRecent": "最近活動優先",
+  "quickChatsOrderOldest": "最早活動優先",
+  "quickChatLastActivity": "{{relative}}（{{date}}）",
+  "quickChatNoMessagesYet": "尚無訊息。建立於 {{date}}",
+  "quickChatLinkedRepository": "已關聯的儲存庫：{{name}}",
+  "quickChatLinkedRepositoryPrefix": "已關聯的儲存庫：",
+  "quickChatCreatedTask": "由此對話建立的任務：{{title}}",
+  "quickChatCreatedTaskPrefix": "由此對話建立的任務：",
+  "quickChatMoreTasks_one": "以及另外 {{count}} 個任務",
+  "quickChatMoreTasks_other": "以及另外 {{count}} 個任務"
 }

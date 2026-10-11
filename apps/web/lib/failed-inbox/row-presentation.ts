@@ -22,3 +22,14 @@ export function failedInboxOriginMarkerKey(origin: string | undefined): string |
 export function hasResolvableFailedInboxReason(reason: string): boolean {
   return reason.trim().length > 0;
 }
+
+// Only the server's closed typed classification gets a label; free-text
+// reasons are never pattern-matched into one.
+const REASON_KIND_KEYS: Record<string, string> = {
+  quota: "failedInbox:reasonKindQuota",
+  provider_unavailable: "failedInbox:reasonKindProviderUnavailable",
+};
+
+export function failedInboxReasonKindKey(kind: string | undefined): string | null {
+  return (kind && REASON_KIND_KEYS[kind]) || null;
+}

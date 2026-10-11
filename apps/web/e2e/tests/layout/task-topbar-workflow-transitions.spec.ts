@@ -32,6 +32,7 @@ test.describe("Task topbar workflow transitions", () => {
   test("expands the semantic transition summary without header overflow", async ({
     testPage,
     apiClient,
+    backend,
     seedData,
   }) => {
     const imported = await apiClient.importWorkflows(seedData.workspaceId, WORKFLOW_YAML);
@@ -113,9 +114,13 @@ test.describe("Task topbar workflow transitions", () => {
     // Reopen and click a routed destination session row: it activates that
     // session's tab.
     await expand.click();
-    const sessionRow = popover.getByTestId(
-      `workflow-step-visit-session-${review.id}-${DESTINATION_SESSION_ID}`,
-    );
+    // Review was entered at activation (visit 1) and again after Backlog
+    // (visit 3); sessions created now belong to the current visit.
+    const rowIn = (ordinal: number) =>
+      popover.getByTestId(
+        `workflow-step-visit-session-${review.id}-${ordinal}-${DESTINATION_SESSION_ID}`,
+      );
+    const sessionRow = rowIn(3);
     await expect(sessionRow).toBeVisible();
     await sessionRow.click();
     const destinationTab = testPage.getByTestId(`session-tab-${DESTINATION_SESSION_ID}`);
@@ -123,5 +128,23 @@ test.describe("Task topbar workflow transitions", () => {
     await expect(
       destinationTab.locator('xpath=ancestor::*[contains(@class, "dv-tab")][1]'),
     ).toHaveClass(/dv-active-tab/);
+
+    // Reassign the session to the earlier Review visit from its tab menu; the
+    // association is durable across a reload and a backend restart.
+    await destinationTab.click({ button: "right" });
+    await testPage.getByRole("menuitem", { name: "Associate with workflow step" }).click();
+    await testPage.getByRole("menuitem", { name: /Review\s*Visit 1/ }).click();
+    const reopen = async () => {
+      await testPage.reload();
+      await session.waitForLoad();
+      await expand.click();
+    };
+    await reopen();
+    await expect(rowIn(1)).toBeVisible();
+    await expect(rowIn(3)).toHaveCount(0);
+    await backend.restart();
+    await reopen();
+    await expect(rowIn(1)).toBeVisible();
+    await expect(rowIn(3)).toHaveCount(0);
   });
 });

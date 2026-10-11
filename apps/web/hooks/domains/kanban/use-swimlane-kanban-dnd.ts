@@ -1,5 +1,6 @@
 "use client";
 
+import { getTransitionFailure } from "@/lib/tasks/transition-failure";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   DragEndEvent,
@@ -78,7 +79,12 @@ export function useCrossStepMove(workflowId: string, onMoveError?: (error: MoveT
           });
         }
         const message = getTaskMoveErrorMessage(error, t("task:taskMoveErrorGeneric"), t);
-        onMoveError?.({ message, taskId, sessionId: task.primarySessionId ?? null });
+        onMoveError?.({
+          message,
+          failure: getTransitionFailure(error),
+          taskId,
+          sessionId: task.primarySessionId ?? null,
+        });
       }
     },
     [workflowId, store, moveTaskById, onMoveError],

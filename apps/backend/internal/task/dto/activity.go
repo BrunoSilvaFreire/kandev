@@ -105,9 +105,15 @@ type StepVisitSessionDTO struct {
 
 // StepVisitSummaryDTO is the task-local visit count for one destination step.
 type StepVisitSummaryDTO struct {
-	StepID   string                `json:"step_id"`
-	Count    int                   `json:"count"`
-	Sessions []StepVisitSessionDTO `json:"sessions"`
+	VisitID    string                `json:"visit_id,omitempty"`
+	StepID     string                `json:"step_id"`
+	StepName   string                `json:"step_name,omitempty"`
+	Count      int                   `json:"count"`
+	Ordinal    int64                 `json:"ordinal,omitempty"`
+	EnteredAt  *time.Time            `json:"entered_at,omitempty"`
+	Provenance string                `json:"provenance,omitempty"`
+	Eligible   bool                  `json:"eligible"`
+	Sessions   []StepVisitSessionDTO `json:"sessions"`
 }
 
 // TaskTransitionCountsResponse is the bounded header-count payload.

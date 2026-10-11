@@ -2411,6 +2411,53 @@ func (s *Service) setSessionStartingWithOptions(
 	return nil
 }
 
+// interruptionEpisodeStore is the task repository's episode surface. It is
+// optional so focused test repositories keep the marker-only behavior.
+type interruptionEpisodeStore interface {
+	GetSessionInterruptionEpisode(ctx context.Context, sessionID string) (string, error)
+	ResolveSessionInterruption(ctx context.Context, sessionID, episodeID string) (bool, error)
+	CountUnresolvedSessionInterruptions(ctx context.Context, taskID string) (int, error)
+}
+
+// resolveInterruptionAfterRecovery resolves the session episode captured for
+// this recovery attempt, then removes the task warning marker only when no
+// session of the task still carries an unresolved episode. A read or write
+// failure keeps the warning.
+func (s *Service) resolveInterruptionAfterRecovery(
+	ctx context.Context,
+	session *models.TaskSession,
+	snapshot interruptedMarkerSnapshot,
+) {
+	store, ok := s.repo.(interruptionEpisodeStore)
+	if !ok {
+		s.clearTaskInterruptedMarker(ctx, session.TaskID, snapshot.value)
+		return
+	}
+	resolved, err := store.ResolveSessionInterruption(ctx, session.ID, snapshot.episodeID)
+	if err != nil {
+		s.logger.Warn("failed to resolve session interruption episode",
+			zap.String("session_id", session.ID), zap.Error(err))
+		return
+	}
+	remaining, err := store.CountUnresolvedSessionInterruptions(ctx, session.TaskID)
+	if err != nil {
+		s.logger.Warn("failed to count unresolved interruption episodes",
+			zap.String("task_id", session.TaskID), zap.Error(err))
+		return
+	}
+	if remaining == 0 {
+		s.clearTaskInterruptedMarker(ctx, session.TaskID, snapshot.value)
+		return
+	}
+	if !resolved {
+		return
+	}
+	// A sibling keeps the warning, but the projected episode changed.
+	if task, taskErr := s.repo.GetTask(ctx, session.TaskID); taskErr == nil && task != nil {
+		s.publishTaskUpdated(ctx, task)
+	}
+}
+
 // clearTaskInterruptedMarker removes the startup interruption marker from a
 // task and republishes task.updated when it was actually present, so open
 // clients drop the warning icon. Callers invoke it only after provider

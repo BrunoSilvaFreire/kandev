@@ -42,5 +42,20 @@
   "triageCaption": "可能的問題只是提示，請開啟對話進行回覆。",
   "triageKindClarification": "待確認",
   "triageKindStaleReview": "滯留的審查",
-  "triageKindPossibleQuestion": "可能的問題"
+  "triageKindPossibleQuestion": "可能的問題",
+  "triageKindInterrupted": "已中斷",
+  "triageKindReview": "審查",
+  "triageKindDependency": "等待中",
+  "triageActionAnswer": "回答",
+  "triageActionResume": "繼續",
+  "triageActionReview": "去審查",
+  "triageActionOpen": "開啟",
+  "triageReasonClarification": "代理程式提出了問題，正在等待你的回答。",
+  "triageReasonBackendRestart": "Kandev 在代理程式工作時重啟了。繼續即可接著同一對話。",
+  "triageReasonExecutionLost": "代理程式在回合中途停止回應。繼續即可接著同一對話。",
+  "triageReasonInterruptedUnknown": "代理程式被中斷，原因未記錄。",
+  "triageReasonStaleReview": "此任務等待審查已超過一天。",
+  "triageReasonReview": "此任務正在等待你的審查。",
+  "triageReasonDependency": "此任務正在等待另一個任務完成。",
+  "triageReasonPossibleQuestion": "代理程式可能在上一條訊息中提出了問題。"
 }
